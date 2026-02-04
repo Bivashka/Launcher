@@ -433,6 +433,328 @@ const dashboardPages: Array<{ id: DashboardPage; title: string; subtitle: string
   { id: 'audit', title: 'Audit Logs', subtitle: 'Traceability, export and cleanup' },
 ]
 
+const uiExactTranslations: Record<string, string> = {
+  'Loading...': 'Загрузка...',
+  'Syncing...': 'Синхронизация...',
+  Live: 'Онлайн',
+  Workspace: 'Рабочая область',
+  Logout: 'Выйти',
+  Profiles: 'Профили',
+  Servers: 'Серверы',
+  News: 'Новости',
+  Bans: 'Баны',
+  'Control Center': 'Центр управления',
+  'Stable API auth': 'Стабильная API-авторизация',
+  'Per-profile runtime': 'Рантайм на профиль',
+  'Live sync controls': 'Управление синхронизацией',
+  'Audit export + cleanup': 'Экспорт и очистка аудита',
+  Overview: 'Обзор',
+  'Status and quick metrics': 'Статус и быстрые метрики',
+  'Servers & Profiles': 'Серверы и профили',
+  'Game topology and profile data': 'Топология игры и данные профилей',
+  'Build & Runtime': 'Сборки и рантайм',
+  'Artifacts, retention and cosmetics': 'Артефакты, ретеншн и косметика',
+  Integrations: 'Интеграции',
+  'Discord, auth provider and S3': 'Discord, auth provider и S3',
+  Security: 'Безопасность',
+  'Bans and account protection': 'Баны и защита аккаунтов',
+  Branding: 'Брендинг',
+  'Product visuals and identity': 'Визуал и идентичность продукта',
+  'Audit Logs': 'Журнал аудита',
+  'Traceability, export and cleanup': 'Трассировка, экспорт и очистка',
+  'First run setup': 'Первичная настройка',
+  Username: 'Логин',
+  Password: 'Пароль',
+  Creating: 'Создание',
+  'Create admin': 'Создать администратора',
+  'Admin login': 'Вход администратора',
+  'Signing in...': 'Вход...',
+  'Sign in': 'Войти',
+  'Edit profile': 'Редактировать профиль',
+  'Create profile': 'Создать профиль',
+  Name: 'Название',
+  'Slug (example: main-survival)': 'Slug (пример: main-survival)',
+  Description: 'Описание',
+  'Icon key (S3 key)': 'Ключ иконки (S3)',
+  'Upload icon': 'Загрузить иконку',
+  Priority: 'Приоритет',
+  'RAM MB': 'RAM МБ',
+  'Bundled Java path (relative, optional)': 'Путь встроенной Java (относительный, опционально)',
+  'Bundled runtime artifact key (S3 key, optional)': 'Ключ встроенного рантайма (S3, опционально)',
+  'Runtime metadata': 'Метаданные рантайма',
+  Enabled: 'Включено',
+  'Update profile': 'Обновить профиль',
+  'Edit server': 'Редактировать сервер',
+  'Create server': 'Создать сервер',
+  'Select profile': 'Выберите профиль',
+  Address: 'Адрес',
+  Port: 'Порт',
+  'Main jar path (DE route)': 'Путь main jar (DE маршрут)',
+  'RU proxy address': 'Адрес RU-прокси',
+  'RU proxy port': 'Порт RU-прокси',
+  'RU jar path (proxy route)': 'Путь RU jar (proxy маршрут)',
+  'MC Version': 'Версия MC',
+  'Update server': 'Обновить сервер',
+  'Skins / Capes': 'Скины / Кейпы',
+  'Username or ExternalId': 'Имя пользователя или ExternalId',
+  'Upload skin': 'Загрузить скин',
+  'Upload cape': 'Загрузить кейп',
+  'Java Runtime Artifact': 'Артефакт Java Runtime',
+  'Select profile slug': 'Выберите slug профиля',
+  'Upload runtime': 'Загрузить рантайм',
+  'Runtime key override for verify (optional)': 'Ключ рантайма для проверки (опционально)',
+  'Verify runtime artifact': 'Проверить артефакт рантайма',
+  'Keep last N': 'Хранить последние N',
+  'Dry run': 'Пробный запуск',
+  'Cleanup old runtimes': 'Очистить старые рантаймы',
+  'Runtime Retention Schedule': 'Расписание ретеншна рантайма',
+  'Enable background runtime cleanup': 'Включить фоновую очистку рантайма',
+  'Interval minutes': 'Интервал, минуты',
+  'Save runtime retention': 'Сохранить ретеншн рантайма',
+  'Dry-run': 'Пробный запуск',
+  'Run retention now': 'Запустить ретеншн сейчас',
+  'Dry-run profile slug (optional)': 'Slug профиля для dry-run (опционально)',
+  'Dry-run max profiles': 'Макс. профилей в dry-run',
+  'Delete keys preview limit': 'Лимит ключей в превью удаления',
+  'Export dry-run JSON': 'Экспорт dry-run JSON',
+  'Apply from dry-run': 'Применить из dry-run',
+  'Copy delete keys': 'Скопировать ключи удаления',
+  'Dry-run summary': 'Сводка dry-run',
+  'no keys': 'нет ключей',
+  'not configured': 'не настроено',
+  'no icon': 'без иконки',
+  'not set': 'не задано',
+  Rebuild: 'Пересобрать',
+  Edit: 'Редактировать',
+  Delete: 'Удалить',
+  'Discord RPC': 'Discord RPC',
+  Profile: 'Профиль',
+  Server: 'Сервер',
+  'Select scope': 'Выберите область',
+  'App ID': 'ID приложения',
+  'Details text': 'Текст details',
+  'State text': 'Текст state',
+  'Large image key': 'Ключ большой картинки',
+  'Large image text': 'Текст большой картинки',
+  'Small image key': 'Ключ маленькой картинки',
+  'Small image text': 'Текст маленькой картинки',
+  Load: 'Загрузить',
+  Save: 'Сохранить',
+  'Rebuild options': 'Параметры пересборки',
+  'MC version (for loader path)': 'Версия MC (для пути loader)',
+  'Source sub-path override (optional)': 'Переопределение подпути source (опционально)',
+  'Java runtime path override (optional)': 'Переопределение пути Java runtime (опционально)',
+  'launch: auto': 'launch: auto',
+  'launch: jar': 'launch: jar',
+  'launch: mainclass': 'launch: mainclass',
+  'Launch main class (optional)': 'Главный класс запуска (опционально)',
+  'Launch classpath entries (one per line, supports globs: libraries/**/*.jar)':
+    'Элементы classpath запуска (по одному на строку, поддерживаются globs: libraries/**/*.jar)',
+  'Publish buildId to profile servers': 'Публиковать buildId на серверы профиля',
+  'Edit news': 'Редактировать новость',
+  'Create news': 'Создать новость',
+  Title: 'Заголовок',
+  'Body (Markdown/JSON/plain text)': 'Текст (Markdown/JSON/plain text)',
+  'Source (manual/rss/json)': 'Источник (manual/rss/json)',
+  Pinned: 'Закреплено',
+  'Update news': 'Обновить новость',
+  Reset: 'Сбросить',
+  'News Sources': 'Источники новостей',
+  'Source name': 'Название источника',
+  URL: 'URL',
+  'Max items': 'Макс. элементов',
+  'Update source': 'Обновить источник',
+  'Add source': 'Добавить источник',
+  'Save source settings': 'Сохранить настройки источников',
+  'Sync news now': 'Синхронизировать новости',
+  'Sources Status': 'Статус источников',
+  Sync: 'Синхронизировать',
+  'News Auto-sync': 'Автосинхронизация новостей',
+  'Enable background sync': 'Включить фоновую синхронизацию',
+  'Save auto-sync settings': 'Сохранить настройки автосинхронизации',
+  'Run now': 'Запустить',
+  'Auto-sync Status': 'Статус автосинхронизации',
+  'Enabled / Interval': 'Включено / Интервал',
+  'Last run': 'Последний запуск',
+  'Last error': 'Последняя ошибка',
+  Updated: 'Обновлено',
+  'News Retention': 'Ретеншн новостей',
+  'Enable retention policy': 'Включить политику ретеншна',
+  'Max age days': 'Макс. возраст (дни)',
+  'Save retention settings': 'Сохранить настройки ретеншна',
+  'Retention Status': 'Статус ретеншна',
+  Limits: 'Лимиты',
+  'Last apply / deleted': 'Последнее применение / удалено',
+  'Dry-run preview': 'Превью dry-run',
+  'HWID ban': 'Бан HWID',
+  'Ban HWID': 'Забанить HWID',
+  'Account ban': 'Бан аккаунта',
+  'Ban account': 'Забанить аккаунт',
+  'Reset account HWID': 'Сбросить HWID аккаунта',
+  'Active / History bans': 'Активные / история банов',
+  Remove: 'Снять бан',
+  'Auth Provider': 'Auth Provider',
+  'Login URL (external auth endpoint)': 'Login URL (внешний auth endpoint)',
+  'Timeout seconds': 'Таймаут, сек',
+  'Allow dev fallback (local player auth when URL empty)': 'Разрешить dev fallback (локальный auth при пустом URL)',
+  'Save auth provider settings': 'Сохранить настройки auth provider',
+  'Auth Provider Status': 'Статус auth provider',
+  'S3 Storage': 'Хранилище S3',
+  Bucket: 'Bucket',
+  'Access key': 'Access key',
+  'Secret key': 'Secret key',
+  'Force path style': 'Force path style',
+  'Use SSL (https)': 'Использовать SSL (https)',
+  'Auto create bucket': 'Автосоздание bucket',
+  'Save S3 settings': 'Сохранить настройки S3',
+  'S3 Status': 'Статус S3',
+  'Endpoint / Bucket': 'Endpoint / Bucket',
+  'Path style / SSL': 'Path style / SSL',
+  'Product name': 'Название продукта',
+  'Developer name': 'Имя разработчика',
+  Tagline: 'Теглайн',
+  'Support URL': 'URL поддержки',
+  'Primary color (#RRGGBB)': 'Основной цвет (#RRGGBB)',
+  'Accent color (#RRGGBB)': 'Акцентный цвет (#RRGGBB)',
+  'Logo text': 'Текст логотипа',
+  'Save branding settings': 'Сохранить настройки брендинга',
+  'Branding Preview': 'Предпросмотр брендинга',
+  'Product / Developer': 'Продукт / Разработчик',
+  Colors: 'Цвета',
+  'Support / Logo': 'Поддержка / Логотип',
+  'Admin Audit Logs': 'Журналы аудита администратора',
+  'Action prefix (e.g. runtime)': 'Префикс действия (например, runtime)',
+  'Actor (exact)': 'Исполнитель (точное совпадение)',
+  'Entity type (exact)': 'Тип сущности (точное совпадение)',
+  'Entity id contains': 'Entity id содержит',
+  'Request id (exact)': 'Request id (точное совпадение)',
+  'Remote IP (exact)': 'Remote IP (точное совпадение)',
+  'From (local)': 'С (локально)',
+  'To (local)': 'По (локально)',
+  Limit: 'Лимит',
+  'Range:': 'Диапазон:',
+  'Clear filters': 'Очистить фильтры',
+  'Sort: newest first': 'Сортировка: новые сверху',
+  'Sort: oldest first': 'Сортировка: старые сверху',
+  'Presets:': 'Пресеты:',
+  upload: 'загрузка',
+  verify: 'проверка',
+  cleanup: 'очистка',
+  run: 'запуск',
+  apply: 'применить',
+  all: 'все',
+  'Refresh logs': 'Обновить логи',
+  'Load more': 'Загрузить еще',
+  'Export limit': 'Лимит экспорта',
+  'Export JSON': 'Экспорт JSON',
+  'Export CSV': 'Экспорт CSV',
+  'Export uses current filters and sort.': 'Экспорт использует текущие фильтры и сортировку.',
+  'Cleanup older than (days)': 'Очистка старше (дней)',
+  'Cleanup batch limit': 'Лимит пачки очистки',
+  'Cleanup dry-run': 'Очистка dry-run',
+  'Cleanup apply': 'Применить очистку',
+  'Audit Feed': 'Лента аудита',
+}
+
+const uiPartialTranslations: Array<[string, string]> = [
+  ['Cannot reach API. Check backend and VITE_API_BASE_URL.', 'Нет доступа к API. Проверьте backend и VITE_API_BASE_URL.'],
+  ['Request failed', 'Ошибка запроса'],
+  ['Missing admin token', 'Отсутствует токен администратора'],
+  ['Profile saved.', 'Профиль сохранен.'],
+  ['Profile deleted.', 'Профиль удален.'],
+  ['Server saved.', 'Сервер сохранен.'],
+  ['Server deleted.', 'Сервер удален.'],
+  ['News item saved.', 'Новость сохранена.'],
+  ['News item deleted.', 'Новость удалена.'],
+  ['saved.', 'сохранено.'],
+  ['failed', 'ошибка'],
+  ['Loaded: ', 'Загружено: '],
+  ['next offset: ', 'следующий offset: '],
+  ['has more: ', 'есть еще: '],
+  ['sort: ', 'сортировка: '],
+  ['actor: ', 'исполнитель: '],
+  ['entity: ', 'сущность: '],
+  ['req: ', 'request: '],
+  ['ip: ', 'ip: '],
+  ['expires: ', 'истекает: '],
+  ['active: ', 'активен: '],
+  ['created: ', 'создан: '],
+  ['account: ', 'аккаунт: '],
+  ['pinned: ', 'закреплено: '],
+  ['enabled: ', 'включено: '],
+  ['last sync: ', 'последняя синхронизация: '],
+  ['profiles: ', 'профилей: '],
+  ['deleted: ', 'удалено: '],
+  ['error: ', 'ошибка: '],
+]
+
+function translateUiText(input: string): string {
+  const trimmed = input.trim()
+  if (!trimmed) {
+    return input
+  }
+
+  const exact = uiExactTranslations[trimmed]
+  if (exact) {
+    return input.replace(trimmed, exact)
+  }
+
+  let translated = input
+  for (const [from, to] of uiPartialTranslations) {
+    translated = translated.replaceAll(from, to)
+  }
+
+  return translated
+}
+
+function translateDomTree(root: ParentNode): void {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  let node: Node | null = walker.nextNode()
+
+  while (node) {
+    const value = node.nodeValue ?? ''
+    if (/[A-Za-z]/.test(value)) {
+      const nextValue = translateUiText(value)
+      if (nextValue !== value) {
+        node.nodeValue = nextValue
+      }
+    }
+
+    node = walker.nextNode()
+  }
+
+  if (!(root instanceof Element) && !(root instanceof Document)) {
+    return
+  }
+
+  const elements = root.querySelectorAll<HTMLElement>('[placeholder],[title],[aria-label]')
+  for (const element of elements) {
+    const placeholder = element.getAttribute('placeholder')
+    if (placeholder && /[A-Za-z]/.test(placeholder)) {
+      const nextPlaceholder = translateUiText(placeholder)
+      if (nextPlaceholder !== placeholder) {
+        element.setAttribute('placeholder', nextPlaceholder)
+      }
+    }
+
+    const title = element.getAttribute('title')
+    if (title && /[A-Za-z]/.test(title)) {
+      const nextTitle = translateUiText(title)
+      if (nextTitle !== title) {
+        element.setAttribute('title', nextTitle)
+      }
+    }
+
+    const ariaLabel = element.getAttribute('aria-label')
+    if (ariaLabel && /[A-Za-z]/.test(ariaLabel)) {
+      const nextAriaLabel = translateUiText(ariaLabel)
+      if (nextAriaLabel !== ariaLabel) {
+        element.setAttribute('aria-label', nextAriaLabel)
+      }
+    }
+  }
+}
+
 function formatBytes(sizeBytes: number): string {
   if (sizeBytes <= 0) {
     return '0 B'
@@ -583,6 +905,30 @@ function App() {
     setRuntimeCleanupResult(null)
     setRuntimeVerifyResult(null)
   }, [runtimeProfileSlug])
+
+  useEffect(() => {
+    const applyTranslation = () => {
+      translateDomTree(document.body)
+    }
+
+    applyTranslation()
+
+    const observer = new MutationObserver(() => {
+      applyTranslation()
+    })
+
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: ['placeholder', 'title', 'aria-label'],
+    })
+
+    return () => {
+      observer.disconnect()
+    }
+  }, [])
 
   async function determineStartPhase() {
     setError('')
