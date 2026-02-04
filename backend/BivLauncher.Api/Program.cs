@@ -23,8 +23,8 @@ builder.Services.Configure<RuntimeRetentionOptions>(builder.Configuration.GetSec
 builder.Services.Configure<BuildPipelineOptions>(builder.Configuration.GetSection(BuildPipelineOptions.SectionName));
 builder.Services.Configure<AuthProviderOptions>(builder.Configuration.GetSection(AuthProviderOptions.SectionName));
 
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
-    ?? builder.Configuration["DB_CONN"]
+var connectionString = builder.Configuration["DB_CONN"]
+    ?? builder.Configuration.GetConnectionString("DefaultConnection")
     ?? "Host=localhost;Port=5432;Database=bivlauncher;Username=postgres;Password=postgres";
 
 builder.Services.AddDbContext<AppDbContext>(options => options.UseNpgsql(connectionString));
