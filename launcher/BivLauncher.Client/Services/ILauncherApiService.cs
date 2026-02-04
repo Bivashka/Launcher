@@ -1,0 +1,16 @@
+using BivLauncher.Client.Models;
+
+namespace BivLauncher.Client.Services;
+
+public interface ILauncherApiService
+{
+    Task<BootstrapResponse> GetBootstrapAsync(string apiBaseUrl, CancellationToken cancellationToken = default);
+    Task<PublicAuthLoginResponse> LoginAsync(
+        string apiBaseUrl,
+        PublicAuthLoginRequest request,
+        CancellationToken cancellationToken = default);
+    Task<bool> HasSkinAsync(string apiBaseUrl, string username, CancellationToken cancellationToken = default);
+    Task<bool> HasCapeAsync(string apiBaseUrl, string username, CancellationToken cancellationToken = default);
+    Task<LauncherManifest> GetManifestAsync(string apiBaseUrl, string profileSlug, CancellationToken cancellationToken = default);
+    Task<Stream> OpenAssetReadStreamAsync(string apiBaseUrl, string s3Key, CancellationToken cancellationToken = default);
+}

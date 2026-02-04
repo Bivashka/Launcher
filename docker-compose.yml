@@ -1,0 +1,89 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-bivlauncher}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-bivlauncher}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/BivLauncher.Api/Dockerfile
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      DB_CONN: Host=db;Port=5432;Database=${POSTGRES_DB:-bivlauncher};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-postgres}
+      JWT_SECRET: ${JWT_SECRET:-change_me_to_a_long_random_secret}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
+      ADMIN_ALLOWED_ORIGINS: ${ADMIN_ALLOWED_ORIGINS:-http://localhost:5173}
+      S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
+      S3_BUCKET: ${S3_BUCKET:-launcher-files}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-minioadmin}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-minioadmin}
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
+      S3_USE_SSL: ${S3_USE_SSL:-false}
+      S3_AUTO_CREATE_BUCKET: ${S3_AUTO_CREATE_BUCKET:-true}
+      BUILD_SOURCE_ROOT: ${BUILD_SOURCE_ROOT:-/app/BuildSources}
+      BUILD_DEFAULT_JVM_ARGS: ${BUILD_DEFAULT_JVM_ARGS:--Xms1024M -Xmx2048M}
+      BUILD_DEFAULT_GAME_ARGS: ${BUILD_DEFAULT_GAME_ARGS:-}
+      AUTH_PROVIDER_URLS: ${AUTH_PROVIDER_URLS:-}
+      AUTH_PROVIDER_LOGIN_URL: ${AUTH_PROVIDER_LOGIN_URL:-}
+      AUTH_PROVIDER_TIMEOUT_SECONDS: ${AUTH_PROVIDER_TIMEOUT_SECONDS:-15}
+      AUTH_PROVIDER_ALLOW_DEV_FALLBACK: ${AUTH_PROVIDER_ALLOW_DEV_FALLBACK:-true}
+      NEWS_SYNC_ENABLED: ${NEWS_SYNC_ENABLED:-false}
+      NEWS_SYNC_INTERVAL_MINUTES: ${NEWS_SYNC_INTERVAL_MINUTES:-60}
+      NEWS_RETENTION_ENABLED: ${NEWS_RETENTION_ENABLED:-false}
+      NEWS_RETENTION_MAX_ITEMS: ${NEWS_RETENTION_MAX_ITEMS:-500}
+      NEWS_RETENTION_MAX_AGE_DAYS: ${NEWS_RETENTION_MAX_AGE_DAYS:-30}
+      LAUNCHER_LATEST_VERSION: ${LAUNCHER_LATEST_VERSION:-}
+      LAUNCHER_UPDATE_URL: ${LAUNCHER_UPDATE_URL:-}
+      LAUNCHER_RELEASE_NOTES: ${LAUNCHER_RELEASE_NOTES:-}
+      HWID_HMAC_SALT: ${HWID_HMAC_SALT:-change-me}
+    ports:
+      - "${API_PORT:-8080}:8080"
+    volumes:
+      - ./build-sources:/app/BuildSources:ro
+    depends_on:
+      db:
+        condition: service_healthy
+
+  admin:
+    build:
+      context: .
+      dockerfile: admin/Dockerfile
+    restart: unless-stopped
+    environment:
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8080}
+    ports:
+      - "${ADMIN_PORT:-5173}:5173"
+    depends_on:
+      - api
+
+  minio:
+    image: minio/minio:latest
+    profiles: ["minio"]
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-minioadmin}
+    command: server /data --console-address ":9001"
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/data
+
+volumes:
+  postgres_data:
+  minio_data:

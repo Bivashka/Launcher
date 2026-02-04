@@ -1,0 +1,386 @@
+@BivLauncher.Api_HostAddress = http://localhost:8080
+
+GET {{BivLauncher.Api_HostAddress}}/health
+Accept: application/json
+
+###
+GET {{BivLauncher.Api_HostAddress}}/api/admin/setup/status
+Accept: application/json
+
+###
+GET {{BivLauncher.Api_HostAddress}}/api/public/bootstrap
+Accept: application/json
+
+###
+GET {{BivLauncher.Api_HostAddress}}/api/admin/profiles
+Accept: application/json
+
+###
+GET {{BivLauncher.Api_HostAddress}}/api/admin/audit-logs?limit=50&actionPrefix=runtime
+Accept: application/json
+Authorization: Bearer <admin_jwt>
+
+###
+GET {{BivLauncher.Api_HostAddress}}/api/admin/audit-logs?limit=100&actionPrefix=runtime&actor=admin&entityId=main-survival
+Accept: application/json
+Authorization: Bearer <admin_jwt>
+
+###
+GET {{BivLauncher.Api_HostAddress}}/api/admin/audit-logs?limit=100&offset=100&actionPrefix=runtime
+Accept: application/json
+Authorization: Bearer <admin_jwt>
+
+###
+GET {{BivLauncher.Api_HostAddress}}/api/admin/audit-logs?limit=100&offset=0&actionPrefix=runtime&sort=asc
+Accept: application/json
+Authorization: Bearer <admin_jwt>
+
+###
+GET {{BivLauncher.Api_HostAddress}}/api/admin/audit-logs?limit=100&actionPrefix=runtime.retention.dry-run
+Accept: application/json
+Authorization: Bearer <admin_jwt>
+
+###
+GET {{BivLauncher.Api_HostAddress}}/api/admin/audit-logs?limit=100&actionPrefix=profile
+Accept: application/json
+Authorization: Bearer <admin_jwt>
+
+###
+GET {{BivLauncher.Api_HostAddress}}/api/admin/audit-logs?limit=100&entityType=profile&sort=desc
+Accept: application/json
+Authorization: Bearer <admin_jwt>
+
+###
+GET {{BivLauncher.Api_HostAddress}}/api/admin/audit-logs?limit=100&requestId=<trace_id>&remoteIp=127.0.0.1
+Accept: application/json
+Authorization: Bearer <admin_jwt>
+
+###
+GET {{BivLauncher.Api_HostAddress}}/api/admin/audit-logs?limit=100&fromUtc=2026-02-04T00:00:00Z&toUtc=2026-02-04T23:59:59Z&sort=desc
+Accept: application/json
+Authorization: Bearer <admin_jwt>
+
+###
+GET {{BivLauncher.Api_HostAddress}}/api/admin/audit-logs/export?format=csv&limit=5000&actionPrefix=runtime&fromUtc=2026-02-01T00:00:00Z
+Accept: text/csv
+Authorization: Bearer <admin_jwt>
+
+###
+DELETE {{BivLauncher.Api_HostAddress}}/api/admin/audit-logs?olderThanUtc=2025-11-01T00:00:00Z&dryRun=true&limit=5000
+Accept: application/json
+Authorization: Bearer <admin_jwt>
+
+###
+POST {{BivLauncher.Api_HostAddress}}/api/admin/profiles/00000000-0000-0000-0000-000000000000/rebuild
+Content-Type: application/json
+Authorization: Bearer <admin_jwt>
+
+{
+  "loaderType": "vanilla",
+  "mcVersion": "1.21.1",
+  "javaRuntimePath": "runtime/bin/javaw.exe",
+  "javaRuntimeArtifactKey": "runtimes/main-survival/runtime-win64.zip",
+  "launchMode": "auto",
+  "launchMainClass": "",
+  "launchClasspath": "libraries/**/*.jar\n*.jar",
+  "publishToServers": true
+}
+
+###
+GET {{BivLauncher.Api_HostAddress}}/api/public/assets/icons/profiles/example.png
+Accept: application/octet-stream
+
+###
+GET {{BivLauncher.Api_HostAddress}}/api/public/manifest/main-survival
+Accept: application/json
+
+###
+POST {{BivLauncher.Api_HostAddress}}/api/public/auth/login
+Content-Type: application/json
+
+{
+  "username": "player1",
+  "password": "secret",
+  "hwidFingerprint": "8ee2866a7e9f4f67f9d2f4d4d4f29d15f3262a6578d39f67fcaea5f5df83ec8e",
+  "hwidHash": ""
+}
+
+###
+GET {{BivLauncher.Api_HostAddress}}/api/public/skins/player1
+Accept: image/png
+
+###
+GET {{BivLauncher.Api_HostAddress}}/api/public/capes/player1
+Accept: image/png
+
+###
+GET {{BivLauncher.Api_HostAddress}}/api/admin/news
+Accept: application/json
+Authorization: Bearer <admin_jwt>
+
+###
+POST {{BivLauncher.Api_HostAddress}}/api/admin/news
+Content-Type: application/json
+Authorization: Bearer <admin_jwt>
+
+{
+  "title": "Patch 1.0.0",
+  "body": "Server maintenance completed.",
+  "source": "manual",
+  "pinned": true,
+  "enabled": true
+}
+
+###
+GET {{BivLauncher.Api_HostAddress}}/api/admin/bans
+Accept: application/json
+Authorization: Bearer <admin_jwt>
+
+###
+POST {{BivLauncher.Api_HostAddress}}/api/admin/bans/hwid
+Content-Type: application/json
+Authorization: Bearer <admin_jwt>
+
+{
+  "hwidHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "reason": "HWID cheat",
+  "expiresAtUtc": null
+}
+
+###
+POST {{BivLauncher.Api_HostAddress}}/api/admin/bans/account/player1
+Content-Type: application/json
+Authorization: Bearer <admin_jwt>
+
+{
+  "reason": "Account abuse",
+  "expiresAtUtc": null
+}
+
+###
+POST {{BivLauncher.Api_HostAddress}}/api/admin/bans/account/player1/reset-hwid
+Authorization: Bearer <admin_jwt>
+
+###
+GET {{BivLauncher.Api_HostAddress}}/api/admin/settings/auth-provider
+Accept: application/json
+Authorization: Bearer <admin_jwt>
+
+###
+PUT {{BivLauncher.Api_HostAddress}}/api/admin/settings/auth-provider
+Content-Type: application/json
+Authorization: Bearer <admin_jwt>
+
+{
+  "loginUrl": "https://auth.example.com/api/login",
+  "timeoutSeconds": 15,
+  "allowDevFallback": false
+}
+
+###
+GET {{BivLauncher.Api_HostAddress}}/api/admin/settings/branding
+Accept: application/json
+Authorization: Bearer <admin_jwt>
+
+###
+GET {{BivLauncher.Api_HostAddress}}/api/admin/settings/s3
+Accept: application/json
+Authorization: Bearer <admin_jwt>
+
+###
+GET {{BivLauncher.Api_HostAddress}}/api/admin/settings/news-sources
+Accept: application/json
+Authorization: Bearer <admin_jwt>
+
+###
+GET {{BivLauncher.Api_HostAddress}}/api/admin/settings/news-sync
+Accept: application/json
+Authorization: Bearer <admin_jwt>
+
+###
+GET {{BivLauncher.Api_HostAddress}}/api/admin/settings/news-retention
+Accept: application/json
+Authorization: Bearer <admin_jwt>
+
+###
+GET {{BivLauncher.Api_HostAddress}}/api/admin/settings/runtime-retention
+Accept: application/json
+Authorization: Bearer <admin_jwt>
+
+###
+PUT {{BivLauncher.Api_HostAddress}}/api/admin/settings/branding
+Content-Type: application/json
+Authorization: Bearer <admin_jwt>
+
+{
+  "productName": "BivLauncher",
+  "developerName": "Bivashka",
+  "tagline": "Managed launcher platform",
+  "supportUrl": "https://example.com/support",
+  "primaryColor": "#2F6FED",
+  "accentColor": "#20C997",
+  "logoText": "BLP"
+}
+
+###
+PUT {{BivLauncher.Api_HostAddress}}/api/admin/settings/news-sources
+Content-Type: application/json
+Authorization: Bearer <admin_jwt>
+
+{
+  "sources": [
+    {
+      "name": "Mojang News",
+      "type": "rss",
+      "url": "https://www.minecraft.net/en-us/feeds/community-content/rss",
+      "enabled": true,
+      "maxItems": 5
+    }
+  ]
+}
+
+###
+POST {{BivLauncher.Api_HostAddress}}/api/admin/settings/news-sources/sync
+Content-Type: application/json
+Authorization: Bearer <admin_jwt>
+
+{}
+
+###
+PUT {{BivLauncher.Api_HostAddress}}/api/admin/settings/news-sync
+Content-Type: application/json
+Authorization: Bearer <admin_jwt>
+
+{
+  "enabled": true,
+  "intervalMinutes": 60
+}
+
+###
+POST {{BivLauncher.Api_HostAddress}}/api/admin/settings/news-sync/run
+Content-Type: application/json
+Authorization: Bearer <admin_jwt>
+
+{}
+
+###
+PUT {{BivLauncher.Api_HostAddress}}/api/admin/settings/news-retention
+Content-Type: application/json
+Authorization: Bearer <admin_jwt>
+
+{
+  "enabled": true,
+  "maxItems": 500,
+  "maxAgeDays": 30
+}
+
+###
+POST {{BivLauncher.Api_HostAddress}}/api/admin/settings/news-retention/run
+Content-Type: application/json
+Authorization: Bearer <admin_jwt>
+
+{}
+
+###
+POST {{BivLauncher.Api_HostAddress}}/api/admin/settings/news-retention/dry-run
+Content-Type: application/json
+Authorization: Bearer <admin_jwt>
+
+{}
+
+###
+PUT {{BivLauncher.Api_HostAddress}}/api/admin/settings/runtime-retention
+Content-Type: application/json
+Authorization: Bearer <admin_jwt>
+
+{
+  "enabled": true,
+  "intervalMinutes": 360,
+  "keepLast": 3
+}
+
+###
+POST {{BivLauncher.Api_HostAddress}}/api/admin/settings/runtime-retention/run
+Content-Type: application/json
+Authorization: Bearer <admin_jwt>
+
+{}
+
+###
+POST {{BivLauncher.Api_HostAddress}}/api/admin/settings/runtime-retention/run-from-preview?profileSlug=main-survival&maxProfiles=20
+Content-Type: application/json
+Authorization: Bearer <admin_jwt>
+
+{}
+
+###
+POST {{BivLauncher.Api_HostAddress}}/api/admin/settings/runtime-retention/dry-run
+Content-Type: application/json
+Authorization: Bearer <admin_jwt>
+
+{}
+
+###
+POST {{BivLauncher.Api_HostAddress}}/api/admin/settings/runtime-retention/dry-run?profileSlug=main-survival&maxProfiles=5&previewKeysLimit=20
+Content-Type: application/json
+Authorization: Bearer <admin_jwt>
+
+{}
+
+###
+POST {{BivLauncher.Api_HostAddress}}/api/admin/settings/news-sources/sync?sourceId=00000000-0000-0000-0000-000000000000
+Content-Type: application/json
+Authorization: Bearer <admin_jwt>
+
+{}
+
+###
+PUT {{BivLauncher.Api_HostAddress}}/api/admin/settings/s3
+Content-Type: application/json
+Authorization: Bearer <admin_jwt>
+
+{
+  "endpoint": "http://localhost:9000",
+  "bucket": "launcher-files",
+  "accessKey": "minioadmin",
+  "secretKey": "minioadmin",
+  "forcePathStyle": true,
+  "useSsl": false,
+  "autoCreateBucket": true
+}
+
+###
+PUT {{BivLauncher.Api_HostAddress}}/api/admin/discord-rpc/profile/00000000-0000-0000-0000-000000000000
+Content-Type: application/json
+Authorization: Bearer <admin_jwt>
+
+{
+  "enabled": true,
+  "appId": "1234567890",
+  "detailsText": "In Launcher",
+  "stateText": "Choosing server",
+  "largeImageKey": "logo",
+  "largeImageText": "BivLauncher",
+  "smallImageKey": "",
+  "smallImageText": ""
+}
+
+###
+GET {{BivLauncher.Api_HostAddress}}/api/admin/runtimes/verify?entityId=main-survival
+Accept: application/json
+Authorization: Bearer <admin_jwt>
+
+###
+GET {{BivLauncher.Api_HostAddress}}/api/admin/runtimes/verify?key=runtimes/main-survival/runtime-win64.zip
+Accept: application/json
+Authorization: Bearer <admin_jwt>
+
+###
+POST {{BivLauncher.Api_HostAddress}}/api/admin/runtimes/cleanup?entityId=main-survival&keepLast=3&dryRun=true
+Accept: application/json
+Authorization: Bearer <admin_jwt>
+
+###
+POST {{BivLauncher.Api_HostAddress}}/api/admin/runtimes/cleanup?entityId=main-survival&keepLast=3&dryRun=false
+Accept: application/json
+Authorization: Bearer <admin_jwt>
