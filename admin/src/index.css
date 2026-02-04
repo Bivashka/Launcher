@@ -1,11 +1,12 @@
 :root {
-  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  font-family: "Manrope", "Space Grotesk", "Segoe UI Variable", "Segoe UI", sans-serif;
   line-height: 1.4;
   font-weight: 400;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  color-scheme: dark;
 }
 
 * {
@@ -15,5 +16,9 @@
 body {
   margin: 0;
   min-width: 320px;
-  background: radial-gradient(circle at top, #1e293b, #020617 55%);
+  background:
+    radial-gradient(circle at 10% 12%, rgba(47, 107, 212, 0.35), transparent 34%),
+    radial-gradient(circle at 85% 18%, rgba(16, 190, 145, 0.2), transparent 30%),
+    radial-gradient(circle at 35% 100%, rgba(35, 77, 168, 0.32), transparent 42%),
+    #020716;
 }

@@ -3,6 +3,7 @@ import type { FormEvent } from 'react'
 import './App.css'
 
 type Phase = 'loading' | 'setup' | 'login' | 'dashboard'
+type DashboardPage = 'overview' | 'servers' | 'build' | 'news' | 'integrations' | 'security' | 'settings' | 'audit'
 
 type SetupStatusResponse = { needsSetup: boolean }
 type LoginResponse = { token: string; tokenType: string; username: string }
@@ -421,6 +422,16 @@ const defaultS3Settings: S3Settings = {
 }
 
 const supportedLoaders = ['vanilla', 'forge', 'fabric', 'quilt', 'neoforge', 'liteloader'] as const
+const dashboardPages: Array<{ id: DashboardPage; title: string; subtitle: string }> = [
+  { id: 'overview', title: 'Overview', subtitle: 'Status and quick metrics' },
+  { id: 'servers', title: 'Servers & Profiles', subtitle: 'Game topology and profile data' },
+  { id: 'build', title: 'Build & Runtime', subtitle: 'Artifacts, retention and cosmetics' },
+  { id: 'news', title: 'News', subtitle: 'Content, sources and sync policies' },
+  { id: 'integrations', title: 'Integrations', subtitle: 'Discord, auth provider and S3' },
+  { id: 'security', title: 'Security', subtitle: 'Bans and account protection' },
+  { id: 'settings', title: 'Branding', subtitle: 'Product visuals and identity' },
+  { id: 'audit', title: 'Audit Logs', subtitle: 'Traceability, export and cleanup' },
+]
 
 function formatBytes(sizeBytes: number): string {
   if (sizeBytes <= 0) {
@@ -473,6 +484,7 @@ function App() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
+  const [activePage, setActivePage] = useState<DashboardPage>('overview')
 
   const [profiles, setProfiles] = useState<Profile[]>([])
   const [servers, setServers] = useState<Server[]>([])
@@ -595,6 +607,7 @@ function App() {
 
       setToken(savedToken)
       setPhase('dashboard')
+      setActivePage('overview')
       await loadAdminData(savedToken)
     } catch {
       setPhase('login')
@@ -871,6 +884,7 @@ function App() {
       setToken(payload.token)
       setPassword('')
       setPhase('dashboard')
+      setActivePage('overview')
       await loadAdminData(payload.token)
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : 'Login failed')
@@ -2310,6 +2324,7 @@ function App() {
   function logout() {
     localStorage.removeItem('blp_admin_token')
     setToken(null)
+    setActivePage('overview')
     setProfiles([])
     setServers([])
     setNewsItems([])
@@ -2367,11 +2382,18 @@ function App() {
     return <main className="shell">Loading...</main>
   }
 
+  const activePageMeta = dashboardPages.find((page) => page.id === activePage) ?? dashboardPages[0]
+
   return (
     <main className="shell">
-      <section className="panel">
-        <h1>BivLauncher Admin</h1>
-        <p className="muted">API: {apiBaseUrl}</p>
+      <section className={`panel ${phase === 'dashboard' ? 'panel-dashboard' : ''}`}>
+        <div className="panel-topbar">
+          <div>
+            <h1>BivLauncher Admin</h1>
+            <p className="muted">API: {apiBaseUrl}</p>
+          </div>
+          {phase === 'dashboard' && <span className="status-pill">{busy ? 'Syncing...' : 'Live'}</span>}
+        </div>
 
         {phase === 'setup' && (
           <form className="form" onSubmit={onSetupSubmit}>
@@ -2417,18 +2439,67 @@ function App() {
 
         {phase === 'dashboard' && (
           <section className="dashboard">
-            <div className="dashboard-header">
-              <h2>Dashboard</h2>
-              <button onClick={logout}>Logout</button>
-            </div>
-            <ul>
-              <li>Profiles: {profiles.length}</li>
-              <li>Servers: {servers.length}</li>
-              <li>News: {newsItems.length}</li>
-              <li>Bans: {bans.length}</li>
-            </ul>
+            <aside className="dashboard-sidebar">
+              <p className="sidebar-caption">Workspace</p>
+              <nav className="dashboard-nav">
+                {dashboardPages.map((page) => (
+                  <button
+                    key={page.id}
+                    type="button"
+                    className={`nav-item ${activePage === page.id ? 'active' : ''}`}
+                    onClick={() => setActivePage(page.id)}
+                  >
+                    <span>{page.title}</span>
+                    <small>{page.subtitle}</small>
+                  </button>
+                ))}
+              </nav>
+              <button type="button" className="logout-btn" onClick={logout}>
+                Logout
+              </button>
+            </aside>
 
-            <div className="grid-2">
+            <div className="dashboard-main">
+              <div className="dashboard-header">
+                <div>
+                  <h2>{activePageMeta.title}</h2>
+                  <p className="muted">{activePageMeta.subtitle}</p>
+                </div>
+                <div className="quick-stats">
+                  <div className="stat-card">
+                    <span>Profiles</span>
+                    <strong>{profiles.length}</strong>
+                  </div>
+                  <div className="stat-card">
+                    <span>Servers</span>
+                    <strong>{servers.length}</strong>
+                  </div>
+                  <div className="stat-card">
+                    <span>News</span>
+                    <strong>{newsItems.length}</strong>
+                  </div>
+                  <div className="stat-card">
+                    <span>Bans</span>
+                    <strong>{bans.length}</strong>
+                  </div>
+                </div>
+              </div>
+
+            <section className={`overview-hero ${activePage === 'overview' ? '' : 'is-hidden'}`}>
+              <h3>Control Center</h3>
+              <p>
+                Use left navigation to manage each area separately: profiles/servers, build pipeline,
+                integrations, content, security and audit.
+              </p>
+              <div className="overview-tags">
+                <span>Stable API auth</span>
+                <span>Per-profile runtime</span>
+                <span>Live sync controls</span>
+                <span>Audit export + cleanup</span>
+              </div>
+            </section>
+
+            <div className={`grid-2 ${activePage === 'servers' ? '' : 'is-hidden'}`}>
               <form className="form form-small" onSubmit={onProfileSubmit}>
                 <h3>{editingProfileId ? 'Edit profile' : 'Create profile'}</h3>
                 <input
@@ -2620,7 +2691,7 @@ function App() {
               </form>
             </div>
 
-            <div className="grid-2">
+            <div className={`grid-2 split-build-servers ${(activePage === 'build' || activePage === 'servers') ? '' : 'is-hidden'} ${activePage === 'build' ? 'show-build' : 'show-servers'}`}>
               <section className="form form-small">
                 <h3>Skins / Capes</h3>
                 <input
@@ -2864,7 +2935,7 @@ function App() {
               </section>
             </div>
 
-            <div className="grid-2">
+            <div className={`grid-2 split-integrations-profiles ${(activePage === 'integrations' || activePage === 'servers') ? '' : 'is-hidden'} ${activePage === 'integrations' ? 'show-integrations' : 'show-servers'}`}>
               <section className="form form-small">
                 <h3>Discord RPC</h3>
                 <div className="grid-inline">
@@ -3034,7 +3105,7 @@ function App() {
               </section>
             </div>
 
-            <div className="grid-2">
+            <div className={`grid-2 ${activePage === 'news' ? '' : 'is-hidden'}`}>
               <form className="form form-small" onSubmit={onNewsSubmit}>
                 <h3>{editingNewsId ? 'Edit news' : 'Create news'}</h3>
                 <input
@@ -3102,7 +3173,7 @@ function App() {
               </section>
             </div>
 
-            <div className="grid-2">
+            <div className={`grid-2 ${activePage === 'news' ? '' : 'is-hidden'}`}>
               <section className="form form-small">
                 <h3>News Sources</h3>
                 <input
@@ -3188,7 +3259,7 @@ function App() {
               </section>
             </div>
 
-            <div className="grid-2">
+            <div className={`grid-2 ${activePage === 'news' ? '' : 'is-hidden'}`}>
               <section className="form form-small">
                 <h3>News Auto-sync</h3>
                 <label className="checkbox">
@@ -3262,7 +3333,7 @@ function App() {
               </section>
             </div>
 
-            <div className="grid-2">
+            <div className={`grid-2 ${activePage === 'news' ? '' : 'is-hidden'}`}>
               <section className="form form-small">
                 <h3>News Retention</h3>
                 <label className="checkbox">
@@ -3364,7 +3435,7 @@ function App() {
               </section>
             </div>
 
-            <div className="grid-2">
+            <div className={`grid-2 ${activePage === 'security' ? '' : 'is-hidden'}`}>
               <section className="form form-small">
                 <h3>Bans</h3>
                 <h4>HWID ban</h4>
@@ -3442,7 +3513,7 @@ function App() {
               </section>
             </div>
 
-            <div className="grid-2">
+            <div className={`grid-2 ${activePage === 'integrations' ? '' : 'is-hidden'}`}>
               <section className="form form-small">
                 <h3>Auth Provider</h3>
                 <input
@@ -3515,7 +3586,7 @@ function App() {
               </section>
             </div>
 
-            <div className="grid-2">
+            <div className={`grid-2 ${activePage === 'integrations' ? '' : 'is-hidden'}`}>
               <section className="form form-small">
                 <h3>S3 Storage</h3>
                 <input
@@ -3604,7 +3675,7 @@ function App() {
               </section>
             </div>
 
-            <div className="grid-2">
+            <div className={`grid-2 ${activePage === 'settings' ? '' : 'is-hidden'}`}>
               <section className="form form-small">
                 <h3>Branding</h3>
                 <input
@@ -3686,7 +3757,7 @@ function App() {
               </section>
             </div>
 
-            <div className="grid-2">
+            <div className={`grid-2 ${activePage === 'audit' ? '' : 'is-hidden'}`}>
               <section className="form form-small">
                 <h3>Admin Audit Logs</h3>
                 <small>
@@ -3890,6 +3961,7 @@ function App() {
                   ))}
                 </ul>
               </section>
+            </div>
             </div>
           </section>
         )}
