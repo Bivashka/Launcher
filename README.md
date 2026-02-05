@@ -23,6 +23,8 @@ Current state: iteration #64 (admin auth + profiles/servers CRUD + rebuild pipel
    - Admin: `http://localhost:5173`
    - API health: `http://localhost:8080/health`
 
+Note: API now reads Postgres connection from `DB_CONN` (in `.env`) as the primary source.
+
 ## Installer
 
 - Run guided install:

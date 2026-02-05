@@ -1162,6 +1162,12 @@ write_env_value "ADMIN_ALLOWED_ORIGINS" "$ADMIN_PUBLIC_URL"
 write_env_value "INSTALL_PUBLIC_HOST" "$PUBLIC_HOST"
 write_env_value "INSTALL_USE_SSL" "$SSL_NORMALIZED"
 
+POSTGRES_DB_VALUE="$(read_env_value "POSTGRES_DB" "bivlauncher")"
+POSTGRES_USER_VALUE="$(read_env_value "POSTGRES_USER" "postgres")"
+POSTGRES_PASSWORD_VALUE="$(read_env_value "POSTGRES_PASSWORD" "postgres")"
+DB_CONN_VALUE="Host=db;Port=5432;Database=${POSTGRES_DB_VALUE};Username=${POSTGRES_USER_VALUE};Password=${POSTGRES_PASSWORD_VALUE}"
+write_env_value "DB_CONN" "$DB_CONN_VALUE"
+
 JWT_SECRET_VALUE="$(read_env_value "JWT_SECRET" "")"
 HWID_HMAC_VALUE="$(read_env_value "HWID_HMAC_SALT" "")"
 ensure_secret_value "JWT_SECRET" "$JWT_SECRET_VALUE" "change_me_to_a_long_random_secret" "change-me" "64"
