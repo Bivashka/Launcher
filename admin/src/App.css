@@ -793,31 +793,31 @@ button:disabled {
   }
 }
 
-/* Full Redesign: Ember + Mint (non-blue) */
+/* Full Redesign: Graphite + Neon Cyan */
 :root {
-  --ui-bg-soft: rgba(26, 18, 13, 0.94);
-  --ui-bg-hard: rgba(16, 11, 8, 0.96);
-  --ui-panel: rgba(35, 24, 17, 0.9);
-  --ui-panel-alt: rgba(45, 30, 20, 0.86);
-  --ui-border: rgba(255, 171, 103, 0.34);
-  --ui-border-strong: rgba(255, 145, 73, 0.5);
-  --ui-text: #fff1e6;
-  --ui-muted: #d7baa4;
-  --ui-primary: #ff8b38;
-  --ui-primary-strong: #ff6f4a;
-  --ui-accent: #45d39c;
-  --ui-danger: #ff9b86;
-  --ui-success: #adf8cf;
+  --ui-bg-soft: rgba(9, 17, 25, 0.94);
+  --ui-bg-hard: rgba(5, 10, 16, 0.96);
+  --ui-panel: rgba(15, 27, 39, 0.9);
+  --ui-panel-alt: rgba(21, 35, 48, 0.86);
+  --ui-border: rgba(121, 184, 222, 0.3);
+  --ui-border-strong: rgba(100, 200, 235, 0.44);
+  --ui-text: #e8f6ff;
+  --ui-muted: #9fb8cc;
+  --ui-primary: #4bd6ff;
+  --ui-primary-strong: #3d8fff;
+  --ui-accent: #39dca7;
+  --ui-danger: #ff9fb0;
+  --ui-success: #9ef7d6;
 }
 
 .panel {
   background:
-    radial-gradient(circle at 86% 12%, rgba(69, 211, 156, 0.14), transparent 48%),
-    radial-gradient(circle at 8% 0%, rgba(255, 146, 72, 0.16), transparent 42%),
+    radial-gradient(circle at 86% 12%, rgba(57, 220, 167, 0.16), transparent 48%),
+    radial-gradient(circle at 8% 0%, rgba(75, 214, 255, 0.18), transparent 42%),
     linear-gradient(150deg, var(--ui-bg-soft), var(--ui-bg-hard));
   color: var(--ui-text);
   border-color: var(--ui-border);
-  box-shadow: 0 34px 80px rgba(10, 6, 4, 0.56), inset 0 1px 0 rgba(255, 214, 180, 0.08);
+  box-shadow: 0 34px 80px rgba(1, 8, 14, 0.64), inset 0 1px 0 rgba(176, 238, 255, 0.1);
 }
 
 .panel h1,
@@ -833,8 +833,8 @@ button:disabled {
 
 .status-pill {
   color: var(--ui-success);
-  background: rgba(38, 101, 76, 0.34);
-  border-color: rgba(124, 255, 195, 0.42);
+  background: rgba(21, 87, 65, 0.34);
+  border-color: rgba(126, 255, 219, 0.42);
 }
 
 .auth-hero,
@@ -854,77 +854,77 @@ button:disabled {
 .stat-card,
 .branding-preview-login > div,
 .markdown-preview {
-  background: linear-gradient(160deg, rgba(42, 28, 18, 0.9), rgba(24, 17, 13, 0.92));
+  background: linear-gradient(160deg, rgba(20, 35, 48, 0.9), rgba(10, 20, 29, 0.92));
   border-color: var(--ui-border);
-  box-shadow: 0 12px 30px rgba(8, 5, 3, 0.38);
+  box-shadow: 0 12px 30px rgba(2, 8, 13, 0.42);
 }
 
 .auth-hero {
   background:
-    radial-gradient(circle at 0% 0%, rgba(255, 148, 76, 0.26), transparent 46%),
-    radial-gradient(circle at 98% 98%, rgba(71, 213, 160, 0.2), transparent 42%),
-    linear-gradient(148deg, rgba(51, 31, 20, 0.9), rgba(26, 18, 13, 0.94));
+    radial-gradient(circle at 0% 0%, rgba(77, 220, 255, 0.25), transparent 46%),
+    radial-gradient(circle at 98% 98%, rgba(57, 220, 167, 0.2), transparent 42%),
+    linear-gradient(148deg, rgba(24, 42, 58, 0.9), rgba(9, 17, 25, 0.94));
 }
 
 .auth-kicker {
-  color: #ffc79b;
+  color: #9de3ff;
 }
 
 .auth-chip-grid span,
 .overview-tags span {
-  background: linear-gradient(132deg, rgba(63, 36, 21, 0.84), rgba(45, 25, 16, 0.82));
-  color: #ffe4cf;
-  border-color: rgba(255, 169, 103, 0.4);
+  background: linear-gradient(132deg, rgba(30, 51, 68, 0.84), rgba(18, 34, 47, 0.82));
+  color: #dcf5ff;
+  border-color: rgba(121, 184, 222, 0.4);
 }
 
 .form input,
 .form select,
 .form textarea {
-  background: rgba(30, 20, 14, 0.9);
-  border-color: rgba(255, 169, 103, 0.3);
-  color: #fff2e7;
+  background: rgba(12, 23, 34, 0.9);
+  border-color: rgba(121, 184, 222, 0.3);
+  color: #e8f6ff;
 }
 
 .form input:focus,
 .form select:focus,
 .form textarea:focus {
-  border-color: rgba(255, 162, 88, 0.88);
-  box-shadow: 0 0 0 3px rgba(255, 136, 58, 0.2);
+  border-color: rgba(75, 214, 255, 0.88);
+  box-shadow: 0 0 0 3px rgba(61, 143, 255, 0.22);
 }
 
 button {
   background: linear-gradient(132deg, var(--ui-primary), var(--ui-primary-strong));
-  border-color: rgba(255, 183, 133, 0.82);
-  box-shadow: 0 10px 24px rgba(133, 62, 23, 0.36);
+  border-color: rgba(137, 225, 255, 0.72);
+  box-shadow: 0 10px 24px rgba(26, 89, 156, 0.34);
 }
 
 button:hover {
-  box-shadow: 0 12px 26px rgba(153, 72, 28, 0.42);
+  box-shadow: 0 12px 26px rgba(31, 110, 186, 0.44);
 }
 
 .nav-item {
-  background: rgba(48, 30, 20, 0.78);
-  border-color: rgba(255, 164, 96, 0.26);
+  background: rgba(22, 37, 51, 0.78);
+  border-color: rgba(121, 184, 222, 0.22);
 }
 
 .nav-item small,
 .list-text small {
-  color: #d6b59d;
+  color: #9cb7cc;
 }
 
 .nav-item.active {
-  background: linear-gradient(135deg, rgba(255, 142, 67, 0.96), rgba(240, 89, 77, 0.92));
-  border-color: rgba(255, 201, 152, 0.9);
-  box-shadow: 0 10px 24px rgba(131, 50, 23, 0.38);
+  background: linear-gradient(135deg, rgba(74, 211, 255, 0.96), rgba(61, 143, 255, 0.92));
+  border-color: rgba(163, 235, 255, 0.9);
+  box-shadow: 0 10px 24px rgba(29, 97, 165, 0.42);
 }
 
 .nav-item.active small {
-  color: #fff2e5;
+  color: #ecf7ff;
 }
 
 .logout-btn {
-  background: linear-gradient(136deg, #ff5f5f, #e33e5c);
-  border-color: rgba(255, 170, 170, 0.8);
+  background: linear-gradient(136deg, #ff6f84, #f14f6a);
+  border-color: rgba(255, 175, 191, 0.8);
 }
 
 .wizard-summary {
@@ -945,9 +945,9 @@ button:hover {
 }
 
 .wizard-state {
-  border-color: rgba(255, 164, 93, 0.42);
-  background: rgba(84, 49, 30, 0.52);
-  color: #ffe5cf;
+  border-color: rgba(123, 192, 227, 0.42);
+  background: rgba(30, 54, 73, 0.52);
+  color: #e5f6ff;
 }
 
 .wizard-state.done {
@@ -957,7 +957,7 @@ button:hover {
 }
 
 .warning-note {
-  color: #ffc88f;
+  color: #ffd69c;
 }
 
 .notice {
@@ -973,9 +973,9 @@ button:hover {
   width: fit-content;
   padding: 0.24rem 0.62rem;
   border-radius: 999px;
-  border: 1px solid rgba(255, 175, 105, 0.52);
-  background: rgba(91, 48, 24, 0.58);
-  color: #ffdcbf;
+  border: 1px solid rgba(131, 205, 237, 0.52);
+  background: rgba(26, 56, 78, 0.58);
+  color: #dcf5ff;
   font-size: 0.74rem;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -996,7 +996,7 @@ button:hover {
   border-radius: 999px;
   border: 2px solid transparent;
   background-clip: content-box;
-  background-color: rgba(255, 165, 98, 0.45);
+  background-color: rgba(103, 198, 234, 0.45);
 }
 
 .checkbox {
@@ -1004,9 +1004,9 @@ button:hover {
   justify-content: space-between;
   padding: 0.45rem 0.6rem;
   border-radius: 12px;
-  border: 1px solid rgba(255, 171, 103, 0.3);
-  background: rgba(30, 20, 14, 0.65);
-  color: #ffeede;
+  border: 1px solid rgba(121, 184, 222, 0.3);
+  background: rgba(12, 23, 34, 0.65);
+  color: #e8f6ff;
   font-weight: 600;
 }
 
@@ -1015,8 +1015,8 @@ button:hover {
   width: 42px;
   height: 24px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 185, 129, 0.45);
-  background: rgba(78, 49, 31, 0.92);
+  border: 1px solid rgba(131, 205, 237, 0.45);
+  background: rgba(22, 41, 58, 0.92);
   position: relative;
   transition: background-color 0.22s ease, border-color 0.22s ease;
   cursor: pointer;
@@ -1030,13 +1030,13 @@ button:hover {
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: #ffe6d0;
+  background: #dff4ff;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
   transition: transform 0.22s ease;
 }
 
 .checkbox input[type="checkbox"]:checked {
-  background: linear-gradient(135deg, #3ac68d, #2ea56f);
+  background: linear-gradient(135deg, #38d8a3, #32b989);
   border-color: rgba(153, 255, 211, 0.68);
 }
 

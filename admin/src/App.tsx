@@ -678,8 +678,8 @@ const defaultBrandingSettings: BrandingSettings = {
   developerName: 'Bivashka',
   tagline: 'Managed launcher platform',
   supportUrl: 'https://example.com/support',
-  primaryColor: '#FF8B38',
-  accentColor: '#45D39C',
+  primaryColor: '#4BD6FF',
+  accentColor: '#39DCA7',
   logoText: 'BLP',
   backgroundImageUrl: '',
   backgroundOverlayOpacity: 0.55,
@@ -6608,10 +6608,10 @@ function App() {
                 <div
                   className="branding-preview"
                   style={{
-                    borderColor: brandingSettings.accentColor || '#45D39C',
+                    borderColor: brandingSettings.accentColor || '#39DCA7',
                     backgroundImage: brandingSettings.backgroundImageUrl
                       ? `linear-gradient(rgba(6,10,18,${Math.min(0.95, Math.max(0, Number(brandingSettings.backgroundOverlayOpacity) || 0.55))}), rgba(6,10,18,${Math.min(0.95, Math.max(0, Number(brandingSettings.backgroundOverlayOpacity) || 0.55))})), url(${brandingSettings.backgroundImageUrl})`
-                      : `linear-gradient(140deg, ${brandingSettings.primaryColor || '#FF8B38'}, ${brandingSettings.accentColor || '#45D39C'})`,
+                      : `linear-gradient(140deg, ${brandingSettings.primaryColor || '#4BD6FF'}, ${brandingSettings.accentColor || '#39DCA7'})`,
                   }}
                 >
                   <div className={`branding-preview-login branding-preview-login-${brandingSettings.loginCardPosition}`}>
