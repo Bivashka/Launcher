@@ -26,16 +26,21 @@
     <Border Classes="heroPanel"
             Background="{Binding HeroBackgroundBrush}"
             BorderBrush="{Binding HeroBorderBrush}">
-      <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
+      <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto">
         <TextBlock Classes="heroTitle" Text="{Binding ProductName}" />
         <TextBlock Grid.Row="1" Classes="subtle" Text="{Binding Tagline}" Margin="0,6,0,0" />
+        <TextBlock Grid.Row="2"
+                   Classes="heroMeta"
+                   Margin="0,8,0,0"
+                   Text="{Binding AuthStatusText}"
+                   TextWrapping="Wrap" />
         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Top">
           <Button Classes="ghostButton"
                   Content="{Binding RefreshButtonText}"
                   Command="{Binding RefreshCommand}"
                   IsVisible="{Binding IsLauncherReady}" />
           <Button Classes="iconButton"
-                  Content="⚙"
+                  Content="&#xE713;"
                   Command="{Binding ToggleSettingsCommand}"
                   IsVisible="{Binding IsLauncherReady}" />
         </StackPanel>
@@ -51,7 +56,7 @@
               Background="{Binding LoginCardBackgroundBrush}"
               BorderBrush="{Binding LoginCardBorderBrush}"
               IsVisible="{Binding IsLoginRequired}">
-        <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="10">
+        <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="10">
           <TextBlock Classes="sectionTitle" Text="{Binding AccountHeaderText}" />
           <TextBlock Grid.Row="1" Classes="subtle" Text="{Binding StatusText}" TextWrapping="Wrap" />
 
@@ -61,23 +66,22 @@
                    Text="{Binding PlayerUsername}" />
 
           <TextBlock Grid.Row="4" Text="{Binding PasswordLabelText}" />
-          <StackPanel Grid.Row="5" Orientation="Horizontal" Spacing="10">
-            <TextBox Width="280"
-                     Text="{Binding PlayerPassword}"
-                     PasswordChar="*" />
-            <Button Content="{Binding LoginButtonText}"
-                    Command="{Binding LoginCommand}" />
-          </StackPanel>
+          <TextBox Grid.Row="5"
+                   Text="{Binding PlayerPassword}"
+                   PasswordChar="*" />
+          <Button Grid.Row="6"
+                  Classes="playButton"
+                  Content="{Binding LoginButtonText}"
+                  Command="{Binding LoginCommand}" />
 
-          <TextBlock Grid.Row="6"
+          <TextBlock Grid.Row="7"
                      Text="{Binding TwoFactorCodeLabelText}"
                      IsVisible="{Binding IsTwoFactorStepActive}" />
-          <TextBox Grid.Row="7"
-                   Width="280"
+          <TextBox Grid.Row="8"
                    Watermark="123456"
                    Text="{Binding PlayerTwoFactorCode}"
                    IsVisible="{Binding IsTwoFactorStepActive}" />
-          <TextBlock Grid.Row="8"
+          <TextBlock Grid.Row="9"
                      Classes="subtle"
                      Text="{Binding TwoFactorHintText}"
                      TextWrapping="Wrap"
@@ -191,7 +195,7 @@
                 <TextBlock Classes="sectionTitle" Text="{Binding SettingsHeaderText}" />
                 <Button Grid.Column="1"
                         Classes="iconButton"
-                        Content="✕"
+                        Content="&#xE711;"
                         Command="{Binding CloseSettingsCommand}" />
               </Grid>
 

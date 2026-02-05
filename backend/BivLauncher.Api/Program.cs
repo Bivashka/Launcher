@@ -52,14 +52,24 @@ builder.Services.AddSingleton<IAssetUrlService, AssetUrlService>();
 builder.Services.AddHostedService<NewsSyncHostedService>();
 builder.Services.AddHostedService<RuntimeRetentionHostedService>();
 
-var adminOrigins = builder.Configuration["ADMIN_ALLOWED_ORIGINS"]?
+var adminOriginsRaw = builder.Configuration["ADMIN_ALLOWED_ORIGINS"];
+var adminOrigins = adminOriginsRaw?
     .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
     ?? ["http://localhost:5173"];
+var allowAnyAdminOrigin = adminOrigins.Any(origin => origin == "*");
 
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AdminClient", policy =>
     {
+        if (allowAnyAdminOrigin)
+        {
+            policy.AllowAnyOrigin()
+                .AllowAnyHeader()
+                .AllowAnyMethod();
+            return;
+        }
+
         policy.WithOrigins(adminOrigins)
             .AllowAnyHeader()
             .AllowAnyMethod();

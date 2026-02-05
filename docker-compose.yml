@@ -26,7 +26,7 @@ services:
       DB_CONN: Host=db;Port=5432;Database=${POSTGRES_DB:-bivlauncher};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-postgres}
       JWT_SECRET: ${JWT_SECRET:-change_me_to_a_long_random_secret}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
-      ADMIN_ALLOWED_ORIGINS: ${ADMIN_ALLOWED_ORIGINS:-http://localhost:5173}
+      ADMIN_ALLOWED_ORIGINS: ${ADMIN_ALLOWED_ORIGINS:-*}
       S3_USE_S3: ${S3_USE_S3:-true}
       S3_LOCAL_ROOT: ${S3_LOCAL_ROOT:-/app/storage}
       S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}

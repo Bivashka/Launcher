@@ -1215,6 +1215,7 @@ function toSlug(value: string): string {
 
 function App() {
   const apiBaseUrl = useMemo(() => import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080', [])
+  const currentOrigin = useMemo(() => window.location.origin, [])
 
   const [phase, setPhase] = useState<Phase>('loading')
   const [username, setUsername] = useState('admin')
@@ -1556,7 +1557,10 @@ function App() {
     try {
       const response = await fetch(`${apiBaseUrl}/api/admin/setup/status`)
       if (!response.ok) {
-        throw new Error('Failed to fetch setup status')
+        const responseText = await response.text()
+        const compactResponse = responseText.trim().slice(0, 220)
+        const suffix = compactResponse ? `: ${compactResponse}` : ''
+        throw new Error(`API responded with ${response.status} on setup status${suffix}`)
       }
 
       const payload = (await response.json()) as SetupStatusResponse
@@ -1575,8 +1579,18 @@ function App() {
       setPhase('dashboard')
       setActivePage('overview')
       await loadAdminData(savedToken)
-    } catch {
+    } catch (error) {
       setPhase('login')
+      if (error instanceof TypeError) {
+        setError(`Cannot reach API from ${window.location.origin}. Check ADMIN_ALLOWED_ORIGINS and VITE_API_BASE_URL.`)
+        return
+      }
+
+      if (error instanceof Error) {
+        setError(error.message)
+        return
+      }
+
       setError('Cannot reach API. Check backend and VITE_API_BASE_URL.')
     }
   }
@@ -4318,7 +4332,7 @@ function App() {
 
   return (
     <main className="shell">
-      <section className={`panel ${phase === 'dashboard' ? 'panel-dashboard' : ''}`}>
+      <section className={`panel ${phase === 'dashboard' ? 'panel-dashboard' : 'panel-auth'}`}>
         <div className="panel-topbar">
           <div>
             <h1>BivLauncher Admin</h1>
@@ -4327,46 +4341,51 @@ function App() {
           {phase === 'dashboard' && <span className="status-pill">{busy ? 'Syncing...' : 'Live'}</span>}
         </div>
 
-        {phase === 'setup' && (
-          <form className="form" onSubmit={onSetupSubmit}>
-            <h2>First run setup</h2>
-            <label>
-              Username
-              <input value={username} onChange={(event) => setUsername(event.target.value)} required minLength={3} />
-            </label>
-            <label>
-              Password
-              <input
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                type="password"
-                required
-                minLength={8}
-              />
-            </label>
-            <button disabled={busy}>{busy ? 'Creating...' : 'Create admin'}</button>
-          </form>
-        )}
+        {phase !== 'dashboard' && (
+          <section className="auth-layout">
+            <section className="auth-hero">
+              <p className="auth-kicker">BivLauncher Control Plane</p>
+              <h2>One panel for launcher, backend and content ops</h2>
+              <p className="muted">
+                Manage profiles, build/release, storage mode, crash analytics and security from one workspace.
+              </p>
+              <div className="auth-chip-grid">
+                <span>Setup Wizard</span>
+                <span>Storage migration</span>
+                <span>Crash center</span>
+                <span>2FA policy</span>
+              </div>
+            </section>
 
-        {phase === 'login' && (
-          <form className="form" onSubmit={onLoginSubmit}>
-            <h2>Admin login</h2>
-            <label>
-              Username
-              <input value={username} onChange={(event) => setUsername(event.target.value)} required minLength={3} />
-            </label>
-            <label>
-              Password
-              <input
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                type="password"
-                required
-                minLength={8}
-              />
-            </label>
-            <button disabled={busy}>{busy ? 'Signing in...' : 'Sign in'}</button>
-          </form>
+            <form className="form auth-form" onSubmit={phase === 'setup' ? onSetupSubmit : onLoginSubmit}>
+              <h2>{phase === 'setup' ? 'First run setup' : 'Admin login'}</h2>
+              <p className="muted">
+                {phase === 'setup'
+                  ? 'Create root administrator credentials for this project.'
+                  : 'Sign in with your administrator account to open dashboard.'}
+              </p>
+              <label>
+                Username
+                <input value={username} onChange={(event) => setUsername(event.target.value)} required minLength={3} />
+              </label>
+              <label>
+                Password
+                <input
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  type="password"
+                  required
+                  minLength={8}
+                />
+              </label>
+              <button disabled={busy}>
+                {phase === 'setup'
+                  ? (busy ? 'Creating...' : 'Create admin')
+                  : (busy ? 'Signing in...' : 'Sign in')}
+              </button>
+              <small className="muted auth-hint">Browser origin: {currentOrigin}</small>
+            </form>
+          </section>
         )}
 
         {phase === 'dashboard' && (
