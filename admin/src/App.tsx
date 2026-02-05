@@ -961,17 +961,17 @@ const uiExactTranslations: Record<string, string> = {
   'Cleanup apply': 'Применить очистку',
   'Audit Feed': 'Лента аудита',
 
-  'Setup Wizard': 'Setup Wizard',
-  'Guided first configuration and readiness checks': 'Guided first configuration and readiness checks',
-  'Pre-flight checks': 'Pre-flight checks',
-  'Run pre-flight': 'Run pre-flight',
-  'Recent runs': 'Recent runs',
-  'Clear history': 'Clear history',
-  'No checks yet': 'No checks yet',
-  Passed: 'Passed',
-  Failed: 'Failed',
-  Skipped: 'Skipped',
-  'All checks passed': 'All checks passed',
+  'Setup Wizard': 'Мастер запуска',
+  'Guided first configuration and readiness checks': 'Пошаговая первичная настройка и проверка готовности',
+  'Pre-flight checks': 'Проверки перед запуском',
+  'Run pre-flight': 'Запустить проверки',
+  'Recent runs': 'Последние запуски',
+  'Clear history': 'Очистить историю',
+  'No checks yet': 'Проверок пока нет',
+  Passed: 'ОК',
+  Failed: 'Ошибка',
+  Skipped: 'Пропуск',
+  'All checks passed': 'Все проверки пройдены',
 }
 
 const uiPartialTranslations: Array<[string, string]> = [
@@ -1004,18 +1004,18 @@ const uiPartialTranslations: Array<[string, string]> = [
   ['profiles: ', 'профилей: '],
   ['deleted: ', 'удалено: '],
   ['error: ', 'ошибка: '],
-  ['Session expired. Please log in again.', 'Session expired. Please log in again.'],
-  ['Too many requests. Retry shortly.', 'Too many requests. Retry shortly.'],
-  ['Too many requests. Retry in ', 'Too many requests. Retry in '],
-  [' second(s).', ' second(s).'],
-  ['Pre-flight history cleared.', 'Pre-flight history cleared.'],
-  ['Pre-flight history cleared locally (backend endpoint unavailable).', 'Pre-flight history cleared locally (backend endpoint unavailable).'],
-  ['Failed to clear pre-flight history', 'Failed to clear pre-flight history'],
-  ['Loaded pre-flight snapshot from ', 'Loaded pre-flight snapshot from '],
-  ['Pre-flight complete: ', 'Pre-flight complete: '],
-  ['Actor: ', 'Actor: '],
-  ['Runs API health, storage round-trip and auth-provider probe. Use before first public release.', 'Runs API health, storage round-trip and auth-provider probe. Use before first public release.'],
-  ['Run pre-flight to collect live readiness status.', 'Run pre-flight to collect live readiness status.'],
+  ['Session expired. Please log in again.', 'Сессия истекла. Войдите снова.'],
+  ['Too many requests. Retry shortly.', 'Слишком много запросов. Повторите позже.'],
+  ['Too many requests. Retry in ', 'Слишком много запросов. Повторите через '],
+  [' second(s).', ' сек.'],
+  ['Pre-flight history cleared.', 'История preflight очищена.'],
+  ['Pre-flight history cleared locally (backend endpoint unavailable).', 'История preflight очищена локально (backend endpoint недоступен).'],
+  ['Failed to clear pre-flight history', 'Не удалось очистить историю preflight'],
+  ['Loaded pre-flight snapshot from ', 'Загружен снимок preflight от '],
+  ['Pre-flight complete: ', 'Проверка завершена: '],
+  ['Actor: ', 'Исполнитель: '],
+  ['Runs API health, storage round-trip and auth-provider probe. Use before first public release.', 'Проверяет API health, доступ к хранилищу и auth-provider. Используйте перед первым публичным релизом.'],
+  ['Run pre-flight to collect live readiness status.', 'Запустите preflight, чтобы получить актуальный статус готовности.'],
 ]
 
 function translateUiText(input: string): string {
@@ -3268,16 +3268,16 @@ function App() {
         setAuthProbeResult(authResult)
         checks.push({
           id: 'auth-provider',
-          label: 'Auth provider probe',
+          label: 'Проверка auth provider',
           status: authResult.success ? 'passed' : 'failed',
           message: authResult.message,
         })
       } catch (authError) {
         checks.push({
           id: 'auth-provider',
-          label: 'Auth provider probe',
+          label: 'Проверка auth provider',
           status: 'failed',
-          message: authError instanceof Error ? authError.message : 'Auth probe failed.',
+          message: authError instanceof Error ? authError.message : 'Проверка auth provider завершилась ошибкой.',
         })
       }
 
@@ -3309,7 +3309,7 @@ function App() {
         setWizardPreflightHistory((prev) => [run, ...prev].slice(0, maxWizardPreflightHistoryRuns))
       }
 
-      setNotice(`Pre-flight complete: ${checks.length - failed}/${checks.length} passed.`)
+      setNotice(`Проверка завершена: ${checks.length - failed}/${checks.length} OK.`)
     } finally {
       setBusy(false)
     }
@@ -3322,7 +3322,7 @@ function App() {
     }
 
     setWizardPreflightChecks(run.checks)
-    setNotice(`Loaded pre-flight snapshot from ${new Date(run.ranAtUtc).toLocaleString()}.`)
+    setNotice(`Загружен снимок preflight от ${new Date(run.ranAtUtc).toLocaleString()}.`)
     setError('')
   }
 
@@ -3333,15 +3333,15 @@ function App() {
     try {
       await requestWithAuth<{ deleted: number }>('/api/admin/wizard/preflight-runs', { method: 'DELETE' })
       setWizardPreflightHistory([])
-      setNotice('Pre-flight history cleared.')
+      setNotice('История preflight очищена.')
     } catch (caughtError) {
       if (caughtError instanceof ApiRequestError && caughtError.status === 404) {
         setWizardPreflightHistory([])
-        setNotice('Pre-flight history cleared locally (backend endpoint unavailable).')
+        setNotice('История preflight очищена локально (backend endpoint недоступен).')
         return
       }
 
-      setError(caughtError instanceof Error ? caughtError.message : 'Failed to clear pre-flight history')
+      setError(caughtError instanceof Error ? caughtError.message : 'Не удалось очистить историю preflight')
     } finally {
       setBusy(false)
     }
@@ -4426,39 +4426,39 @@ function App() {
                 </div>
                 <div className="quick-stats">
                   <div className="stat-card">
-                    <span>Profiles</span>
+                    <span>Профили</span>
                     <strong>{profiles.length}</strong>
                   </div>
                   <div className="stat-card">
-                    <span>Servers</span>
+                    <span>Серверы</span>
                     <strong>{servers.length}</strong>
                   </div>
                   <div className="stat-card">
-                    <span>News</span>
+                    <span>Новости</span>
                     <strong>{newsItems.length}</strong>
                   </div>
                   <div className="stat-card">
-                    <span>Bans</span>
+                    <span>Баны</span>
                     <strong>{bans.length}</strong>
                   </div>
                 </div>
               </div>
 
             <section className={`overview-hero ${activePage === 'overview' ? '' : 'is-hidden'}`}>
-              <h3>Control Center</h3>
+              <h3>Центр управления</h3>
               <p>
-                Use left navigation to manage each area separately: profiles/servers, build pipeline,
-                integrations, content, security and audit.
+                Используйте левую навигацию для управления каждым блоком отдельно:
+                профили/серверы, сборка, интеграции, контент, безопасность и аудит.
               </p>
               <div className="overview-tags">
-                <span>Stable API auth</span>
-                <span>Per-profile runtime</span>
-                <span>Live sync controls</span>
-                <span>Audit export + cleanup</span>
+                <span>Стабильная авторизация API</span>
+                <span>Рантайм на профиль</span>
+                <span>Онлайн-синхронизация</span>
+                <span>Экспорт и очистка аудита</span>
               </div>
               <div className="button-row" style={{ marginTop: '0.75rem' }}>
                 <button type="button" onClick={() => setActivePage('wizard')}>
-                  Open setup wizard
+                  Открыть мастер запуска
                 </button>
               </div>
             </section>
@@ -4466,14 +4466,14 @@ function App() {
             <section className={`wizard-board ${activePage === 'wizard' ? '' : 'is-hidden'}`}>
               <div className="wizard-head">
                 <div>
-                  <h3>Setup Wizard</h3>
+                  <h3>Мастер запуска</h3>
                   <p className="muted">
-                    Complete required steps before production launch. Optional steps improve UX/support readiness.
+                    Завершите обязательные шаги перед публичным запуском. Опциональные шаги улучшают UX и поддержку.
                   </p>
                 </div>
                 <div className="wizard-summary">
                   <strong>{wizardRequiredPercent}%</strong>
-                  <small>required ready</small>
+                  <small>готовность обязательных</small>
                 </div>
               </div>
 
@@ -4482,40 +4482,40 @@ function App() {
               </div>
 
               <div className="overview-tags">
-                <span>Required: {wizardRequiredDone}/{wizardRequiredTotal}</span>
-                <span>Optional done: {wizardOptionalDone}</span>
-                <span>Total checks: {wizardSteps.length}</span>
+                <span>Обязательные: {wizardRequiredDone}/{wizardRequiredTotal}</span>
+                <span>Опциональные: {wizardOptionalDone}</span>
+                <span>Всего проверок: {wizardSteps.length}</span>
               </div>
 
               <section className="wizard-quick">
-                <h4>Quick Start: profile + first server</h4>
+                <h4>Быстрый старт: профиль + первый сервер</h4>
                 <small className="muted">
-                  Creates one enabled profile and one enabled server in a single action.
+                  Создает один включенный профиль и один включенный сервер одним действием.
                 </small>
                 <div className="wizard-quick-grid">
                   <input
-                    placeholder="Project / profile name"
+                    placeholder="Название проекта / профиля"
                     value={wizardProjectName}
                     onChange={(event) => setWizardProjectName(event.target.value)}
                   />
                   <input
-                    placeholder="Profile slug (optional, auto-generated)"
+                    placeholder="Slug профиля (опционально, автогенерация)"
                     value={wizardProfileSlug}
                     onChange={(event) => setWizardProfileSlug(event.target.value)}
                   />
                 </div>
                 <small className={`muted ${wizardHasSlugConflict ? 'warning-note' : ''}`}>
-                  Effective slug: {wizardNormalizedSlug || '(empty)'}
-                  {wizardHasSlugConflict ? ' (already exists)' : ''}
+                  Итоговый slug: {wizardNormalizedSlug || '(пусто)'}
+                  {wizardHasSlugConflict ? ' (уже существует)' : ''}
                 </small>
                 <div className="wizard-quick-grid">
                   <input
-                    placeholder="Server name (optional)"
+                    placeholder="Название сервера (опционально)"
                     value={wizardServerName}
                     onChange={(event) => setWizardServerName(event.target.value)}
                   />
                   <input
-                    placeholder="Server address"
+                    placeholder="Адрес сервера"
                     value={wizardServerAddress}
                     onChange={(event) => setWizardServerAddress(event.target.value)}
                   />
@@ -4525,7 +4525,7 @@ function App() {
                     type="number"
                     min={1}
                     max={65535}
-                    placeholder="Server port"
+                    placeholder="Порт сервера"
                     value={wizardServerPort}
                     onChange={(event) => setWizardServerPort(Math.min(65535, Math.max(1, Number(event.target.value) || 25565)))}
                   />
@@ -4539,31 +4539,31 @@ function App() {
                 </div>
                 <div className="wizard-quick-grid">
                   <input
-                    placeholder="MC version"
+                    placeholder="Версия MC"
                     value={wizardMcVersion}
                     onChange={(event) => setWizardMcVersion(event.target.value)}
                   />
                   <button type="button" onClick={onWizardQuickCreate} disabled={busy || !token || !wizardProjectName.trim()}>
-                    Create starter topology
+                    Создать стартовую структуру
                   </button>
                 </div>
               </section>
 
               <section className="wizard-preflight">
                 <div className="wizard-preflight-head">
-                  <h4>Pre-flight checks</h4>
+                  <h4>Проверки перед запуском</h4>
                   <button type="button" onClick={onRunWizardPreflight} disabled={busy || !token}>
-                    Run pre-flight
+                    Запустить проверки
                   </button>
                 </div>
                 <small className="muted">
-                  Runs API health, storage round-trip and auth-provider probe. Use before first public release.
+                  Проверяет API health, доступ к хранилищу и auth-provider. Используйте перед первым публичным релизом.
                 </small>
                 <ul className="wizard-preflight-list">
                   {wizardPreflightChecks.map((check) => (
                     <li key={check.id} className={check.status}>
                       <span className={`wizard-state ${check.status === 'passed' ? 'done' : 'pending'}`}>
-                        {check.status === 'passed' ? 'Passed' : check.status === 'failed' ? 'Failed' : 'Skipped'}
+                        {check.status === 'passed' ? 'ОК' : check.status === 'failed' ? 'Ошибка' : 'Пропуск'}
                       </span>
                       <span className="list-text">
                         {check.label}
@@ -4574,8 +4574,8 @@ function App() {
                   {wizardPreflightChecks.length === 0 && (
                     <li className="empty">
                       <span className="list-text">
-                        No checks yet
-                        <small>Run pre-flight to collect live readiness status.</small>
+                        Проверок пока нет
+                        <small>Запустите preflight, чтобы получить актуальный статус готовности.</small>
                       </span>
                     </li>
                   )}
@@ -4583,9 +4583,9 @@ function App() {
                 {wizardPreflightHistory.length > 0 && (
                   <div className="wizard-preflight-history">
                     <div className="wizard-preflight-history-head">
-                      <strong>Recent runs</strong>
+                      <strong>Последние запуски</strong>
                       <button type="button" onClick={onClearWizardPreflightHistory} disabled={busy}>
-                        Clear history
+                        Очистить историю
                       </button>
                     </div>
                     <ul className="wizard-preflight-history-list">
@@ -4598,11 +4598,11 @@ function App() {
                             </span>
                             <span className="list-text">
                               {new Date(run.ranAtUtc).toLocaleString()}
-                              <small>{runFailed > 0 ? `${runFailed} failed` : 'All checks passed'}</small>
-                              <small>Actor: {run.actor}</small>
+                              <small>{runFailed > 0 ? `Ошибок: ${runFailed}` : 'Все проверки пройдены'}</small>
+                              <small>Исполнитель: {run.actor}</small>
                             </span>
                             <button type="button" onClick={() => onUseWizardPreflightRun(run.id)}>
-                              Load
+                              Загрузить
                             </button>
                           </li>
                         )
@@ -4616,17 +4616,17 @@ function App() {
                 {wizardSteps.map((step) => (
                   <li key={step.id} className={step.done ? 'done' : 'pending'}>
                     <div className={`wizard-state ${step.done ? 'done' : 'pending'}`}>
-                      {step.done ? 'Done' : 'Pending'}
+                      {step.done ? 'Готово' : 'Ожидает'}
                     </div>
                     <div className="wizard-step-text">
                       <strong>
-                        {step.title} {step.required ? '(required)' : '(optional)'}
+                        {step.title} {step.required ? '(обязательно)' : '(опционально)'}
                       </strong>
                       <small className="muted">{step.description}</small>
                       <small className="muted">{step.hint}</small>
                     </div>
                     <button type="button" onClick={() => setActivePage(step.page)}>
-                      Open
+                      Открыть
                     </button>
                   </li>
                 ))}
@@ -6773,48 +6773,48 @@ function App() {
 
             <div className={`grid-2 ${activePage === 'audit' ? '' : 'is-hidden'}`}>
               <section className="form form-small">
-                <h3>Admin Audit Logs</h3>
+                <h3>Журнал аудита администратора</h3>
                 <small>
-                  Runtime, CRUD, settings and auth actions with export/cleanup tooling ({auditLogs.length} entries loaded).
+                  Действия по рантайму, CRUD, настройкам и авторизации с экспортом/очисткой ({auditLogs.length} записей загружено).
                 </small>
                 <div className="grid-inline">
                   <input
-                    placeholder="Action prefix (e.g. runtime)"
+                    placeholder="Префикс действия (например: runtime)"
                     value={auditLogActionPrefix}
                     onChange={(event) => setAuditLogActionPrefix(event.target.value)}
                   />
                   <input
-                    placeholder="Actor (exact)"
+                    placeholder="Исполнитель (точно)"
                     value={auditLogActor}
                     onChange={(event) => setAuditLogActor(event.target.value)}
                   />
                 </div>
                 <div className="grid-inline">
                   <input
-                    placeholder="Entity type (exact)"
+                    placeholder="Тип сущности (точно)"
                     value={auditLogEntityType}
                     onChange={(event) => setAuditLogEntityType(event.target.value)}
                   />
                   <input
-                    placeholder="Entity id contains"
+                    placeholder="Entity id содержит"
                     value={auditLogEntityId}
                     onChange={(event) => setAuditLogEntityId(event.target.value)}
                   />
                   <input
-                    placeholder="Request id (exact)"
+                    placeholder="Request id (точно)"
                     value={auditLogRequestId}
                     onChange={(event) => setAuditLogRequestId(event.target.value)}
                   />
                 </div>
                 <div className="grid-inline">
                   <input
-                    placeholder="Remote IP (exact)"
+                    placeholder="Remote IP (точно)"
                     value={auditLogRemoteIp}
                     onChange={(event) => setAuditLogRemoteIp(event.target.value)}
                   />
                   <input
                     type="datetime-local"
-                    placeholder="From (local)"
+                    placeholder="С (локальное время)"
                     value={auditLogFromLocal}
                     onChange={(event) => setAuditLogFromLocal(event.target.value)}
                   />
@@ -6822,7 +6822,7 @@ function App() {
                 <div className="grid-inline">
                   <input
                     type="datetime-local"
-                    placeholder="To (local)"
+                    placeholder="По (локальное время)"
                     value={auditLogToLocal}
                     onChange={(event) => setAuditLogToLocal(event.target.value)}
                   />
@@ -6830,27 +6830,27 @@ function App() {
                     type="number"
                     min={1}
                     max={500}
-                    placeholder="Limit"
+                    placeholder="Лимит"
                     value={auditLogLimit}
                     onChange={(event) => setAuditLogLimit(Number(event.target.value) || 50)}
                   />
                 </div>
                 <div className="grid-inline">
                   <small>
-                    Range:
+                    Период:
                     {' '}
-                    <button type="button" onClick={() => onSetAuditRangeDays(1)}>24h</button>
+                    <button type="button" onClick={() => onSetAuditRangeDays(1)}>24ч</button>
                     {' '}
-                    <button type="button" onClick={() => onSetAuditRangeDays(7)}>7d</button>
+                    <button type="button" onClick={() => onSetAuditRangeDays(7)}>7д</button>
                     {' '}
-                    <button type="button" onClick={() => onSetAuditRangeDays(30)}>30d</button>
+                    <button type="button" onClick={() => onSetAuditRangeDays(30)}>30д</button>
                     {' '}
-                    <button type="button" onClick={() => onSetAuditRangeDays(90)}>90d</button>
+                    <button type="button" onClick={() => onSetAuditRangeDays(90)}>90д</button>
                     {' '}
-                    <button type="button" onClick={() => { setAuditLogFromLocal(''); setAuditLogToLocal('') }}>all</button>
+                    <button type="button" onClick={() => { setAuditLogFromLocal(''); setAuditLogToLocal('') }}>всё</button>
                   </small>
                   <button type="button" onClick={onClearAuditFilters}>
-                    Clear filters
+                    Сбросить фильтры
                   </button>
                 </div>
                 <div className="grid-inline">
@@ -6858,11 +6858,11 @@ function App() {
                     value={auditLogSortOrder}
                     onChange={(event) => setAuditLogSortOrder(event.target.value === 'asc' ? 'asc' : 'desc')}
                   >
-                    <option value="desc">Sort: newest first</option>
-                    <option value="asc">Sort: oldest first</option>
+                    <option value="desc">Сортировка: сначала новые</option>
+                    <option value="asc">Сортировка: сначала старые</option>
                   </select>
                   <small>
-                    Presets:
+                    Пресеты:
                     {' '}
                     <button type="button" onClick={() => onSetAuditActionPreset('runtime')}>runtime*</button>
                     {' '}
@@ -6894,35 +6894,35 @@ function App() {
                   </small>
                 </div>
                 <button type="button" onClick={onRefreshAuditLogs} disabled={busy || !token}>
-                  Refresh logs
+                  Обновить логи
                 </button>
                 <button type="button" onClick={onLoadMoreAuditLogs} disabled={busy || !token || !auditLogsHasMore}>
-                  Load more
+                  Загрузить ещё
                 </button>
                 <div className="grid-inline">
                   <input
                     type="number"
                     min={1}
                     max={50000}
-                    placeholder="Export limit"
+                    placeholder="Лимит экспорта"
                     value={auditExportLimit}
                     onChange={(event) => setAuditExportLimit(Number(event.target.value) || 5000)}
                   />
                   <button type="button" onClick={() => onExportAuditLogs('json')} disabled={busy || !token}>
-                    Export JSON
+                    Экспорт JSON
                   </button>
                 </div>
                 <div className="grid-inline">
                   <button type="button" onClick={() => onExportAuditLogs('csv')} disabled={busy || !token}>
-                    Export CSV
+                    Экспорт CSV
                   </button>
-                  <small>Export uses current filters and sort.</small>
+                  <small>Экспорт использует текущие фильтры и сортировку.</small>
                 </div>
                 <div className="grid-inline">
                   <input
                     type="number"
                     min={1}
-                    placeholder="Cleanup older than (days)"
+                    placeholder="Очистить старше (дней)"
                     value={auditCleanupOlderThanDays}
                     onChange={(event) => setAuditCleanupOlderThanDays(Number(event.target.value) || 90)}
                   />
@@ -6930,40 +6930,40 @@ function App() {
                     type="number"
                     min={1}
                     max={50000}
-                    placeholder="Cleanup batch limit"
+                    placeholder="Лимит очистки за проход"
                     value={auditCleanupLimit}
                     onChange={(event) => setAuditCleanupLimit(Number(event.target.value) || 5000)}
                   />
                 </div>
                 <div className="grid-inline">
                   <button type="button" onClick={() => onAuditCleanup(true)} disabled={busy || !token}>
-                    Cleanup dry-run
+                    Очистка dry-run
                   </button>
                   <button type="button" onClick={() => onAuditCleanup(false)} disabled={busy || !token}>
-                    Cleanup apply
+                    Применить очистку
                   </button>
                 </div>
                 <small>
-                  Loaded: {auditLogs.length} | next offset: {auditLogsOffset} | has more: {String(auditLogsHasMore)} | sort: {auditLogSortOrder}
+                  Загружено: {auditLogs.length} | следующий offset: {auditLogsOffset} | есть ещё: {String(auditLogsHasMore)} | сорт: {auditLogSortOrder}
                 </small>
               </section>
 
               <section>
-                <h3>Audit Feed</h3>
+                <h3>Лента аудита</h3>
                 <ul className="list">
                   {auditLogs.map((log) => (
                     <li key={log.id}>
                       <span className="list-text">
                         {log.action}
                         <small>
-                          actor: {log.actor} | entity: {log.entityType}:{log.entityId || 'n/a'}
+                          исполнитель: {log.actor} | сущность: {log.entityType}:{log.entityId || 'n/a'}
                         </small>
                         <small>
-                          req: {log.requestId || 'n/a'} | ip: {log.remoteIp || 'n/a'}
+                          request: {log.requestId || 'n/a'} | ip: {log.remoteIp || 'n/a'}
                         </small>
                         <small>{new Date(log.createdAtUtc).toLocaleString()}</small>
                         <small>
-                          ua: {log.userAgent ? (log.userAgent.length > 120 ? `${log.userAgent.slice(0, 120)}...` : log.userAgent) : 'n/a'}
+                          user-agent: {log.userAgent ? (log.userAgent.length > 120 ? `${log.userAgent.slice(0, 120)}...` : log.userAgent) : 'n/a'}
                         </small>
                         <small>
                           {log.detailsJson.length > 220
