@@ -6,7 +6,7 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 * {
@@ -18,10 +18,10 @@ body {
   min-width: 320px;
   position: relative;
   background:
-    radial-gradient(circle at 12% 10%, rgba(76, 222, 255, 0.3), transparent 34%),
-    radial-gradient(circle at 86% 14%, rgba(99, 159, 255, 0.24), transparent 36%),
-    radial-gradient(circle at 64% 92%, rgba(62, 224, 173, 0.2), transparent 40%),
-    linear-gradient(150deg, #07121c 0%, #091723 52%, #060f17 100%);
+    radial-gradient(circle at 8% 8%, rgba(108, 172, 255, 0.2), transparent 32%),
+    radial-gradient(circle at 90% 10%, rgba(129, 197, 255, 0.18), transparent 30%),
+    radial-gradient(circle at 54% 92%, rgba(88, 194, 173, 0.14), transparent 40%),
+    linear-gradient(160deg, #f7f9fd 0%, #eff4fb 58%, #eaf1fb 100%);
 }
 
 body::before {
@@ -30,9 +30,9 @@ body::before {
   inset: 0;
   pointer-events: none;
   background-image:
-    linear-gradient(rgba(145, 221, 255, 0.08) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(145, 221, 255, 0.08) 1px, transparent 1px);
-  background-size: 34px 34px;
+    linear-gradient(rgba(81, 132, 208, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(81, 132, 208, 0.06) 1px, transparent 1px);
+  background-size: 30px 30px;
   mask-image: radial-gradient(circle at center, black 34%, transparent 92%);
-  opacity: 0.24;
+  opacity: 0.36;
 }
