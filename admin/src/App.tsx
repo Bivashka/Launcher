@@ -725,17 +725,17 @@ const gameArgPresets: Array<{ id: string; label: string; value: string }> = [
   { id: 'windowed', label: 'Windowed 1280x720', value: '--width 1280 --height 720 --server {SERVER_HOST} --port {SERVER_PORT}' },
 ]
 const dashboardPages: Array<{ id: DashboardPage; title: string; subtitle: string }> = [
-  { id: 'overview', title: 'Overview', subtitle: 'Status and quick metrics' },
-  { id: 'wizard', title: 'Setup Wizard', subtitle: 'Guided first configuration and readiness checks' },
-  { id: 'servers', title: 'Servers & Profiles', subtitle: 'Game topology and profile data' },
-  { id: 'build', title: 'Build & Runtime', subtitle: 'Artifacts, retention and cosmetics' },
-  { id: 'news', title: 'News', subtitle: 'Content, sources and sync policies' },
-  { id: 'integrations', title: 'Integrations', subtitle: 'Discord, auth provider and S3' },
-  { id: 'security', title: 'Security', subtitle: 'Bans and account protection' },
-  { id: 'crashes', title: 'Crashes', subtitle: 'Crash logs, triage and export' },
-  { id: 'docs', title: 'Documentation', subtitle: 'Guides, FAQ and searchable markdown docs' },
-  { id: 'settings', title: 'Branding', subtitle: 'Product visuals and identity' },
-  { id: 'audit', title: 'Audit Logs', subtitle: 'Traceability, export and cleanup' },
+  { id: 'overview', title: 'Обзор', subtitle: 'Состояние проекта и ключевые метрики' },
+  { id: 'wizard', title: 'Мастер запуска', subtitle: 'Пошаговая первичная настройка и проверка готовности' },
+  { id: 'servers', title: 'Профили и серверы', subtitle: 'Основная игровая конфигурация' },
+  { id: 'build', title: 'Сборка и рантайм', subtitle: 'Артефакты, ретеншен и косметика' },
+  { id: 'news', title: 'Новости', subtitle: 'Контент, источники и синхронизация' },
+  { id: 'integrations', title: 'Интеграции', subtitle: 'Discord, auth provider и S3' },
+  { id: 'security', title: 'Безопасность', subtitle: 'Баны и защита аккаунтов' },
+  { id: 'crashes', title: 'Крэши', subtitle: 'Логи сбоев, разбор и экспорт' },
+  { id: 'docs', title: 'Документация', subtitle: 'Гайды, FAQ и встроенные статьи' },
+  { id: 'settings', title: 'Брендинг', subtitle: 'Визуал и идентичность продукта' },
+  { id: 'audit', title: 'Аудит', subtitle: 'Трассировка, экспорт и очистка журналов' },
 ]
 
 const uiExactTranslations: Record<string, string> = {
@@ -1590,7 +1590,7 @@ function App() {
     } catch (error) {
       setPhase('login')
       if (error instanceof TypeError) {
-        setError(`Cannot reach API (${apiBaseUrl}) from ${window.location.origin}. Check CORS (ADMIN_ALLOWED_ORIGINS), API port 8080 and reverse-proxy/firewall.`)
+        setError(`Нет доступа к API (${apiBaseUrl}) из ${window.location.origin}. Проверь CORS (ADMIN_ALLOWED_ORIGINS), порт API 8080 и reverse-proxy/firewall.`)
         return
       }
 
@@ -1599,7 +1599,7 @@ function App() {
         return
       }
 
-      setError('Cannot reach API. Check backend and VITE_API_BASE_URL.')
+      setError('Нет доступа к API. Проверь backend и VITE_API_BASE_URL.')
     }
   }
 
@@ -4333,7 +4333,7 @@ function App() {
   }
 
   if (phase === 'loading') {
-    return <main className="shell">Loading...</main>
+    return <main className="shell">Загрузка...</main>
   }
 
   const activePageMeta = dashboardPages.find((page) => page.id === activePage) ?? dashboardPages[0]
@@ -4346,38 +4346,38 @@ function App() {
             <h1>BivLauncher Admin</h1>
             <p className="muted">API: {apiBaseUrl}</p>
           </div>
-          {phase === 'dashboard' && <span className="status-pill">{busy ? 'Syncing...' : 'Live'}</span>}
+          {phase === 'dashboard' && <span className="status-pill">{busy ? 'Синхронизация...' : 'В работе'}</span>}
         </div>
 
         {phase !== 'dashboard' && (
           <section className="auth-layout">
             <section className="auth-hero">
               <p className="auth-kicker">BivLauncher Control Plane</p>
-              <h2>One panel for launcher, backend and content ops</h2>
+              <h2>Единая панель для лаунчера, backend и контент-операций</h2>
               <p className="muted">
-                Manage profiles, build/release, storage mode, crash analytics and security from one workspace.
+                Управляй профилями, релизами, режимом хранения, крэш-аналитикой и безопасностью из одного места.
               </p>
               <div className="auth-chip-grid">
-                <span>Setup Wizard</span>
-                <span>Storage migration</span>
-                <span>Crash center</span>
-                <span>2FA policy</span>
+                <span>Мастер настройки</span>
+                <span>Миграция хранилища</span>
+                <span>Центр крэшей</span>
+                <span>Политика 2FA</span>
               </div>
             </section>
 
             <form className="form auth-form" onSubmit={phase === 'setup' ? onSetupSubmit : onLoginSubmit}>
-              <h2>{phase === 'setup' ? 'First run setup' : 'Admin login'}</h2>
+              <h2>{phase === 'setup' ? 'Первичная настройка' : 'Вход администратора'}</h2>
               <p className="muted">
                 {phase === 'setup'
-                  ? 'Create root administrator credentials for this project.'
-                  : 'Sign in with your administrator account to open dashboard.'}
+                  ? 'Создай root-учётку администратора для этого проекта.'
+                  : 'Войди под администратором, чтобы открыть дашборд.'}
               </p>
               <label>
-                Username
+                Логин
                 <input value={username} onChange={(event) => setUsername(event.target.value)} required minLength={3} />
               </label>
               <label>
-                Password
+                Пароль
                 <input
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
@@ -4388,8 +4388,8 @@ function App() {
               </label>
               <button disabled={busy}>
                 {phase === 'setup'
-                  ? (busy ? 'Creating...' : 'Create admin')
-                  : (busy ? 'Signing in...' : 'Sign in')}
+                  ? (busy ? 'Создание...' : 'Создать администратора')
+                  : (busy ? 'Вход...' : 'Войти')}
               </button>
               <small className="muted auth-hint">Browser origin: {currentOrigin}</small>
             </form>
@@ -4399,7 +4399,7 @@ function App() {
         {phase === 'dashboard' && (
           <section className="dashboard">
             <aside className="dashboard-sidebar">
-              <p className="sidebar-caption">Workspace</p>
+              <p className="sidebar-caption">Рабочая область</p>
               <nav className="dashboard-nav">
                 {dashboardPages.map((page) => (
                   <button
@@ -4414,7 +4414,7 @@ function App() {
                 ))}
               </nav>
               <button type="button" className="logout-btn" onClick={logout}>
-                Logout
+                Выйти
               </button>
             </aside>
 
@@ -4635,26 +4635,27 @@ function App() {
 
             <div className={`grid-2 ${activePage === 'servers' ? '' : 'is-hidden'}`}>
               <form className="form form-small" onSubmit={onProfileSubmit}>
-                <h3>{editingProfileId ? 'Edit profile' : 'Create profile'}</h3>
+                <p className="step-badge">Шаг 1</p>
+                <h3>{editingProfileId ? 'Редактировать профиль' : 'Создать профиль'}</h3>
                 <input
-                  placeholder="Name"
+                  placeholder="Название"
                   value={profileForm.name}
                   onChange={(event) => setProfileForm((prev) => ({ ...prev, name: event.target.value }))}
                   required
                 />
                 <input
-                  placeholder="Slug (example: main-survival)"
+                  placeholder="Slug (пример: main-survival)"
                   value={profileForm.slug}
                   onChange={(event) => setProfileForm((prev) => ({ ...prev, slug: event.target.value }))}
                   required
                 />
                 <input
-                  placeholder="Description"
+                  placeholder="Описание"
                   value={profileForm.description}
                   onChange={(event) => setProfileForm((prev) => ({ ...prev, description: event.target.value }))}
                 />
                 <input
-                  placeholder="Icon key (S3 key)"
+                  placeholder="Ключ иконки (S3)"
                   value={profileForm.iconKey}
                   onChange={(event) => setProfileForm((prev) => ({ ...prev, iconKey: event.target.value }))}
                 />
@@ -4665,13 +4666,13 @@ function App() {
                     onChange={(event) => setProfileIconFile(event.target.files?.[0] ?? null)}
                   />
                   <button type="button" onClick={onUploadProfileIcon} disabled={busy || !token}>
-                    Upload icon
+                    Загрузить иконку
                   </button>
                 </div>
                 <div className="grid-inline">
                   <input
                     type="number"
-                    placeholder="Priority"
+                    placeholder="Приоритет"
                     value={profileForm.priority}
                     onChange={(event) =>
                       setProfileForm((prev) => ({ ...prev, priority: Number(event.target.value) || 0 }))
@@ -4679,7 +4680,7 @@ function App() {
                   />
                   <input
                     type="number"
-                    placeholder="RAM MB"
+                    placeholder="RAM (МБ)"
                     value={profileForm.recommendedRamMb}
                     onChange={(event) =>
                       setProfileForm((prev) => ({ ...prev, recommendedRamMb: Number(event.target.value) || 1024 }))
@@ -4687,40 +4688,40 @@ function App() {
                   />
                 </div>
                 <textarea
-                  placeholder="Default JVM args for profile"
+                  placeholder="JVM args по умолчанию для профиля"
                   rows={3}
                   value={profileForm.jvmArgsDefault}
                   onChange={(event) => setProfileForm((prev) => ({ ...prev, jvmArgsDefault: event.target.value }))}
                 />
                 {profileJvmArgsAnalysis.warnings.length > 0 && (
                   <small className="warning-note">
-                    JVM warnings: {profileJvmArgsAnalysis.warnings.join(' | ')}
+                    Предупреждения JVM: {profileJvmArgsAnalysis.warnings.join(' | ')}
                   </small>
                 )}
                 <textarea
-                  placeholder="Default Game args for profile"
+                  placeholder="Game args по умолчанию для профиля"
                   rows={3}
                   value={profileForm.gameArgsDefault}
                   onChange={(event) => setProfileForm((prev) => ({ ...prev, gameArgsDefault: event.target.value }))}
                 />
                 {profileGameArgsAnalysis.warnings.length > 0 && (
                   <small className="warning-note">
-                    Game warnings: {profileGameArgsAnalysis.warnings.join(' | ')}
+                    Предупреждения Game args: {profileGameArgsAnalysis.warnings.join(' | ')}
                   </small>
                 )}
                 <input
-                  placeholder="Bundled Java path (relative, optional)"
+                  placeholder="Путь до встроенной Java (относительный, опционально)"
                   value={profileForm.bundledJavaPath}
                   onChange={(event) => setProfileForm((prev) => ({ ...prev, bundledJavaPath: event.target.value }))}
                 />
                 <input
-                  placeholder="Bundled runtime artifact key (S3 key, optional)"
+                  placeholder="Ключ встроенного рантайма (S3, опционально)"
                   value={profileForm.bundledRuntimeKey}
                   onChange={(event) => setProfileForm((prev) => ({ ...prev, bundledRuntimeKey: event.target.value }))}
                 />
                 {runtimeMetadataProfile ? (
                   <small>
-                    Runtime metadata: {runtimeMetadataProfile.bundledRuntimeSizeBytes > 0 ? formatBytes(runtimeMetadataProfile.bundledRuntimeSizeBytes) : 'size n/a'}
+                    Метаданные рантайма: {runtimeMetadataProfile.bundledRuntimeSizeBytes > 0 ? formatBytes(runtimeMetadataProfile.bundledRuntimeSizeBytes) : 'размер n/a'}
                     {runtimeMetadataProfile.bundledRuntimeContentType ? ` | ${runtimeMetadataProfile.bundledRuntimeContentType}` : ''}
                     {runtimeMetadataProfile.bundledRuntimeSha256 ? ` | sha256 ${runtimeMetadataProfile.bundledRuntimeSha256}` : ''}
                   </small>
@@ -4731,19 +4732,20 @@ function App() {
                     checked={profileForm.enabled}
                     onChange={(event) => setProfileForm((prev) => ({ ...prev, enabled: event.target.checked }))}
                   />
-                  Enabled
+                  Включено
                 </label>
-                <button disabled={busy || !token}>{editingProfileId ? 'Update profile' : 'Create profile'}</button>
+                <button disabled={busy || !token}>{editingProfileId ? 'Сохранить профиль' : 'Создать профиль'}</button>
               </form>
 
               <form className="form form-small" onSubmit={onServerSubmit}>
-                <h3>{editingServerId ? 'Edit server' : 'Create server'}</h3>
+                <p className="step-badge">Шаг 2</p>
+                <h3>{editingServerId ? 'Редактировать сервер' : 'Создать сервер'}</h3>
                 <select
                   value={serverForm.profileId}
                   onChange={(event) => setServerForm((prev) => ({ ...prev, profileId: event.target.value }))}
                   required
                 >
-                  <option value="">Select profile</option>
+                  <option value="">Выберите профиль</option>
                   {profiles.map((profile) => (
                     <option key={profile.id} value={profile.id}>
                       {profile.name}
@@ -4751,21 +4753,21 @@ function App() {
                   ))}
                 </select>
                 <input
-                  placeholder="Name"
+                  placeholder="Название"
                   value={serverForm.name}
                   onChange={(event) => setServerForm((prev) => ({ ...prev, name: event.target.value }))}
                   required
                 />
                 <div className="grid-inline">
                   <input
-                    placeholder="Address"
+                    placeholder="Адрес"
                     value={serverForm.address}
                     onChange={(event) => setServerForm((prev) => ({ ...prev, address: event.target.value }))}
                     required
                   />
                   <input
                     type="number"
-                    placeholder="Port"
+                    placeholder="Порт"
                     value={serverForm.port}
                     onChange={(event) => setServerForm((prev) => ({ ...prev, port: Number(event.target.value) || 25565 }))}
                     required
@@ -4773,12 +4775,12 @@ function App() {
                 </div>
                 <div className="grid-inline">
                   <input
-                    placeholder="Main jar path (DE route)"
+                    placeholder="Main jar path (DE маршрут)"
                     value={serverForm.mainJarPath}
                     onChange={(event) => setServerForm((prev) => ({ ...prev, mainJarPath: event.target.value }))}
                   />
                   <input
-                    placeholder="RU proxy address"
+                    placeholder="Адрес RU-прокси"
                     value={serverForm.ruProxyAddress}
                     onChange={(event) => setServerForm((prev) => ({ ...prev, ruProxyAddress: event.target.value }))}
                   />
@@ -4786,7 +4788,7 @@ function App() {
                 <div className="grid-inline">
                   <input
                     type="number"
-                    placeholder="RU proxy port"
+                    placeholder="Порт RU-прокси"
                     value={serverForm.ruProxyPort}
                     onChange={(event) =>
                       setServerForm((prev) => ({ ...prev, ruProxyPort: Number(event.target.value) || 25565 }))
@@ -4794,7 +4796,7 @@ function App() {
                     required
                   />
                   <input
-                    placeholder="RU jar path (proxy route)"
+                    placeholder="RU jar path (маршрут прокси)"
                     value={serverForm.ruJarPath}
                     onChange={(event) => setServerForm((prev) => ({ ...prev, ruJarPath: event.target.value }))}
                   />
@@ -4812,14 +4814,14 @@ function App() {
                     ))}
                   </select>
                   <input
-                    placeholder="MC Version"
+                    placeholder="Версия MC"
                     value={serverForm.mcVersion}
                     onChange={(event) => setServerForm((prev) => ({ ...prev, mcVersion: event.target.value }))}
                     required
                   />
                 </div>
                 <input
-                  placeholder="Icon key (S3 key)"
+                  placeholder="Ключ иконки (S3)"
                   value={serverForm.iconKey}
                   onChange={(event) => setServerForm((prev) => ({ ...prev, iconKey: event.target.value }))}
                 />
@@ -4830,7 +4832,7 @@ function App() {
                     onChange={(event) => setServerIconFile(event.target.files?.[0] ?? null)}
                   />
                   <button type="button" onClick={onUploadServerIcon} disabled={busy || !token}>
-                    Upload icon
+                    Загрузить иконку
                   </button>
                 </div>
                 <label className="checkbox">
@@ -4839,19 +4841,19 @@ function App() {
                     checked={serverForm.enabled}
                     onChange={(event) => setServerForm((prev) => ({ ...prev, enabled: event.target.checked }))}
                   />
-                  Enabled
+                  Включено
                 </label>
                 <button disabled={busy || !token || profiles.length === 0}>
-                  {editingServerId ? 'Update server' : 'Create server'}
+                  {editingServerId ? 'Сохранить сервер' : 'Создать сервер'}
                 </button>
               </form>
             </div>
 
             <div className={`grid-2 split-build-servers ${(activePage === 'build' || activePage === 'servers') ? '' : 'is-hidden'} ${activePage === 'build' ? 'show-build' : 'show-servers'}`}>
               <section className="form form-small">
-                <h3>Skins / Capes</h3>
+                <h3>Скины / Плащи</h3>
                 <input
-                  placeholder="Username or ExternalId"
+                  placeholder="Имя пользователя или ExternalId"
                   value={cosmeticsUser}
                   onChange={(event) => setCosmeticsUser(event.target.value)}
                 />
@@ -4862,7 +4864,7 @@ function App() {
                     onChange={(event) => setSkinFile(event.target.files?.[0] ?? null)}
                   />
                   <button type="button" onClick={onUploadSkin} disabled={busy || !token}>
-                    Upload skin
+                    Загрузить скин
                   </button>
                 </div>
                 <div className="upload-row">
@@ -4872,17 +4874,17 @@ function App() {
                     onChange={(event) => setCapeFile(event.target.files?.[0] ?? null)}
                   />
                   <button type="button" onClick={onUploadCape} disabled={busy || !token}>
-                    Upload cape
+                    Загрузить плащ
                   </button>
                 </div>
 
-                <h4>Java Runtime Artifact</h4>
+                <h4>Артефакт Java Runtime</h4>
                 <select
                   value={runtimeProfileSlug}
                   onChange={(event) => setRuntimeProfileSlug(event.target.value)}
                   disabled={profiles.length === 0}
                 >
-                  <option value="">Select profile slug</option>
+                  <option value="">Выберите slug профиля</option>
                   {profiles.map((profile) => (
                     <option key={profile.id} value={profile.slug}>
                       {profile.name} ({profile.slug})
@@ -4896,16 +4898,16 @@ function App() {
                     onChange={(event) => setRuntimeFile(event.target.files?.[0] ?? null)}
                   />
                   <button type="button" onClick={onUploadRuntime} disabled={busy || !token || profiles.length === 0}>
-                    Upload runtime
+                    Загрузить runtime
                   </button>
                 </div>
                 <input
-                  placeholder="Runtime key override for verify (optional)"
+                  placeholder="Ключ runtime для проверки (опционально)"
                   value={runtimeVerifyKey}
                   onChange={(event) => setRuntimeVerifyKey(event.target.value)}
                 />
                 <button type="button" onClick={onVerifyRuntimeArtifact} disabled={busy || !token}>
-                  Verify runtime artifact
+                  Проверить runtime-артефакт
                 </button>
                 {runtimeVerifyResult ? (
                   <small>
@@ -4933,7 +4935,7 @@ function App() {
                   </label>
                 </div>
                 <button type="button" onClick={onCleanupRuntimeArtifacts} disabled={busy || !token || profiles.length === 0}>
-                  Cleanup old runtimes
+                  Очистить старые runtime
                 </button>
                 {runtimeCleanupResult ? (
                   <small>
@@ -5069,21 +5071,21 @@ function App() {
               </section>
 
               <section>
-                <h3>Servers</h3>
-                <ul className="list">
+                <h3>{activePage === 'servers' ? 'Серверы' : 'Список серверов'}</h3>
+                <ul className="list list-compact">
                   {servers.map((server) => (
                     <li key={server.id}>
                       <span className="list-text">
                         {server.name} ({server.address}:{server.port})
                         <small>
-                          RU: {server.ruProxyAddress ? `${server.ruProxyAddress}:${server.ruProxyPort}` : 'not configured'}
+                          RU: {server.ruProxyAddress ? `${server.ruProxyAddress}:${server.ruProxyPort}` : 'не настроен'}
                         </small>
                         <small>Jars: main={server.mainJarPath || 'auto'}, ru={server.ruJarPath || 'auto'}</small>
-                        <small>{server.iconKey || 'no icon'}</small>
+                        <small>{server.iconKey || 'иконка не задана'}</small>
                       </span>
                       <div>
-                        <button onClick={() => onServerEdit(server)}>Edit</button>
-                        <button onClick={() => onServerDelete(server.id)}>Delete</button>
+                        <button onClick={() => onServerEdit(server)}>Изменить</button>
+                        <button onClick={() => onServerDelete(server.id)}>Удалить</button>
                       </div>
                     </li>
                   ))}
@@ -5206,9 +5208,10 @@ function App() {
               </section>
 
               <section>
-                <h3>Profiles</h3>
+                <h3>{activePage === 'servers' ? 'Шаг 3: Профили' : 'Профили'}</h3>
+                {activePage !== 'servers' && (
                 <div className="form form-small">
-                  <h4>Rebuild options</h4>
+                  <h4>Параметры пересборки</h4>
                   <div className="grid-inline">
                     <select value={rebuildLoaderType} onChange={(event) => setRebuildLoaderType(event.target.value)}>
                       {supportedLoaders.map((loader) => (
@@ -5218,7 +5221,7 @@ function App() {
                       ))}
                     </select>
                     <input
-                      placeholder="MC version (for loader path)"
+                      placeholder="Версия MC (для пути загрузчика)"
                       value={rebuildMcVersion}
                       onChange={(event) => setRebuildMcVersion(event.target.value)}
                     />
@@ -5233,7 +5236,7 @@ function App() {
                         }
                       }}
                     >
-                      <option value="">JVM preset...</option>
+                      <option value="">JVM пресет...</option>
                       {jvmArgPresets.map((preset) => (
                         <option key={preset.id} value={preset.id}>
                           {preset.label}
@@ -5249,7 +5252,7 @@ function App() {
                         }
                       }}
                     >
-                      <option value="">Game preset...</option>
+                      <option value="">Game пресет...</option>
                       {gameArgPresets.map((preset) => (
                         <option key={preset.id} value={preset.id}>
                           {preset.label}
@@ -5258,34 +5261,34 @@ function App() {
                     </select>
                   </div>
                   <textarea
-                    placeholder="JVM args override for rebuild (optional)"
+                    placeholder="JVM args для пересборки (опционально)"
                     rows={3}
                     value={rebuildJvmArgsDefault}
                     onChange={(event) => setRebuildJvmArgsDefault(event.target.value)}
                   />
                   {rebuildJvmArgsAnalysis.warnings.length > 0 && (
                     <small className="warning-note">
-                      JVM warnings: {rebuildJvmArgsAnalysis.warnings.join(' | ')}
+                      Предупреждения JVM: {rebuildJvmArgsAnalysis.warnings.join(' | ')}
                     </small>
                   )}
                   <textarea
-                    placeholder="Game args override for rebuild (optional)"
+                    placeholder="Game args для пересборки (опционально)"
                     rows={3}
                     value={rebuildGameArgsDefault}
                     onChange={(event) => setRebuildGameArgsDefault(event.target.value)}
                   />
                   {rebuildGameArgsAnalysis.warnings.length > 0 && (
                     <small className="warning-note">
-                      Game warnings: {rebuildGameArgsAnalysis.warnings.join(' | ')}
+                      Предупреждения Game args: {rebuildGameArgsAnalysis.warnings.join(' | ')}
                     </small>
                   )}
                   <input
-                    placeholder="Source sub-path override (optional)"
+                    placeholder="Подпуть исходников (опционально)"
                     value={rebuildSourceSubPath}
                     onChange={(event) => setRebuildSourceSubPath(event.target.value)}
                   />
                   <input
-                    placeholder="Java runtime path override (optional)"
+                    placeholder="Путь Java runtime (опционально)"
                     value={rebuildJavaRuntimePath}
                     onChange={(event) => setRebuildJavaRuntimePath(event.target.value)}
                   />
@@ -5294,18 +5297,18 @@ function App() {
                       value={rebuildLaunchMode}
                       onChange={(event) => setRebuildLaunchMode(event.target.value as 'auto' | 'jar' | 'mainclass')}
                     >
-                      <option value="auto">launch: auto</option>
-                      <option value="jar">launch: jar</option>
-                      <option value="mainclass">launch: mainclass</option>
+                      <option value="auto">Запуск: auto</option>
+                      <option value="jar">Запуск: jar</option>
+                      <option value="mainclass">Запуск: mainclass</option>
                     </select>
                     <input
-                      placeholder="Launch main class (optional)"
+                      placeholder="Main class запуска (опционально)"
                       value={rebuildLaunchMainClass}
                       onChange={(event) => setRebuildLaunchMainClass(event.target.value)}
                     />
                   </div>
                   <textarea
-                    placeholder="Launch classpath entries (one per line, supports globs: libraries/**/*.jar)"
+                    placeholder="Classpath запуска (по одному на строку, поддержка globs: libraries/**/*.jar)"
                     rows={3}
                     value={rebuildLaunchClasspath}
                     onChange={(event) => setRebuildLaunchClasspath(event.target.value)}
@@ -5316,34 +5319,35 @@ function App() {
                       checked={rebuildPublishToServers}
                       onChange={(event) => setRebuildPublishToServers(event.target.checked)}
                     />
-                    Publish buildId to profile servers
+                    Публиковать buildId на серверы профиля
                   </label>
                 </div>
-                <ul className="list">
+                )}
+                <ul className="list list-compact">
                   {profiles.map((profile) => (
                     <li key={profile.id}>
                       <span className="list-text">
                         {profile.name} ({profile.slug})
-                        <small>{profile.iconKey || 'no icon'}</small>
+                        <small>{profile.iconKey || 'иконка не задана'}</small>
                         <small>
-                          jvm: {profile.jvmArgsDefault ? (profile.jvmArgsDefault.length > 96 ? `${profile.jvmArgsDefault.slice(0, 96)}...` : profile.jvmArgsDefault) : 'default (global)'}
+                          JVM: {profile.jvmArgsDefault ? (profile.jvmArgsDefault.length > 96 ? `${profile.jvmArgsDefault.slice(0, 96)}...` : profile.jvmArgsDefault) : 'по умолчанию (глобально)'}
                         </small>
                         <small>
-                          game: {profile.gameArgsDefault ? (profile.gameArgsDefault.length > 96 ? `${profile.gameArgsDefault.slice(0, 96)}...` : profile.gameArgsDefault) : 'default (global)'}
+                          Game: {profile.gameArgsDefault ? (profile.gameArgsDefault.length > 96 ? `${profile.gameArgsDefault.slice(0, 96)}...` : profile.gameArgsDefault) : 'по умолчанию (глобально)'}
                         </small>
-                        <small>bundled Java: {profile.bundledJavaPath || 'not set'}</small>
-                        <small>runtime key: {profile.bundledRuntimeKey || 'not set'}</small>
+                        <small>Встроенная Java: {profile.bundledJavaPath || 'не задано'}</small>
+                        <small>Ключ runtime: {profile.bundledRuntimeKey || 'не задано'}</small>
                         <small>
-                          runtime meta: {profile.bundledRuntimeSizeBytes > 0 ? formatBytes(profile.bundledRuntimeSizeBytes) : 'n/a'}
+                          Метаданные runtime: {profile.bundledRuntimeSizeBytes > 0 ? formatBytes(profile.bundledRuntimeSizeBytes) : 'n/a'}
                           {profile.bundledRuntimeContentType ? ` | ${profile.bundledRuntimeContentType}` : ''}
                           {profile.bundledRuntimeSha256 ? ` | sha256 ${profile.bundledRuntimeSha256.slice(0, 12)}...` : ''}
                         </small>
-                        <small>build: {profile.latestBuildId || 'none'}</small>
+                        <small>Сборка: {profile.latestBuildId || 'нет'}</small>
                       </span>
                       <div>
-                        <button onClick={() => onProfileRebuild(profile.id)}>Rebuild</button>
-                        <button onClick={() => onProfileEdit(profile)}>Edit</button>
-                        <button onClick={() => onProfileDelete(profile.id)}>Delete</button>
+                        <button onClick={() => onProfileRebuild(profile.id)}>Пересобрать</button>
+                        <button onClick={() => onProfileEdit(profile)}>Изменить</button>
+                        <button onClick={() => onProfileDelete(profile.id)}>Удалить</button>
                       </div>
                     </li>
                   ))}
