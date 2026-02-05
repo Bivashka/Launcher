@@ -57,12 +57,13 @@ var adminOrigins = adminOriginsRaw?
     .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
     ?? ["http://localhost:5173"];
 var allowAnyAdminOrigin = adminOrigins.Any(origin => origin == "*");
+var allowAnyAdminOriginInDevelopment = builder.Environment.IsDevelopment();
 
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AdminClient", policy =>
     {
-        if (allowAnyAdminOrigin)
+        if (allowAnyAdminOrigin || allowAnyAdminOriginInDevelopment)
         {
             policy.AllowAnyOrigin()
                 .AllowAnyHeader()

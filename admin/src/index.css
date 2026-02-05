@@ -1,5 +1,5 @@
 :root {
-  font-family: "Manrope", "Space Grotesk", "Segoe UI Variable", "Segoe UI", sans-serif;
+  font-family: "Sora", "IBM Plex Sans", "Segoe UI Variable", "Segoe UI", sans-serif;
   line-height: 1.4;
   font-weight: 400;
   font-synthesis: none;
@@ -16,9 +16,23 @@
 body {
   margin: 0;
   min-width: 320px;
+  position: relative;
   background:
-    radial-gradient(circle at 10% 12%, rgba(47, 107, 212, 0.35), transparent 34%),
-    radial-gradient(circle at 85% 18%, rgba(16, 190, 145, 0.2), transparent 30%),
-    radial-gradient(circle at 35% 100%, rgba(35, 77, 168, 0.32), transparent 42%),
-    #020716;
+    radial-gradient(circle at 12% 10%, rgba(45, 198, 255, 0.38), transparent 34%),
+    radial-gradient(circle at 86% 14%, rgba(255, 156, 66, 0.24), transparent 36%),
+    radial-gradient(circle at 64% 92%, rgba(22, 219, 176, 0.2), transparent 40%),
+    linear-gradient(148deg, #04132d 0%, #03112a 52%, #061836 100%);
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(151, 212, 255, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(151, 212, 255, 0.06) 1px, transparent 1px);
+  background-size: 34px 34px;
+  mask-image: radial-gradient(circle at center, black 34%, transparent 92%);
+  opacity: 0.28;
 }
