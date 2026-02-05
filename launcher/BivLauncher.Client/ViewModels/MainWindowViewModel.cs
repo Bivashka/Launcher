@@ -1,5 +1,6 @@
-using Avalonia;
+﻿using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
@@ -9,9 +10,13 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.Globalization;
+using System.Net;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace BivLauncher.Client.ViewModels;
 
@@ -23,9 +28,11 @@ public partial class MainWindowViewModel : ViewModelBase
     private readonly IGameLaunchService _gameLaunchService;
     private readonly IDiscordRpcService _discordRpcService;
     private readonly ILauncherUpdateService _launcherUpdateService;
+    private readonly IPendingSubmissionService _pendingSubmissionService;
     private readonly ILogService _logService;
     private readonly HttpClient _iconHttpClient = new() { Timeout = TimeSpan.FromSeconds(20) };
     private readonly Dictionary<string, IImage?> _iconCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, IImage?> _brandingImageCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly Queue<string> _liveLogLines = new();
     private const int MaxLiveLogLines = 500;
     private readonly string _currentLauncherVersion = GetCurrentLauncherVersion();
@@ -34,6 +41,7 @@ public partial class MainWindowViewModel : ViewModelBase
     private bool _isSyncingLanguageOption;
     private bool _isSyncingJavaModeOption;
     private bool _isSyncingRouteOption;
+    private bool _installTelemetrySent;
 
     private LauncherSettings _settings = new();
 
@@ -44,6 +52,7 @@ public partial class MainWindowViewModel : ViewModelBase
         IGameLaunchService gameLaunchService,
         IDiscordRpcService discordRpcService,
         ILauncherUpdateService launcherUpdateService,
+        IPendingSubmissionService pendingSubmissionService,
         ILogService logService)
     {
         _settingsService = settingsService;
@@ -52,6 +61,7 @@ public partial class MainWindowViewModel : ViewModelBase
         _gameLaunchService = gameLaunchService;
         _discordRpcService = discordRpcService;
         _launcherUpdateService = launcherUpdateService;
+        _pendingSubmissionService = pendingSubmissionService;
         _logService = logService;
 
         ManagedServers = new ObservableCollection<ManagedServerItem>();
@@ -69,6 +79,8 @@ public partial class MainWindowViewModel : ViewModelBase
         LaunchCommand = new AsyncRelayCommand(LaunchAsync, CanVerifyOrLaunch);
         CopyCrashCommand = new AsyncRelayCommand(CopyCrashAsync);
         OpenLogsFolderCommand = new RelayCommand(OpenLogsFolder);
+        ToggleSettingsCommand = new RelayCommand(ToggleSettings, CanToggleSettings);
+        CloseSettingsCommand = new RelayCommand(() => IsSettingsOpen = false);
         OpenUpdateUrlCommand = new RelayCommand(OpenUpdateUrl, CanOpenUpdateUrl);
         DownloadUpdateCommand = new AsyncRelayCommand(DownloadUpdateAsync, CanDownloadUpdate);
         InstallUpdateCommand = new AsyncRelayCommand(InstallUpdateAsync, CanInstallUpdate);
@@ -89,6 +101,8 @@ public partial class MainWindowViewModel : ViewModelBase
     public IAsyncRelayCommand LaunchCommand { get; }
     public IAsyncRelayCommand CopyCrashCommand { get; }
     public IRelayCommand OpenLogsFolderCommand { get; }
+    public IRelayCommand ToggleSettingsCommand { get; }
+    public IRelayCommand CloseSettingsCommand { get; }
     public IRelayCommand OpenUpdateUrlCommand { get; }
     public IAsyncRelayCommand DownloadUpdateCommand { get; }
     public IAsyncRelayCommand InstallUpdateCommand { get; }
@@ -97,10 +111,62 @@ public partial class MainWindowViewModel : ViewModelBase
     private string _productName = "BivLauncher";
 
     [ObservableProperty]
-    private string _tagline = "Управляемый лаунчер";
+    private string _tagline = "РЈРїСЂР°РІР»СЏРµРјС‹Р№ Р»Р°СѓРЅС‡РµСЂ";
 
     [ObservableProperty]
-    private string _statusText = "Загрузка...";
+    private IBrush _launcherBackgroundBrush = new LinearGradientBrush
+    {
+        StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
+        EndPoint = new RelativePoint(1, 1, RelativeUnit.Relative),
+        GradientStops = new GradientStops
+        {
+            new GradientStop(Color.Parse("#07111E"), 0),
+            new GradientStop(Color.Parse("#0C1C30"), 0.55),
+            new GradientStop(Color.Parse("#0A1524"), 1)
+        }
+    };
+
+    [ObservableProperty]
+    private IBrush _heroBackgroundBrush = new LinearGradientBrush
+    {
+        StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
+        EndPoint = new RelativePoint(1, 0, RelativeUnit.Relative),
+        GradientStops = new GradientStops
+        {
+            new GradientStop(Color.Parse("#103357"), 0),
+            new GradientStop(Color.Parse("#17416E"), 1)
+        }
+    };
+
+    [ObservableProperty]
+    private IBrush _heroBorderBrush = new SolidColorBrush(Color.Parse("#4A7098"));
+
+    [ObservableProperty]
+    private IBrush _loginCardBackgroundBrush = new SolidColorBrush(Color.Parse("#121F34"));
+
+    [ObservableProperty]
+    private IBrush _loginCardBorderBrush = new SolidColorBrush(Color.Parse("#2E557F"));
+
+    [ObservableProperty]
+    private IBrush _playButtonBackgroundBrush = new SolidColorBrush(Color.Parse("#1F8F63"));
+
+    [ObservableProperty]
+    private IBrush _playButtonBorderBrush = new SolidColorBrush(Color.Parse("#4EC598"));
+
+    [ObservableProperty]
+    private IImage? _brandingBackgroundImage;
+
+    [ObservableProperty]
+    private double _brandingBackgroundOverlayOpacity = 0.55;
+
+    [ObservableProperty]
+    private HorizontalAlignment _loginCardHorizontalAlignment = HorizontalAlignment.Center;
+
+    [ObservableProperty]
+    private double _loginCardWidth = 460;
+
+    [ObservableProperty]
+    private string _statusText = "Р—Р°РіСЂСѓР·РєР°...";
 
     [ObservableProperty]
     private bool _isBusy;
@@ -157,13 +223,28 @@ public partial class MainWindowViewModel : ViewModelBase
     private string _playerPassword = string.Empty;
 
     [ObservableProperty]
+    private string _playerTwoFactorCode = string.Empty;
+
+    [ObservableProperty]
     private string _playerLoggedInAs = string.Empty;
 
     [ObservableProperty]
-    private string _authStatusText = "Не выполнен вход.";
+    private string _authStatusText = "РќРµ РІС‹РїРѕР»РЅРµРЅ РІС…РѕРґ.";
 
     [ObservableProperty]
     private bool _isPlayerLoggedIn;
+
+    [ObservableProperty]
+    private bool _isTwoFactorStepActive;
+
+    [ObservableProperty]
+    private string _twoFactorSetupSecret = string.Empty;
+
+    [ObservableProperty]
+    private string _twoFactorSetupUri = string.Empty;
+
+    [ObservableProperty]
+    private bool _isSettingsOpen;
 
     [ObservableProperty]
     private bool _hasSkin;
@@ -209,7 +290,9 @@ public partial class MainWindowViewModel : ViewModelBase
     public string AccountHeaderText => T("header.account");
     public string UsernameLabelText => T("label.username");
     public string PasswordLabelText => T("label.password");
-    public string LoginButtonText => T("button.login");
+    public string TwoFactorCodeLabelText => T("label.twoFactorCode");
+    public string LoginButtonText => IsTwoFactorStepActive ? T("button.verifyTwoFactor") : T("button.login");
+    public string TwoFactorHintText => BuildTwoFactorHintText();
     public string SkinStatusText => F("status.skin", BoolWord(HasSkin));
     public string CapeStatusText => F("status.cape", BoolWord(HasCape));
     public string RuntimeHeaderText => T("header.runtime");
@@ -244,6 +327,9 @@ public partial class MainWindowViewModel : ViewModelBase
         : UpdateDownloadStatusText;
     public bool HasUpdateReleaseNotes => !string.IsNullOrWhiteSpace(UpdateReleaseNotes);
     public bool IsUpdatePackageReady => !string.IsNullOrWhiteSpace(DownloadedUpdatePackagePath) && File.Exists(DownloadedUpdatePackagePath);
+    public bool HasBrandingBackgroundImage => BrandingBackgroundImage is not null;
+    public bool IsLoginRequired => !IsPlayerLoggedIn;
+    public bool IsLauncherReady => IsPlayerLoggedIn;
 
     public async Task InitializeAsync()
     {
@@ -264,6 +350,10 @@ public partial class MainWindowViewModel : ViewModelBase
         JavaMode = NormalizeJavaMode(_settings.JavaMode);
         SyncSelectedJavaModeOption();
         PlayerUsername = _settings.LastPlayerUsername;
+        PlayerTwoFactorCode = string.Empty;
+        IsTwoFactorStepActive = false;
+        TwoFactorSetupSecret = string.Empty;
+        TwoFactorSetupUri = string.Empty;
         AuthStatusText = T("status.notLoggedIn");
 
         await RefreshAsync();
@@ -279,6 +369,7 @@ public partial class MainWindowViewModel : ViewModelBase
         LaunchCommand.NotifyCanExecuteChanged();
         DownloadUpdateCommand.NotifyCanExecuteChanged();
         InstallUpdateCommand.NotifyCanExecuteChanged();
+        ToggleSettingsCommand.NotifyCanExecuteChanged();
     }
 
     partial void OnSelectedServerChanged(ManagedServerItem? value)
@@ -356,6 +447,22 @@ public partial class MainWindowViewModel : ViewModelBase
         OnPropertyChanged(nameof(SelectedNewsBody));
     }
 
+    partial void OnIsTwoFactorStepActiveChanged(bool value)
+    {
+        OnPropertyChanged(nameof(LoginButtonText));
+        OnPropertyChanged(nameof(TwoFactorHintText));
+    }
+
+    partial void OnTwoFactorSetupSecretChanged(string value)
+    {
+        OnPropertyChanged(nameof(TwoFactorHintText));
+    }
+
+    partial void OnTwoFactorSetupUriChanged(string value)
+    {
+        OnPropertyChanged(nameof(TwoFactorHintText));
+    }
+
     partial void OnIsUpdateAvailableChanged(bool value)
     {
         OnPropertyChanged(nameof(UpdateAvailabilityText));
@@ -402,6 +509,11 @@ public partial class MainWindowViewModel : ViewModelBase
     partial void OnUpdateDownloadProgressPercentChanged(int value)
     {
         OnPropertyChanged(nameof(UpdateDownloadProgressText));
+    }
+
+    partial void OnBrandingBackgroundImageChanged(IImage? value)
+    {
+        OnPropertyChanged(nameof(HasBrandingBackgroundImage));
     }
 
     partial void OnJavaModeChanged(string value)
@@ -461,13 +573,13 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             StatusText = T("status.fetchingBootstrap");
             var bootstrap = await _launcherApiService.GetBootstrapAsync(ApiBaseUrl);
+            await FlushPendingSubmissionsAsync();
+            await TrySubmitInstallTelemetryAsync(bootstrap);
 
-            ProductName = string.IsNullOrWhiteSpace(bootstrap.Branding.ProductName)
-                ? "BivLauncher"
-                : bootstrap.Branding.ProductName;
-            Tagline = string.IsNullOrWhiteSpace(bootstrap.Branding.Tagline)
-                ? T("tagline.default")
-                : bootstrap.Branding.Tagline;
+            await ApplyBrandingAsync(ApiBaseUrl, bootstrap.Branding);
+            var discordRpcEnabled = bootstrap.Constraints.DiscordRpcEnabled;
+            var discordRpcPrivacyMode = bootstrap.Constraints.DiscordRpcPrivacyMode;
+            _discordRpcService.ConfigurePolicy(discordRpcEnabled, discordRpcPrivacyMode, ProductName);
             ApplyLauncherUpdateInfo(bootstrap.LauncherUpdate);
 
             var totalMemoryMb = GetTotalAvailableMemoryMb();
@@ -483,6 +595,11 @@ public partial class MainWindowViewModel : ViewModelBase
                 foreach (var server in orderedServers)
                 {
                     var rpc = server.DiscordRpc ?? profile.DiscordRpc;
+                    var effectiveRpcEnabled = (rpc?.Enabled ?? false) && discordRpcEnabled;
+                    var effectiveRpcDetails = discordRpcPrivacyMode ? string.Empty : (rpc?.DetailsText ?? string.Empty);
+                    var effectiveRpcState = discordRpcPrivacyMode ? string.Empty : (rpc?.StateText ?? string.Empty);
+                    var effectiveRpcLargeText = discordRpcPrivacyMode ? string.Empty : (rpc?.LargeImageText ?? string.Empty);
+                    var effectiveRpcSmallText = discordRpcPrivacyMode ? string.Empty : (rpc?.SmallImageText ?? string.Empty);
                     var icon = await ResolveServerIconAsync(ApiBaseUrl, server.IconUrl, profile.IconUrl);
                     allServers.Add(new ManagedServerItem
                     {
@@ -502,18 +619,18 @@ public partial class MainWindowViewModel : ViewModelBase
                         McVersion = server.McVersion,
                         RecommendedRamMb = profile.RecommendedRamMb,
                         DiscordRpcAppId = rpc?.AppId ?? string.Empty,
-                        DiscordRpcDetails = rpc?.DetailsText ?? string.Empty,
-                        DiscordRpcState = rpc?.StateText ?? string.Empty,
+                        DiscordRpcDetails = effectiveRpcDetails,
+                        DiscordRpcState = effectiveRpcState,
                         DiscordRpcLargeImageKey = rpc?.LargeImageKey ?? string.Empty,
-                        DiscordRpcLargeImageText = rpc?.LargeImageText ?? string.Empty,
+                        DiscordRpcLargeImageText = effectiveRpcLargeText,
                         DiscordRpcSmallImageKey = rpc?.SmallImageKey ?? string.Empty,
-                        DiscordRpcSmallImageText = rpc?.SmallImageText ?? string.Empty,
-                        DiscordRpcEnabled = rpc?.Enabled ?? false,
+                        DiscordRpcSmallImageText = effectiveRpcSmallText,
+                        DiscordRpcEnabled = effectiveRpcEnabled,
                         DiscordPreview = BuildDiscordPreview(
-                            rpc?.Enabled ?? false,
+                            effectiveRpcEnabled,
                             rpc?.AppId ?? string.Empty,
-                            rpc?.DetailsText ?? string.Empty,
-                            rpc?.StateText ?? string.Empty),
+                            effectiveRpcDetails,
+                            effectiveRpcState),
                         Icon = icon
                     });
                 }
@@ -608,53 +725,349 @@ public partial class MainWindowViewModel : ViewModelBase
             HasCrash = false;
             CrashSummary = string.Empty;
 
-            await SaveSettingsAsync();
+            var selectedServer = SelectedServer;
+            LauncherManifest? manifest = null;
+            GameLaunchRoute? launchRoute = null;
+            LaunchResult? launchResult = null;
+            Exception? launchException = null;
+            var occurredAtUtc = DateTime.UtcNow;
 
-            StatusText = T("status.fetchingManifest");
-            var manifest = await _launcherApiService.GetManifestAsync(ApiBaseUrl, SelectedServer.ProfileSlug);
-
-            var progress = new Progress<InstallProgressInfo>(info =>
-            {
-                var currentPath = string.IsNullOrWhiteSpace(info.CurrentFilePath) ? info.Message : info.CurrentFilePath;
-                StatusText = F("status.verifyingProgress", info.ProcessedFiles, info.TotalFiles, currentPath);
-            });
-
-            var installResult = await _manifestInstallerService.VerifyAndInstallAsync(
-                ApiBaseUrl,
-                manifest,
-                InstallDirectory,
-                progress);
-
-            StatusText = T("status.launchingJava");
-            var launchRoute = ResolveLaunchRoute(SelectedServer);
-            _discordRpcService.SetLaunchingPresence(SelectedServer);
-            LaunchResult launchResult;
             try
             {
-                _discordRpcService.SetInGamePresence(SelectedServer);
-                launchResult = await _gameLaunchService.LaunchAsync(
-                    manifest,
-                    BuildSettingsSnapshot(),
-                    launchRoute,
-                    installResult.InstanceDirectory,
-                    line => _logService.LogInfo(line));
-            }
-            finally
-            {
-                _discordRpcService.UpdateIdlePresence(SelectedServer);
-            }
+                await SaveSettingsAsync();
 
-            if (launchResult.Success)
+                StatusText = T("status.fetchingManifest");
+                manifest = await _launcherApiService.GetManifestAsync(ApiBaseUrl, selectedServer.ProfileSlug);
+
+                var progress = new Progress<InstallProgressInfo>(info =>
+                {
+                    var currentPath = string.IsNullOrWhiteSpace(info.CurrentFilePath) ? info.Message : info.CurrentFilePath;
+                    StatusText = F("status.verifyingProgress", info.ProcessedFiles, info.TotalFiles, currentPath);
+                });
+
+                var installResult = await _manifestInstallerService.VerifyAndInstallAsync(
+                    ApiBaseUrl,
+                    manifest,
+                    InstallDirectory,
+                    progress);
+
+                StatusText = T("status.launchingJava");
+                launchRoute = ResolveLaunchRoute(selectedServer);
+                _discordRpcService.SetLaunchingPresence(selectedServer);
+
+                try
+                {
+                    _discordRpcService.SetInGamePresence(selectedServer);
+                    launchResult = await _gameLaunchService.LaunchAsync(
+                        manifest,
+                        BuildSettingsSnapshot(),
+                        launchRoute,
+                        installResult.InstanceDirectory,
+                        line => _logService.LogInfo(line));
+                }
+                finally
+                {
+                    _discordRpcService.UpdateIdlePresence(selectedServer);
+                }
+
+                if (launchResult.Success)
+                {
+                    StatusText = T("status.gameExitedNormally");
+                    return;
+                }
+            }
+            catch (Exception ex)
             {
-                StatusText = T("status.gameExitedNormally");
-                return;
+                launchException = ex;
+                _logService.LogError(ex.ToString());
             }
 
             HasCrash = true;
-            var recentLines = _logService.GetRecentLines(40);
-            CrashSummary = string.Join(Environment.NewLine, recentLines);
-            StatusText = F("status.gameExitedCode", launchResult.ExitCode);
+            var fullLogExcerpt = string.Join(Environment.NewLine, _logService.GetRecentLines(120));
+            var crashLines = _logService.GetRecentLines(60);
+            CrashSummary = string.Join(Environment.NewLine, crashLines);
+
+            var reason = BuildCrashReason(launchResult?.ExitCode, launchException);
+            StatusText = launchResult is not null
+                ? F("status.gameExitedCode", launchResult.ExitCode)
+                : F("status.error", reason);
+
+            var crashId = await TrySubmitCrashReportAsync(
+                selectedServer,
+                manifest,
+                launchRoute,
+                launchResult,
+                launchException,
+                fullLogExcerpt,
+                occurredAtUtc);
+
+            if (!string.IsNullOrWhiteSpace(crashId))
+            {
+                StatusText = $"{StatusText} Crash ID: {crashId}";
+            }
         });
+    }
+
+    private async Task<string> TrySubmitCrashReportAsync(
+        ManagedServerItem server,
+        LauncherManifest? manifest,
+        GameLaunchRoute? launchRoute,
+        LaunchResult? launchResult,
+        Exception? launchException,
+        string logExcerpt,
+        DateTime occurredAtUtc)
+    {
+        var reason = BuildCrashReason(launchResult?.ExitCode, launchException);
+        var errorType = launchException?.GetType().Name ?? InferCrashErrorType(reason, logExcerpt);
+        var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["loaderType"] = manifest?.LoaderType ?? server.LoaderType,
+            ["mcVersion"] = manifest?.McVersion ?? server.McVersion,
+            ["launchMode"] = manifest?.LaunchMode ?? string.Empty,
+            ["routeAddress"] = launchRoute?.Address ?? string.Empty,
+            ["routePort"] = launchRoute?.Port.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+            ["javaExecutable"] = launchResult?.JavaExecutable ?? string.Empty
+        }
+        .Where(x => !string.IsNullOrWhiteSpace(x.Value))
+        .ToDictionary(x => x.Key, x => x.Value, StringComparer.OrdinalIgnoreCase);
+
+        var request = new PublicCrashReportCreateRequest
+        {
+            ProfileSlug = server.ProfileSlug,
+            ServerName = server.ServerName,
+            RouteCode = launchRoute?.RouteCode ?? GetSelectedRouteCode(server.ProfileSlug),
+            LauncherVersion = _currentLauncherVersion,
+            OsVersion = Environment.OSVersion.VersionString,
+            JavaVersion = ResolveJavaVersion(launchResult, manifest, logExcerpt),
+            ExitCode = launchResult?.ExitCode,
+            Reason = reason,
+            ErrorType = errorType,
+            LogExcerpt = logExcerpt,
+            OccurredAtUtc = occurredAtUtc,
+            Metadata = JsonSerializer.SerializeToElement(metadata)
+        };
+
+        try
+        {
+            var response = await _launcherApiService.SubmitCrashReportAsync(ApiBaseUrl, request);
+
+            _logService.LogInfo($"Crash report sent: {response.CrashId}");
+            return response.CrashId;
+        }
+        catch (Exception ex)
+        {
+            _logService.LogError($"Crash report upload failed: {ex.Message}");
+
+            try
+            {
+                await _pendingSubmissionService.EnqueueCrashReportAsync(ApiBaseUrl, request);
+                _logService.LogInfo("Crash report queued for retry.");
+            }
+            catch (Exception queueEx)
+            {
+                _logService.LogError($"Crash report queueing failed: {queueEx.Message}");
+            }
+
+            return string.Empty;
+        }
+    }
+
+    private async Task TrySubmitInstallTelemetryAsync(BootstrapResponse bootstrap)
+    {
+        if (_installTelemetrySent || !bootstrap.Constraints.InstallTelemetryEnabled)
+        {
+            return;
+        }
+
+        var projectName = string.IsNullOrWhiteSpace(bootstrap.Branding.ProductName)
+            ? "unknown"
+            : bootstrap.Branding.ProductName.Trim();
+        if (string.IsNullOrWhiteSpace(projectName))
+        {
+            return;
+        }
+
+        var request = new PublicInstallTelemetryTrackRequest
+        {
+            ProjectName = projectName,
+            LauncherVersion = _currentLauncherVersion
+        };
+
+        try
+        {
+            var response = await _launcherApiService.SubmitInstallTelemetryAsync(ApiBaseUrl, request);
+
+            if (response.Accepted || !response.Enabled)
+            {
+                _installTelemetrySent = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logService.LogError($"Install telemetry upload failed: {ex.Message}");
+
+            try
+            {
+                await _pendingSubmissionService.EnqueueInstallTelemetryAsync(ApiBaseUrl, request);
+                _installTelemetrySent = true;
+                _logService.LogInfo("Install telemetry queued for retry.");
+            }
+            catch (Exception queueEx)
+            {
+                _logService.LogError($"Install telemetry queueing failed: {queueEx.Message}");
+            }
+        }
+    }
+
+    private async Task FlushPendingSubmissionsAsync()
+    {
+        var result = await _pendingSubmissionService.FlushAsync(async (item, cancellationToken) =>
+        {
+            if (item.Type.Equals(PendingSubmissionTypes.CrashReport, StringComparison.OrdinalIgnoreCase))
+            {
+                if (item.CrashReport is null)
+                {
+                    return true;
+                }
+
+                var response = await _launcherApiService.SubmitCrashReportAsync(
+                    item.ApiBaseUrl,
+                    item.CrashReport,
+                    cancellationToken);
+                _logService.LogInfo($"Queued crash report sent: {response.CrashId}");
+                return true;
+            }
+
+            if (item.Type.Equals(PendingSubmissionTypes.InstallTelemetry, StringComparison.OrdinalIgnoreCase))
+            {
+                if (item.InstallTelemetry is null)
+                {
+                    return true;
+                }
+
+                var response = await _launcherApiService.SubmitInstallTelemetryAsync(
+                    item.ApiBaseUrl,
+                    item.InstallTelemetry,
+                    cancellationToken);
+
+                if (response.Accepted || !response.Enabled)
+                {
+                    _installTelemetrySent = true;
+                }
+
+                return true;
+            }
+
+            return true;
+        });
+
+        if (result.SentCount == 0 && result.DroppedCount == 0)
+        {
+            return;
+        }
+
+        _logService.LogInfo(
+            $"Pending submissions sync: sent={result.SentCount}, failed={result.FailedCount}, dropped={result.DroppedCount}, remaining={result.RemainingCount}.");
+    }
+
+    private static string BuildCrashReason(int? exitCode, Exception? launchException)
+    {
+        if (launchException is not null)
+        {
+            return $"{launchException.GetType().Name}: {launchException.Message}";
+        }
+
+        if (!exitCode.HasValue)
+        {
+            return "Unknown launch failure.";
+        }
+
+        return exitCode.Value switch
+        {
+            0 => "Process exited normally.",
+            -1073740791 => "Invalid Java or game launch arguments.",
+            -1073741819 => "Process access violation crash.",
+            _ => $"Process exited with code {exitCode.Value}."
+        };
+    }
+
+    private static string InferCrashErrorType(string reason, string logExcerpt)
+    {
+        var source = $"{reason} {logExcerpt}";
+        if (source.Contains("auth", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Auth";
+        }
+
+        if (source.Contains("timeout", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Timeout";
+        }
+
+        if (source.Contains("network", StringComparison.OrdinalIgnoreCase) ||
+            source.Contains("connection", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Network";
+        }
+
+        if (source.Contains("missing", StringComparison.OrdinalIgnoreCase) ||
+            source.Contains("not found", StringComparison.OrdinalIgnoreCase))
+        {
+            return "MissingDependency";
+        }
+
+        return "ProcessExit";
+    }
+
+    private static string ResolveJavaVersion(LaunchResult? launchResult, LauncherManifest? manifest, string logExcerpt)
+    {
+        var fromLogs = TryExtractJavaVersionFromLogs(logExcerpt);
+        if (!string.IsNullOrWhiteSpace(fromLogs))
+        {
+            return fromLogs;
+        }
+
+        var javaExecutable = launchResult?.JavaExecutable ?? string.Empty;
+        if (!string.IsNullOrWhiteSpace(javaExecutable) && File.Exists(javaExecutable))
+        {
+            try
+            {
+                var fileVersion = FileVersionInfo.GetVersionInfo(javaExecutable);
+                if (!string.IsNullOrWhiteSpace(fileVersion.ProductVersion))
+                {
+                    return fileVersion.ProductVersion.Trim();
+                }
+
+                if (!string.IsNullOrWhiteSpace(fileVersion.FileVersion))
+                {
+                    return fileVersion.FileVersion.Trim();
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        return manifest?.JavaRuntime?.Trim() ?? string.Empty;
+    }
+
+    private static string TryExtractJavaVersionFromLogs(string logExcerpt)
+    {
+        if (string.IsNullOrWhiteSpace(logExcerpt))
+        {
+            return string.Empty;
+        }
+
+        var match = Regex.Match(
+            logExcerpt,
+            "(?im)\\b(?:java|openjdk)\\s+version\\s+\"([^\"]+)\"",
+            RegexOptions.CultureInvariant);
+        if (!match.Success || match.Groups.Count < 2)
+        {
+            return string.Empty;
+        }
+
+        return match.Groups[1].Value.Trim();
     }
 
     private async Task SaveSettingsAsync()
@@ -735,15 +1148,34 @@ public partial class MainWindowViewModel : ViewModelBase
             }
 
             AuthStatusText = T("status.authorizing");
+            StatusText = AuthStatusText;
 
             var response = await _launcherApiService.LoginAsync(ApiBaseUrl, new PublicAuthLoginRequest
             {
                 Username = username,
                 Password = PlayerPassword,
-                HwidFingerprint = ComputeHwidFingerprint()
+                HwidFingerprint = ComputeHwidFingerprint(),
+                TwoFactorCode = PlayerTwoFactorCode.Trim()
             });
 
+            if (response.RequiresTwoFactor)
+            {
+                IsTwoFactorStepActive = true;
+                TwoFactorSetupSecret = response.TwoFactorSecret.Trim();
+                TwoFactorSetupUri = response.TwoFactorProvisioningUri.Trim();
+                AuthStatusText = string.IsNullOrWhiteSpace(response.Message)
+                    ? T("status.twoFactorRequired")
+                    : response.Message.Trim();
+                StatusText = AuthStatusText;
+                return;
+            }
+
             IsPlayerLoggedIn = true;
+            IsSettingsOpen = false;
+            IsTwoFactorStepActive = false;
+            TwoFactorSetupSecret = string.Empty;
+            TwoFactorSetupUri = string.Empty;
+            PlayerTwoFactorCode = string.Empty;
             PlayerLoggedInAs = response.Username;
             PlayerPassword = string.Empty;
             var hasSkin = await _launcherApiService.HasSkinAsync(ApiBaseUrl, response.Username);
@@ -751,6 +1183,7 @@ public partial class MainWindowViewModel : ViewModelBase
             HasSkin = hasSkin;
             HasCape = hasCape;
             AuthStatusText = F("status.loggedInAs", response.Username, string.Join(", ", response.Roles));
+            StatusText = T("status.ready");
             _logService.LogInfo($"Player login success: {response.Username} ({response.ExternalId})");
         });
     }
@@ -788,7 +1221,7 @@ public partial class MainWindowViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            StatusText = F("status.error", ex.Message);
+            StatusText = BuildStatusErrorText(ex);
             _logService.LogError(ex.ToString());
         }
         finally
@@ -801,13 +1234,37 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         VerifyFilesCommand.NotifyCanExecuteChanged();
         LaunchCommand.NotifyCanExecuteChanged();
+        ToggleSettingsCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(IsLoginRequired));
+        OnPropertyChanged(nameof(IsLauncherReady));
 
         if (!value)
         {
+            IsSettingsOpen = false;
+            IsTwoFactorStepActive = false;
+            TwoFactorSetupSecret = string.Empty;
+            TwoFactorSetupUri = string.Empty;
+            PlayerTwoFactorCode = string.Empty;
             HasSkin = false;
             HasCape = false;
             AuthStatusText = T("status.notLoggedIn");
         }
+    }
+
+    private bool CanToggleSettings()
+    {
+        return IsLauncherReady && !IsBusy;
+    }
+
+    private void ToggleSettings()
+    {
+        if (!CanToggleSettings())
+        {
+            IsSettingsOpen = false;
+            return;
+        }
+
+        IsSettingsOpen = !IsSettingsOpen;
     }
 
     private bool CanOpenUpdateUrl()
@@ -880,7 +1337,7 @@ public partial class MainWindowViewModel : ViewModelBase
         catch (Exception ex)
         {
             UpdateDownloadStatusText = $"Download failed: {ex.Message}";
-            StatusText = F("status.error", ex.Message);
+            StatusText = BuildStatusErrorText(ex);
             _logService.LogError(ex.ToString());
         }
         finally
@@ -913,7 +1370,7 @@ public partial class MainWindowViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            StatusText = F("status.error", ex.Message);
+            StatusText = BuildStatusErrorText(ex);
             UpdateDownloadStatusText = $"Install failed: {ex.Message}";
             _logService.LogError(ex.ToString());
         }
@@ -937,7 +1394,7 @@ public partial class MainWindowViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            StatusText = F("status.error", ex.Message);
+            StatusText = BuildStatusErrorText(ex);
             _logService.LogError(ex.ToString());
         }
     }
@@ -959,6 +1416,99 @@ public partial class MainWindowViewModel : ViewModelBase
         }
 
         throw new InvalidOperationException("Cannot determine launcher executable path. Run published launcher build.");
+    }
+
+    private async Task ApplyBrandingAsync(string apiBaseUrl, BrandingConfig? branding)
+    {
+        branding ??= new BrandingConfig();
+
+        ProductName = string.IsNullOrWhiteSpace(branding.ProductName)
+            ? "BivLauncher"
+            : branding.ProductName.Trim();
+        Tagline = string.IsNullOrWhiteSpace(branding.Tagline)
+            ? T("tagline.default")
+            : branding.Tagline.Trim();
+
+        var primary = ParseColorOrFallback(branding.PrimaryColor, "#2F6FED");
+        var accent = ParseColorOrFallback(branding.AccentColor, "#20C997");
+        var deep = ParseColorOrFallback("#07111E", "#07111E");
+        var panelBase = ParseColorOrFallback("#121F34", "#121F34");
+        var cardBorderBase = ParseColorOrFallback("#2E557F", "#2E557F");
+
+        LauncherBackgroundBrush = new LinearGradientBrush
+        {
+            StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
+            EndPoint = new RelativePoint(1, 1, RelativeUnit.Relative),
+            GradientStops = new GradientStops
+            {
+                new GradientStop(BlendColors(primary, deep, 0.78), 0),
+                new GradientStop(BlendColors(primary, deep, 0.88), 0.55),
+                new GradientStop(BlendColors(accent, deep, 0.9), 1)
+            }
+        };
+
+        HeroBackgroundBrush = new LinearGradientBrush
+        {
+            StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
+            EndPoint = new RelativePoint(1, 0, RelativeUnit.Relative),
+            GradientStops = new GradientStops
+            {
+                new GradientStop(BlendColors(primary, Colors.White, 0.18), 0),
+                new GradientStop(BlendColors(primary, deep, 0.42), 1)
+            }
+        };
+
+        HeroBorderBrush = new SolidColorBrush(BlendColors(primary, accent, 0.35));
+        LoginCardBackgroundBrush = new SolidColorBrush(BlendColors(panelBase, primary, 0.24));
+        LoginCardBorderBrush = new SolidColorBrush(BlendColors(cardBorderBase, primary, 0.35));
+        PlayButtonBackgroundBrush = new SolidColorBrush(BlendColors(accent, deep, 0.28));
+        PlayButtonBorderBrush = new SolidColorBrush(BlendColors(accent, Colors.White, 0.26));
+
+        BrandingBackgroundOverlayOpacity = Math.Clamp(branding.BackgroundOverlayOpacity, 0, 0.95);
+        LoginCardHorizontalAlignment = ParseLoginCardAlignment(branding.LoginCardPosition);
+
+        var requestedWidth = branding.LoginCardWidth <= 0 ? 460 : branding.LoginCardWidth;
+        LoginCardWidth = Math.Clamp(requestedWidth, 340, 640);
+
+        BrandingBackgroundImage = await ResolveBrandingImageAsync(apiBaseUrl, branding.BackgroundImageUrl);
+    }
+
+    private static HorizontalAlignment ParseLoginCardAlignment(string? raw)
+    {
+        var normalized = (raw ?? string.Empty).Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "left" => HorizontalAlignment.Left,
+            "right" => HorizontalAlignment.Right,
+            _ => HorizontalAlignment.Center
+        };
+    }
+
+    private static Color ParseColorOrFallback(string? value, string fallbackHex)
+    {
+        if (!string.IsNullOrWhiteSpace(value) &&
+            Color.TryParse(value.Trim(), out var parsed))
+        {
+            return parsed;
+        }
+
+        return Color.Parse(fallbackHex);
+    }
+
+    private static Color BlendColors(Color from, Color to, double ratio)
+    {
+        var clamped = Math.Clamp(ratio, 0, 1);
+        return Color.FromArgb(
+            Lerp(from.A, to.A, clamped),
+            Lerp(from.R, to.R, clamped),
+            Lerp(from.G, to.G, clamped),
+            Lerp(from.B, to.B, clamped));
+    }
+
+    private static byte Lerp(byte from, byte to, double ratio)
+    {
+        var value = from + ((to - from) * ratio);
+        return (byte)Math.Clamp((int)Math.Round(value), 0, 255);
     }
 
     private void ApplyLauncherUpdateInfo(LauncherUpdateInfo? updateInfo)
@@ -1117,6 +1667,44 @@ public partial class MainWindowViewModel : ViewModelBase
         return value.Trim().ToLowerInvariant();
     }
 
+    private string BuildTwoFactorHintText()
+    {
+        if (!IsTwoFactorStepActive)
+        {
+            return string.Empty;
+        }
+
+        if (string.IsNullOrWhiteSpace(TwoFactorSetupSecret))
+        {
+            return T("status.twoFactorRequired");
+        }
+
+        if (string.IsNullOrWhiteSpace(TwoFactorSetupUri))
+        {
+            return F("status.twoFactorSetupSecret", TwoFactorSetupSecret);
+        }
+
+        return F("status.twoFactorSetup", TwoFactorSetupSecret, TwoFactorSetupUri);
+    }
+
+    private string BuildStatusErrorText(Exception ex)
+    {
+        if (ex is LauncherApiException apiException &&
+            apiException.StatusCode == HttpStatusCode.TooManyRequests)
+        {
+            if (apiException.RetryAfter is TimeSpan retryAfter &&
+                retryAfter > TimeSpan.Zero)
+            {
+                var retrySeconds = Math.Max(1, (int)Math.Ceiling(retryAfter.TotalSeconds));
+                return F("status.rateLimitedRetry", retrySeconds);
+            }
+
+            return T("status.rateLimited");
+        }
+
+        return F("status.error", ex.Message);
+    }
+
     private static string BuildNewsPreview(string body)
     {
         if (string.IsNullOrWhiteSpace(body))
@@ -1187,6 +1775,37 @@ public partial class MainWindowViewModel : ViewModelBase
         }
 
         return null;
+    }
+
+    private async Task<IImage?> ResolveBrandingImageAsync(string apiBaseUrl, string? brandingImageUrl)
+    {
+        var absoluteUrl = ToAbsoluteUrl(apiBaseUrl, brandingImageUrl);
+        if (string.IsNullOrWhiteSpace(absoluteUrl))
+        {
+            return null;
+        }
+
+        if (_brandingImageCache.TryGetValue(absoluteUrl, out var cached))
+        {
+            return cached;
+        }
+
+        try
+        {
+            await using var stream = await _iconHttpClient.GetStreamAsync(absoluteUrl);
+            using var memory = new MemoryStream();
+            await stream.CopyToAsync(memory);
+            memory.Position = 0;
+
+            var bitmap = new Bitmap(memory);
+            _brandingImageCache[absoluteUrl] = bitmap;
+            return bitmap;
+        }
+        catch
+        {
+            _brandingImageCache[absoluteUrl] = null;
+            return null;
+        }
     }
 
     private static string ToAbsoluteUrl(string apiBaseUrl, string? maybeUrl)
@@ -1406,7 +2025,9 @@ public partial class MainWindowViewModel : ViewModelBase
         OnPropertyChanged(nameof(AccountHeaderText));
         OnPropertyChanged(nameof(UsernameLabelText));
         OnPropertyChanged(nameof(PasswordLabelText));
+        OnPropertyChanged(nameof(TwoFactorCodeLabelText));
         OnPropertyChanged(nameof(LoginButtonText));
+        OnPropertyChanged(nameof(TwoFactorHintText));
         OnPropertyChanged(nameof(SkinStatusText));
         OnPropertyChanged(nameof(CapeStatusText));
         OnPropertyChanged(nameof(RuntimeHeaderText));
@@ -1440,3 +2061,4 @@ public partial class MainWindowViewModel : ViewModelBase
         return value ? T("common.yes") : T("common.no");
     }
 }
+

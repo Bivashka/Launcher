@@ -4,6 +4,8 @@ public sealed class S3Options
 {
     public const string SectionName = "S3";
 
+    public bool UseS3 { get; set; } = true;
+    public string LocalRootPath { get; set; } = "Storage";
     public string Endpoint { get; set; } = "http://localhost:9000";
     public string Bucket { get; set; } = "launcher-files";
     public string AccessKey { get; set; } = "minioadmin";

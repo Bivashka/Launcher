@@ -1,9 +1,11 @@
 using BivLauncher.Api.Contracts.Public;
 using BivLauncher.Api.Data;
 using BivLauncher.Api.Data.Entities;
+using BivLauncher.Api.Options;
 using BivLauncher.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using System.Text.Json;
 
 namespace BivLauncher.Api.Controllers;
@@ -15,7 +17,9 @@ public sealed class PublicController(
     IBrandingProvider brandingProvider,
     IConfiguration configuration,
     IAssetUrlService assetUrlService,
-    IObjectStorageService objectStorageService) : ControllerBase
+    IObjectStorageService objectStorageService,
+    IOptions<InstallTelemetryOptions> installTelemetryOptions,
+    IOptions<DiscordRpcOptions> discordRpcOptions) : ControllerBase
 {
     [HttpGet("bootstrap")]
     public async Task<ActionResult<BootstrapResponse>> Bootstrap(CancellationToken cancellationToken)
@@ -37,13 +41,6 @@ public sealed class PublicController(
                 (x.ScopeType == "server" && serverIds.Contains(x.ScopeId)))
             .ToListAsync(cancellationToken);
 
-        var profileDiscord = discordConfigs
-            .Where(x => x.ScopeType == "profile")
-            .ToDictionary(x => x.ScopeId, MapDiscord);
-        var serverDiscord = discordConfigs
-            .Where(x => x.ScopeType == "server")
-            .ToDictionary(x => x.ScopeId, MapDiscord);
-
         var news = await dbContext.NewsItems
             .AsNoTracking()
             .Where(x => x.Enabled)
@@ -56,6 +53,18 @@ public sealed class PublicController(
         var publicBaseUrl = configuration["PUBLIC_BASE_URL"]
             ?? configuration["PublicBaseUrl"]
             ?? "http://localhost:8080";
+        var installTelemetryEnabled = await ResolveInstallTelemetryEnabledAsync(cancellationToken);
+        var discordRpcSettings = await ResolveDiscordRpcSettingsAsync(cancellationToken);
+        var profileDiscord = discordConfigs
+            .Where(x => x.ScopeType == "profile")
+            .ToDictionary(
+                x => x.ScopeId,
+                x => MapDiscord(x, discordRpcSettings.Enabled, discordRpcSettings.PrivacyMode));
+        var serverDiscord = discordConfigs
+            .Where(x => x.ScopeType == "server")
+            .ToDictionary(
+                x => x.ScopeId,
+                x => MapDiscord(x, discordRpcSettings.Enabled, discordRpcSettings.PrivacyMode));
 
         var response = new BootstrapResponse(
             PublicBaseUrl: publicBaseUrl,
@@ -63,7 +72,10 @@ public sealed class PublicController(
             Constraints: new LauncherConstraints(
                 ManagedLauncher: true,
                 MinRamMb: ResolvePositiveInt(configuration["Launcher:MinRamMb"], 1024),
-                ReservedSystemRamMb: ResolvePositiveInt(configuration["Launcher:ReservedSystemRamMb"], 1024)),
+                ReservedSystemRamMb: ResolvePositiveInt(configuration["Launcher:ReservedSystemRamMb"], 1024),
+                InstallTelemetryEnabled: installTelemetryEnabled,
+                DiscordRpcEnabled: discordRpcSettings.Enabled,
+                DiscordRpcPrivacyMode: discordRpcSettings.PrivacyMode),
             Profiles: profiles
                 .Select(profile => new BootstrapProfileDto(
                     Id: profile.Id,
@@ -202,17 +214,50 @@ public sealed class PublicController(
         return int.TryParse(rawValue, out var parsed) && parsed > 0 ? parsed : fallback;
     }
 
-    private static PublicDiscordRpcConfig MapDiscord(DiscordRpcConfig config)
+    private async Task<bool> ResolveInstallTelemetryEnabledAsync(CancellationToken cancellationToken)
     {
+        var stored = await dbContext.InstallTelemetryConfigs
+            .AsNoTracking()
+            .OrderByDescending(x => x.UpdatedAtUtc)
+            .Select(x => (bool?)x.Enabled)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return stored ?? installTelemetryOptions.Value.Enabled;
+    }
+
+    private async Task<(bool Enabled, bool PrivacyMode)> ResolveDiscordRpcSettingsAsync(CancellationToken cancellationToken)
+    {
+        var stored = await dbContext.DiscordRpcGlobalConfigs
+            .AsNoTracking()
+            .OrderByDescending(x => x.UpdatedAtUtc)
+            .Select(x => new { x.Enabled, x.PrivacyMode })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (stored is not null)
+        {
+            return (stored.Enabled, stored.PrivacyMode);
+        }
+
+        return (discordRpcOptions.Value.Enabled, discordRpcOptions.Value.PrivacyMode);
+    }
+
+    private static PublicDiscordRpcConfig MapDiscord(DiscordRpcConfig config, bool globallyEnabled, bool privacyMode)
+    {
+        var effectiveEnabled = globallyEnabled && config.Enabled;
+        var details = privacyMode ? string.Empty : config.DetailsText;
+        var state = privacyMode ? string.Empty : config.StateText;
+        var largeText = privacyMode ? string.Empty : config.LargeImageText;
+        var smallText = privacyMode ? string.Empty : config.SmallImageText;
+
         return new PublicDiscordRpcConfig(
-            config.Enabled,
+            effectiveEnabled,
             config.AppId,
-            config.DetailsText,
-            config.StateText,
+            details,
+            state,
             config.LargeImageKey,
-            config.LargeImageText,
+            largeText,
             config.SmallImageKey,
-            config.SmallImageText);
+            smallText);
     }
 
     private static LauncherUpdateInfo? ResolveLauncherUpdate(IConfiguration configuration)

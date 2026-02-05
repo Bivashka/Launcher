@@ -15,12 +15,19 @@ public sealed record BrandingConfig(
     string SupportUrl,
     string PrimaryColor,
     string AccentColor,
-    string LogoText);
+    string LogoText,
+    string BackgroundImageUrl,
+    double BackgroundOverlayOpacity,
+    string LoginCardPosition,
+    int LoginCardWidth);
 
 public sealed record LauncherConstraints(
     bool ManagedLauncher,
     int MinRamMb,
-    int ReservedSystemRamMb);
+    int ReservedSystemRamMb,
+    bool InstallTelemetryEnabled,
+    bool DiscordRpcEnabled,
+    bool DiscordRpcPrivacyMode);
 
 public sealed record BootstrapProfileDto(
     Guid Id,

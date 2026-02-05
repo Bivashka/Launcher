@@ -52,6 +52,7 @@ public partial class App : Application
         services.AddSingleton<IDiscordRpcService, DiscordRpcService>();
         services.AddSingleton<ILauncherUpdateService, LauncherUpdateService>();
         services.AddSingleton<ILauncherApiService, LauncherApiService>();
+        services.AddSingleton<IPendingSubmissionService, PendingSubmissionService>();
         services.AddSingleton<IManifestInstallerService, ManifestInstallerService>();
         services.AddSingleton<IGameLaunchService, GameLaunchService>();
         services.AddTransient<MainWindowViewModel>();

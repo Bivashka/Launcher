@@ -31,4 +31,7 @@ public sealed class NewsSourceUpsertItem
 
     [Range(1, 20)]
     public int MaxItems { get; set; } = 5;
+
+    [Range(1, 1440)]
+    public int MinFetchIntervalMinutes { get; set; } = 10;
 }

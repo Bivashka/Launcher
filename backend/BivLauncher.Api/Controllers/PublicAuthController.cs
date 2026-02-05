@@ -1,19 +1,23 @@
 using BivLauncher.Api.Contracts.Public;
 using BivLauncher.Api.Data;
 using BivLauncher.Api.Data.Entities;
+using BivLauncher.Api.Infrastructure;
 using BivLauncher.Api.Services;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 
 namespace BivLauncher.Api.Controllers;
 
 [ApiController]
+[EnableRateLimiting(RateLimitPolicies.PublicLoginPolicy)]
 [Route("api/public/auth")]
 public sealed class PublicAuthController(
     AppDbContext dbContext,
     IExternalAuthService externalAuthService,
     IHardwareFingerprintService hardwareFingerprintService,
-    IJwtTokenService jwtTokenService) : ControllerBase
+    IJwtTokenService jwtTokenService,
+    ITwoFactorService twoFactorService) : ControllerBase
 {
     [HttpPost("login")]
     public async Task<ActionResult<PublicAuthLoginResponse>> Login(
@@ -125,6 +129,21 @@ public sealed class PublicAuthController(
             return StatusCode(StatusCodes.Status403Forbidden, new { error = $"Account is banned: {activeAccountBan}" });
         }
 
+        var isTwoFactorEnabled = await dbContext.TwoFactorConfigs
+            .AsNoTracking()
+            .OrderByDescending(x => x.UpdatedAtUtc)
+            .Select(x => x.Enabled)
+            .FirstOrDefaultAsync(cancellationToken);
+        var requiresTwoFactor = isTwoFactorEnabled && account.TwoFactorRequired;
+        if (requiresTwoFactor)
+        {
+            var twoFactorResponse = await ValidateTwoFactorAsync(account, request.TwoFactorCode, cancellationToken);
+            if (twoFactorResponse is not null)
+            {
+                return Ok(twoFactorResponse);
+            }
+        }
+
         await dbContext.SaveChangesAsync(cancellationToken);
 
         var token = jwtTokenService.CreatePlayerToken(account, roles);
@@ -134,6 +153,85 @@ public sealed class PublicAuthController(
             TokenType: "Bearer",
             Username: account.Username,
             ExternalId: account.ExternalId,
-            Roles: roles));
+            Roles: roles,
+            RequiresTwoFactor: false,
+            TwoFactorEnrolled: true));
+    }
+
+    private async Task<PublicAuthLoginResponse?> ValidateTwoFactorAsync(
+        AuthAccount account,
+        string? rawCode,
+        CancellationToken cancellationToken)
+    {
+        var hasSecret = !string.IsNullOrWhiteSpace(account.TwoFactorSecret);
+        if (!hasSecret)
+        {
+            account.TwoFactorSecret = twoFactorService.GenerateSecret();
+            account.TwoFactorEnrolledAtUtc = null;
+            account.UpdatedAtUtc = DateTime.UtcNow;
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        var normalizedCode = NormalizeTwoFactorCode(rawCode);
+        if (string.IsNullOrWhiteSpace(normalizedCode))
+        {
+            if (dbContext.ChangeTracker.HasChanges())
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+            return BuildTwoFactorChallenge(account, "Two-factor code is required.");
+        }
+
+        var codeValid = twoFactorService.ValidateCode(account.TwoFactorSecret, normalizedCode, DateTime.UtcNow);
+        if (!codeValid)
+        {
+            if (dbContext.ChangeTracker.HasChanges())
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+            return BuildTwoFactorChallenge(account, "Invalid two-factor code.");
+        }
+
+        if (!account.TwoFactorEnrolledAtUtc.HasValue)
+        {
+            account.TwoFactorEnrolledAtUtc = DateTime.UtcNow;
+            account.UpdatedAtUtc = DateTime.UtcNow;
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        return null;
+    }
+
+    private PublicAuthLoginResponse BuildTwoFactorChallenge(AuthAccount account, string message)
+    {
+        var hasSecret = !string.IsNullOrWhiteSpace(account.TwoFactorSecret);
+        var enrolled = hasSecret && account.TwoFactorEnrolledAtUtc.HasValue;
+
+        var secret = enrolled ? string.Empty : account.TwoFactorSecret;
+        var provisioningUri = enrolled || string.IsNullOrWhiteSpace(secret)
+            ? string.Empty
+            : twoFactorService.BuildOtpAuthUri("BivLauncher", account.Username, secret);
+
+        return new PublicAuthLoginResponse(
+            Token: string.Empty,
+            TokenType: "Bearer",
+            Username: account.Username,
+            ExternalId: account.ExternalId,
+            Roles: [],
+            RequiresTwoFactor: true,
+            TwoFactorEnrolled: enrolled,
+            TwoFactorProvisioningUri: provisioningUri,
+            TwoFactorSecret: secret,
+            Message: message);
+    }
+
+    private static string NormalizeTwoFactorCode(string? rawCode)
+    {
+        if (string.IsNullOrWhiteSpace(rawCode))
+        {
+            return string.Empty;
+        }
+
+        return new string(rawCode.Where(char.IsDigit).ToArray());
     }
 }

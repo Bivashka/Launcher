@@ -23,6 +23,9 @@ HEALTH_RETRIES_OVERRIDE=""
 HEALTH_TIMEOUT_OVERRIDE=""
 HEALTH_DELAY_OVERRIDE=""
 OUTPUT_JSON_PATH=""
+ADMIN_SETUP_MODE="prompt"
+ADMIN_USERNAME_OVERRIDE=""
+ADMIN_PASSWORD_OVERRIDE=""
 ENV_CHANGES_JSON=""
 GENERATED_SECRETS_JSON=""
 CHECKS_JSON=""
@@ -67,6 +70,10 @@ ENV_ROLLBACK_APPLIED="false"
 HEALTH_RETRIES=30
 HEALTH_TIMEOUT_SECONDS=3
 HEALTH_RETRY_DELAY_SECONDS=2
+ADMIN_SETUP_ATTEMPTED="false"
+ADMIN_SETUP_CREATED="false"
+ADMIN_SETUP_USERNAME=""
+ADMIN_SETUP_SKIP_REASON=""
 
 print_usage() {
   cat <<'EOF'
@@ -92,6 +99,10 @@ Options:
   --health-timeout <sec>    Health-check request timeout in seconds (default: 3).
   --health-delay <sec>      Delay between health-check retries in seconds (default: 2).
   --env-file <path>         Use custom env file path instead of .env.
+  --setup-admin             Try to create first admin account after stack startup.
+  --skip-admin-setup        Skip admin setup flow (including interactive prompt).
+  --admin-user <username>   Admin username for setup flow.
+  --admin-password <pass>   Admin password for setup flow (or use BLP_ADMIN_PASSWORD env var).
   --output-json <path|->    Write final installer report as JSON (use '-' for stdout).
   --help                    Show this help.
 EOF
@@ -211,6 +222,28 @@ parse_args() {
           fail_now 10 "missing-arg-env-file" "Option --env-file requires a value."
         fi
         ENV_FILE="$2"
+        shift 2
+        ;;
+      --setup-admin)
+        ADMIN_SETUP_MODE="force"
+        shift
+        ;;
+      --skip-admin-setup)
+        ADMIN_SETUP_MODE="skip"
+        shift
+        ;;
+      --admin-user)
+        if [ "$#" -lt 2 ]; then
+          fail_now 10 "missing-arg-admin-user" "Option --admin-user requires a value."
+        fi
+        ADMIN_USERNAME_OVERRIDE="$2"
+        shift 2
+        ;;
+      --admin-password)
+        if [ "$#" -lt 2 ]; then
+          fail_now 10 "missing-arg-admin-password" "Option --admin-password requires a value."
+        fi
+        ADMIN_PASSWORD_OVERRIDE="$2"
         shift 2
         ;;
       --output-json)
@@ -411,6 +444,13 @@ write_json_report() {
     "retries": ${HEALTH_RETRIES},
     "timeoutSeconds": ${HEALTH_TIMEOUT_SECONDS},
     "retryDelaySeconds": ${HEALTH_RETRY_DELAY_SECONDS}
+  },
+  "adminSetup": {
+    "mode": "$(json_escape "$ADMIN_SETUP_MODE")",
+    "attempted": $(json_bool "$ADMIN_SETUP_ATTEMPTED"),
+    "created": $(json_bool "$ADMIN_SETUP_CREATED"),
+    "username": "$(json_escape "$ADMIN_SETUP_USERNAME")",
+    "skipReason": "$(json_escape "$ADMIN_SETUP_SKIP_REASON")"
   },
   "checkSummary": {
     "total": $((CHECKS_PASSED_TOTAL + CHECKS_FAILED_TOTAL + CHECKS_SKIPPED_TOTAL)),
@@ -677,6 +717,42 @@ ask_with_default() {
   fi
 }
 
+ask_secret() {
+  local prompt="$1"
+  local answer
+
+  if [ "$NON_INTERACTIVE" = "1" ]; then
+    echo ""
+    return
+  fi
+
+  read -r -s -p "${prompt}: " answer
+  echo
+  echo "$answer"
+}
+
+validate_admin_username() {
+  local username="$1"
+  if [ -z "$username" ]; then
+    fail_now 32 "invalid-admin-username" "Admin username cannot be empty."
+  fi
+
+  if [ "${#username}" -lt 3 ] || [ "${#username}" -gt 64 ]; then
+    fail_now 32 "invalid-admin-username" "Admin username length must be between 3 and 64 characters."
+  fi
+}
+
+validate_admin_password() {
+  local password="$1"
+  if [ -z "$password" ]; then
+    fail_now 33 "invalid-admin-password" "Admin password cannot be empty."
+  fi
+
+  if [ "${#password}" -lt 8 ] || [ "${#password}" -gt 128 ]; then
+    fail_now 33 "invalid-admin-password" "Admin password length must be between 8 and 128 characters."
+  fi
+}
+
 detect_public_ip() {
   if ! command -v curl >/dev/null 2>&1; then
     echo ""
@@ -720,6 +796,206 @@ wait_for_http() {
   echo "${label}: FAILED (${url})"
   append_check_result "http" "$label" "$url" "failed"
   return 1
+}
+
+fetch_admin_setup_status() {
+  local url="$1"
+  local attempt=1
+  local response
+
+  if ! command -v curl >/dev/null 2>&1; then
+    echo ""
+    return 1
+  fi
+
+  while [ "$attempt" -le "$HEALTH_RETRIES" ]; do
+    response="$(curl -fsS --max-time "$HEALTH_TIMEOUT_SECONDS" "$url" 2>/dev/null || true)"
+    if [[ "$response" == *'"needsSetup":true'* ]] || [[ "$response" == *'"needsSetup": true'* ]]; then
+      echo "true"
+      return 0
+    fi
+    if [[ "$response" == *'"needsSetup":false'* ]] || [[ "$response" == *'"needsSetup": false'* ]]; then
+      echo "false"
+      return 0
+    fi
+
+    if [ "$attempt" -lt "$HEALTH_RETRIES" ]; then
+      sleep "$HEALTH_RETRY_DELAY_SECONDS"
+    fi
+    attempt=$((attempt + 1))
+  done
+
+  echo ""
+  return 1
+}
+
+create_first_admin() {
+  local setup_url="$1"
+  local username="$2"
+  local password="$3"
+  local payload
+  local response_file
+  local body
+  local status
+
+  payload="$(printf '{"username":"%s","password":"%s"}' "$(json_escape "$username")" "$(json_escape "$password")")"
+  response_file="$(mktemp "${TMPDIR:-/tmp}/blp-admin-setup.XXXXXX")"
+
+  status="$(curl -sS --max-time "$HEALTH_TIMEOUT_SECONDS" -o "$response_file" -w "%{http_code}" \
+    -H "Content-Type: application/json" \
+    -X POST \
+    --data "$payload" \
+    "$setup_url" || true)"
+  body="$(cat "$response_file" 2>/dev/null || true)"
+  rm -f "$response_file"
+
+  case "$status" in
+    200)
+      return 0
+      ;;
+    409)
+      return 2
+      ;;
+    *)
+      if [ -n "$body" ]; then
+        echo "$body" | tr '\n' ' ' | cut -c1-240
+      fi
+      return 1
+      ;;
+  esac
+}
+
+maybe_setup_admin() {
+  local setup_status_url="http://localhost:${API_PORT}/api/admin/setup/status"
+  local setup_create_url="http://localhost:${API_PORT}/api/admin/setup"
+  local needs_setup
+  local should_setup="false"
+  local username
+  local password
+  local ask_result
+
+  if [ "$DRY_RUN" = "1" ]; then
+    ADMIN_SETUP_SKIP_REASON="dry-run"
+    append_check_result "meta" "Admin setup" "$setup_create_url" "skipped(dry-run)"
+    return
+  fi
+
+  if [ "$ADMIN_SETUP_MODE" = "skip" ]; then
+    ADMIN_SETUP_SKIP_REASON="flag-skip"
+    append_check_result "meta" "Admin setup" "$setup_create_url" "skipped(flag)"
+    return
+  fi
+
+  needs_setup="$(fetch_admin_setup_status "$setup_status_url" || true)"
+  if [ -z "$needs_setup" ]; then
+    ADMIN_SETUP_SKIP_REASON="status-unavailable"
+    append_check_result "meta" "Admin setup status" "$setup_status_url" "failed"
+    if [ "$ADMIN_SETUP_MODE" = "force" ]; then
+      fail_now 31 "admin-setup-status-failed" "Failed to resolve admin setup status endpoint."
+    fi
+    return
+  fi
+
+  append_check_result "meta" "Admin setup status" "$setup_status_url" "passed"
+
+  if [ "$needs_setup" != "true" ]; then
+    ADMIN_SETUP_SKIP_REASON="already-configured"
+    append_check_result "meta" "Admin setup" "$setup_create_url" "skipped(already-configured)"
+    return
+  fi
+
+  if [ "$ADMIN_SETUP_MODE" = "force" ]; then
+    should_setup="true"
+  elif [ "$NON_INTERACTIVE" = "1" ]; then
+    ADMIN_SETUP_SKIP_REASON="non-interactive-no-force"
+    append_check_result "meta" "Admin setup" "$setup_create_url" "skipped(non-interactive)"
+    return
+  else
+    ask_result="$(ask_with_default "Create first admin account now? (true/false)" "true")"
+    ask_result="$(normalize_bool "$ask_result")"
+    if [ "$ask_result" = "true" ]; then
+      should_setup="true"
+    else
+      ADMIN_SETUP_SKIP_REASON="user-declined"
+      append_check_result "meta" "Admin setup" "$setup_create_url" "skipped(user)"
+      return
+    fi
+  fi
+
+  if [ "$should_setup" != "true" ]; then
+    ADMIN_SETUP_SKIP_REASON="not-requested"
+    append_check_result "meta" "Admin setup" "$setup_create_url" "skipped(no-request)"
+    return
+  fi
+
+  username="${ADMIN_USERNAME_OVERRIDE:-admin}"
+  if [ "$NON_INTERACTIVE" != "1" ] && [ -z "${ADMIN_USERNAME_OVERRIDE}" ]; then
+    username="$(ask_with_default "Admin username" "$username")"
+  fi
+  validate_admin_username "$username"
+
+  password="${ADMIN_PASSWORD_OVERRIDE:-${BLP_ADMIN_PASSWORD:-}}"
+  if [ -z "$password" ]; then
+    if [ "$NON_INTERACTIVE" = "1" ]; then
+      fail_now 33 "missing-admin-password" "Admin password is required in non-interactive setup mode. Use --admin-password or BLP_ADMIN_PASSWORD."
+    fi
+
+    while true; do
+      password="$(ask_secret "Admin password (8+ chars)")"
+      validate_admin_password "$password"
+      local confirm_password
+      confirm_password="$(ask_secret "Repeat admin password")"
+      if [ "$password" = "$confirm_password" ]; then
+        break
+      fi
+      echo "Passwords do not match. Try again."
+    done
+  else
+    validate_admin_password "$password"
+  fi
+
+  ADMIN_SETUP_ATTEMPTED="true"
+  ADMIN_SETUP_USERNAME="$username"
+
+  local setup_error=""
+  local setup_result=0
+  set +e
+  setup_error="$(create_first_admin "$setup_create_url" "$username" "$password")"
+  setup_result=$?
+  set -e
+
+  if [ "$setup_result" -eq 0 ]; then
+    ADMIN_SETUP_CREATED="true"
+    ADMIN_SETUP_SKIP_REASON=""
+    append_check_result "meta" "Admin setup" "$username" "passed"
+    echo "Admin account created: ${username}"
+    return
+  fi
+
+  if [ "$setup_result" -eq 2 ]; then
+    ADMIN_SETUP_CREATED="false"
+    ADMIN_SETUP_SKIP_REASON="already-configured"
+    append_check_result "meta" "Admin setup" "$username" "skipped(already-configured)"
+    echo "Admin setup skipped: account already configured."
+    return
+  fi
+
+  ADMIN_SETUP_CREATED="false"
+  ADMIN_SETUP_SKIP_REASON="request-failed"
+  append_check_result "meta" "Admin setup" "$username" "failed"
+
+  if [ "$ADMIN_SETUP_MODE" = "force" ]; then
+    if [ -n "$setup_error" ]; then
+      fail_now 31 "admin-setup-failed" "Admin setup failed: ${setup_error}"
+    fi
+    fail_now 31 "admin-setup-failed" "Admin setup failed."
+  fi
+
+  if [ -n "$setup_error" ]; then
+    echo "Admin setup failed: ${setup_error}"
+  else
+    echo "Admin setup failed."
+  fi
 }
 
 is_port_busy() {
@@ -981,6 +1257,8 @@ else
   append_check_result "meta" "Health checks" "post-start" "skipped(flag)"
 fi
 
+maybe_setup_admin
+
 if [ "$NO_PUBLIC_IP" = "1" ]; then
   PUBLIC_IP=""
   append_check_result "meta" "Public IP detection" "ifconfig.me" "skipped(flag)"
@@ -1002,6 +1280,12 @@ if [ -n "${PUBLIC_IP}" ] && [ "$PUBLIC_HOST" = "localhost" ]; then
 else
   echo "Admin URL: ${ADMIN_PUBLIC_URL}"
   echo "API URL:   ${API_PUBLIC_URL}"
+fi
+
+if [ "$ADMIN_SETUP_CREATED" = "true" ]; then
+  echo "Admin setup completed for user: ${ADMIN_SETUP_USERNAME}"
+elif [ "$ADMIN_SETUP_ATTEMPTED" = "true" ]; then
+  echo "Admin setup attempt finished without account creation."
 fi
 
 write_json_report

@@ -25,19 +25,17 @@ public sealed class ExternalAuthService(
         CancellationToken cancellationToken = default)
     {
         var settings = await ResolveSettingsAsync(cancellationToken);
+        if (string.Equals(settings.AuthMode, "any", StringComparison.OrdinalIgnoreCase))
+        {
+            return CreateAnyModeSuccess(username);
+        }
+
         var loginUrl = settings.LoginUrl.Trim();
         if (string.IsNullOrWhiteSpace(loginUrl))
         {
             if (settings.AllowDevFallback)
             {
-                return new ExternalAuthResult
-                {
-                    Success = true,
-                    ExternalId = username,
-                    Username = username,
-                    Roles = ["player"],
-                    Banned = false
-                };
+                return CreateAnyModeSuccess(username);
             }
 
             return new ExternalAuthResult
@@ -50,12 +48,15 @@ public sealed class ExternalAuthService(
         var httpClient = _httpClientFactory.CreateClient();
         httpClient.Timeout = TimeSpan.FromSeconds(Math.Clamp(settings.TimeoutSeconds, 5, 120));
 
-        var payload = new
+        var payload = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
         {
-            username,
-            password,
-            hwidHash
+            [settings.LoginFieldKey] = username,
+            [settings.PasswordFieldKey] = password
         };
+        if (!string.IsNullOrWhiteSpace(hwidHash))
+        {
+            payload["hwidHash"] = hwidHash;
+        }
 
         try
         {
@@ -104,7 +105,10 @@ public sealed class ExternalAuthService(
         {
             return new AuthProviderOptions
             {
+                AuthMode = NormalizeAuthMode(_options.AuthMode),
                 LoginUrl = _options.LoginUrl,
+                LoginFieldKey = NormalizeFieldKey(_options.LoginFieldKey, "username"),
+                PasswordFieldKey = NormalizeFieldKey(_options.PasswordFieldKey, "password"),
                 TimeoutSeconds = Math.Clamp(_options.TimeoutSeconds, 5, 120),
                 AllowDevFallback = _options.AllowDevFallback
             };
@@ -112,7 +116,10 @@ public sealed class ExternalAuthService(
 
         return new AuthProviderOptions
         {
+            AuthMode = NormalizeAuthMode(stored.AuthMode),
             LoginUrl = stored.LoginUrl,
+            LoginFieldKey = NormalizeFieldKey(stored.LoginFieldKey, "username"),
+            PasswordFieldKey = NormalizeFieldKey(stored.PasswordFieldKey, "password"),
             TimeoutSeconds = Math.Clamp(stored.TimeoutSeconds, 5, 120),
             AllowDevFallback = stored.AllowDevFallback
         };
@@ -234,5 +241,54 @@ public sealed class ExternalAuthService(
         {
             return null;
         }
+    }
+
+    private static ExternalAuthResult CreateAnyModeSuccess(string username)
+    {
+        return new ExternalAuthResult
+        {
+            Success = true,
+            ExternalId = username,
+            Username = username,
+            Roles = ["player"],
+            Banned = false
+        };
+    }
+
+    private static string NormalizeAuthMode(string? authMode)
+    {
+        return string.Equals(authMode?.Trim(), "any", StringComparison.OrdinalIgnoreCase)
+            ? "any"
+            : "external";
+    }
+
+    private static string NormalizeFieldKey(string? raw, string fallback)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return fallback;
+        }
+
+        var value = raw.Trim();
+        if (value.Length > 64)
+        {
+            return fallback;
+        }
+
+        for (var i = 0; i < value.Length; i++)
+        {
+            var ch = value[i];
+            var isValid =
+                (ch >= 'a' && ch <= 'z') ||
+                (ch >= 'A' && ch <= 'Z') ||
+                (ch >= '0' && ch <= '9') ||
+                ch is '_' or '-' or '.';
+            if (!isValid)
+            {
+                return fallback;
+            }
+        }
+
+        return value;
     }
 }

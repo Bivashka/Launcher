@@ -6,25 +6,32 @@ using BivLauncher.Api.Data;
 using BivLauncher.Api.Data.Entities;
 using BivLauncher.Api.Options;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using System.Net;
+using System.Security.Cryptography;
+using System.Text.Json;
 
 namespace BivLauncher.Api.Services;
 
 public sealed class S3ObjectStorageService(
     IServiceScopeFactory serviceScopeFactory,
     IOptions<S3Options> fallbackOptions,
+    IHostEnvironment hostEnvironment,
     ILogger<S3ObjectStorageService> logger) : IObjectStorageService
 {
     private static readonly TimeSpan SettingsCacheDuration = TimeSpan.FromSeconds(15);
+    private static readonly JsonSerializerOptions LocalMetadataJsonOptions = new(JsonSerializerDefaults.Web);
+
     private readonly IServiceScopeFactory _serviceScopeFactory = serviceScopeFactory;
     private readonly S3Options _fallbackOptions = fallbackOptions.Value;
+    private readonly IHostEnvironment _hostEnvironment = hostEnvironment;
     private readonly ILogger<S3ObjectStorageService> _logger = logger;
     private readonly SemaphoreSlim _settingsLock = new(1, 1);
     private readonly SemaphoreSlim _clientLock = new(1, 1);
     private readonly SemaphoreSlim _bucketLock = new(1, 1);
 
-    private ResolvedS3Settings? _cachedSettings;
+    private ResolvedStorageSettings? _cachedSettings;
     private DateTime _cachedSettingsAtUtc = DateTime.MinValue;
     private AmazonS3Client? _client;
     private string _clientSignature = string.Empty;
@@ -38,133 +45,61 @@ public sealed class S3ObjectStorageService(
         CancellationToken cancellationToken = default)
     {
         var settings = await ResolveSettingsAsync(cancellationToken);
-        var client = await GetClientAsync(settings, cancellationToken);
-        await EnsureBucketExistsAsync(client, settings, cancellationToken);
-
-        var request = new PutObjectRequest
+        if (settings.UseS3)
         {
-            BucketName = settings.Bucket,
-            Key = key,
-            InputStream = content,
-            AutoCloseStream = false,
-            ContentType = string.IsNullOrWhiteSpace(contentType) ? "application/octet-stream" : contentType
-        };
-
-        if (metadata is not null)
-        {
-            foreach (var pair in metadata)
-            {
-                if (string.IsNullOrWhiteSpace(pair.Key) || string.IsNullOrWhiteSpace(pair.Value))
-                {
-                    continue;
-                }
-
-                request.Metadata[pair.Key.Trim()] = pair.Value.Trim();
-            }
+            var client = await GetClientAsync(settings, cancellationToken);
+            await EnsureBucketExistsAsync(client, settings, cancellationToken);
+            await UploadS3Async(client, settings, key, content, contentType, metadata, cancellationToken);
+            return;
         }
 
-        await client.PutObjectAsync(request, cancellationToken);
+        await UploadLocalAsync(settings, key, content, contentType, metadata, cancellationToken);
     }
 
     public async Task<StoredObject?> GetAsync(string key, CancellationToken cancellationToken = default)
     {
         var settings = await ResolveSettingsAsync(cancellationToken);
-        var client = await GetClientAsync(settings, cancellationToken);
-        await EnsureBucketExistsAsync(client, settings, cancellationToken);
-
-        try
-        {
-            var response = await client.GetObjectAsync(settings.Bucket, key, cancellationToken);
-            await using var responseStream = response.ResponseStream;
-            using var ms = new MemoryStream();
-            await responseStream.CopyToAsync(ms, cancellationToken);
-
-            var contentType = string.IsNullOrWhiteSpace(response.Headers.ContentType)
-                ? "application/octet-stream"
-                : response.Headers.ContentType;
-
-            return new StoredObject(ms.ToArray(), contentType);
-        }
-        catch (AmazonS3Exception ex) when (ex.StatusCode == HttpStatusCode.NotFound || ex.ErrorCode == "NoSuchKey")
-        {
-            return null;
-        }
+        return settings.UseS3
+            ? await GetS3Async(settings, key, cancellationToken)
+            : await GetLocalAsync(settings, key, cancellationToken);
     }
 
     public async Task<StoredObjectMetadata?> GetMetadataAsync(string key, CancellationToken cancellationToken = default)
     {
         var settings = await ResolveSettingsAsync(cancellationToken);
-        var client = await GetClientAsync(settings, cancellationToken);
-        await EnsureBucketExistsAsync(client, settings, cancellationToken);
-
-        try
-        {
-            var response = await client.GetObjectMetadataAsync(new GetObjectMetadataRequest
-            {
-                BucketName = settings.Bucket,
-                Key = key
-            }, cancellationToken);
-
-            var contentType = string.IsNullOrWhiteSpace(response.Headers.ContentType)
-                ? "application/octet-stream"
-                : response.Headers.ContentType;
-            var sizeBytes = response.Headers.ContentLength;
-            var sha256 = ResolveSha256(response.Metadata);
-
-            return new StoredObjectMetadata(sizeBytes, contentType, sha256);
-        }
-        catch (AmazonS3Exception ex) when (ex.StatusCode == HttpStatusCode.NotFound || ex.ErrorCode == "NoSuchKey")
-        {
-            return null;
-        }
+        return settings.UseS3
+            ? await GetS3MetadataAsync(settings, key, cancellationToken)
+            : await GetLocalMetadataAsync(settings, key, cancellationToken);
     }
 
     public async Task<IReadOnlyList<StoredObjectListItem>> ListByPrefixAsync(string prefix, CancellationToken cancellationToken = default)
     {
         var settings = await ResolveSettingsAsync(cancellationToken);
-        var client = await GetClientAsync(settings, cancellationToken);
-        await EnsureBucketExistsAsync(client, settings, cancellationToken);
-
-        var normalizedPrefix = string.IsNullOrWhiteSpace(prefix)
-            ? string.Empty
-            : prefix.Trim().Replace('\\', '/').TrimStart('/');
-
-        var results = new List<StoredObjectListItem>();
-        string? continuationToken = null;
-        do
-        {
-            var response = await client.ListObjectsV2Async(new ListObjectsV2Request
-            {
-                BucketName = settings.Bucket,
-                Prefix = normalizedPrefix,
-                ContinuationToken = continuationToken
-            }, cancellationToken);
-
-            results.AddRange(response.S3Objects.Select(obj => new StoredObjectListItem(
-                obj.Key,
-                obj.Size,
-                obj.LastModified.ToUniversalTime())));
-
-            continuationToken = response.IsTruncated ? response.NextContinuationToken : null;
-        } while (!string.IsNullOrWhiteSpace(continuationToken));
-
-        return results;
+        return settings.UseS3
+            ? await ListS3ByPrefixAsync(settings, prefix, cancellationToken)
+            : ListLocalByPrefix(settings, prefix);
     }
 
     public async Task DeleteAsync(string key, CancellationToken cancellationToken = default)
     {
         var settings = await ResolveSettingsAsync(cancellationToken);
-        var client = await GetClientAsync(settings, cancellationToken);
-        await EnsureBucketExistsAsync(client, settings, cancellationToken);
-
-        await client.DeleteObjectAsync(new DeleteObjectRequest
+        if (settings.UseS3)
         {
-            BucketName = settings.Bucket,
-            Key = key
-        }, cancellationToken);
+            var client = await GetClientAsync(settings, cancellationToken);
+            await EnsureBucketExistsAsync(client, settings, cancellationToken);
+
+            await client.DeleteObjectAsync(new DeleteObjectRequest
+            {
+                BucketName = settings.Bucket,
+                Key = NormalizeStorageKey(key)
+            }, cancellationToken);
+            return;
+        }
+
+        DeleteLocal(settings, key);
     }
 
-    private async Task<ResolvedS3Settings> ResolveSettingsAsync(CancellationToken cancellationToken)
+    private async Task<ResolvedStorageSettings> ResolveSettingsAsync(CancellationToken cancellationToken)
     {
         if (_cachedSettings is not null &&
             DateTime.UtcNow - _cachedSettingsAtUtc <= SettingsCacheDuration)
@@ -209,7 +144,7 @@ public sealed class S3ObjectStorageService(
             .FirstOrDefaultAsync(cancellationToken);
     }
 
-    private async Task<AmazonS3Client> GetClientAsync(ResolvedS3Settings settings, CancellationToken cancellationToken)
+    private async Task<AmazonS3Client> GetClientAsync(ResolvedStorageSettings settings, CancellationToken cancellationToken)
     {
         var nextSignature = BuildClientSignature(settings);
         if (_client is not null && string.Equals(_clientSignature, nextSignature, StringComparison.Ordinal))
@@ -247,9 +182,10 @@ public sealed class S3ObjectStorageService(
         }
     }
 
-    private static string BuildClientSignature(ResolvedS3Settings settings)
+    private static string BuildClientSignature(ResolvedStorageSettings settings)
     {
         return string.Join('|',
+            settings.UseS3,
             settings.Endpoint,
             settings.AccessKey,
             settings.SecretKey,
@@ -259,7 +195,7 @@ public sealed class S3ObjectStorageService(
 
     private async Task EnsureBucketExistsAsync(
         IAmazonS3 client,
-        ResolvedS3Settings settings,
+        ResolvedStorageSettings settings,
         CancellationToken cancellationToken)
     {
         var nextBucketSignature = $"{_clientSignature}|{settings.Bucket}|{settings.AutoCreateBucket}";
@@ -296,9 +232,375 @@ public sealed class S3ObjectStorageService(
         }
     }
 
-    private static ResolvedS3Settings ResolveFromStorage(S3StorageConfig config)
+    private static async Task UploadS3Async(
+        IAmazonS3 client,
+        ResolvedStorageSettings settings,
+        string key,
+        Stream content,
+        string contentType,
+        IReadOnlyDictionary<string, string>? metadata,
+        CancellationToken cancellationToken)
     {
-        return new ResolvedS3Settings(
+        var request = new PutObjectRequest
+        {
+            BucketName = settings.Bucket,
+            Key = NormalizeStorageKey(key),
+            InputStream = content,
+            AutoCloseStream = false,
+            ContentType = string.IsNullOrWhiteSpace(contentType) ? "application/octet-stream" : contentType
+        };
+
+        if (metadata is not null)
+        {
+            foreach (var pair in metadata)
+            {
+                if (string.IsNullOrWhiteSpace(pair.Key) || string.IsNullOrWhiteSpace(pair.Value))
+                {
+                    continue;
+                }
+
+                request.Metadata[pair.Key.Trim()] = pair.Value.Trim();
+            }
+        }
+
+        await client.PutObjectAsync(request, cancellationToken);
+    }
+
+    private async Task<StoredObject?> GetS3Async(
+        ResolvedStorageSettings settings,
+        string key,
+        CancellationToken cancellationToken)
+    {
+        var client = await GetClientAsync(settings, cancellationToken);
+        await EnsureBucketExistsAsync(client, settings, cancellationToken);
+
+        try
+        {
+            var response = await client.GetObjectAsync(settings.Bucket, NormalizeStorageKey(key), cancellationToken);
+            await using var responseStream = response.ResponseStream;
+            using var ms = new MemoryStream();
+            await responseStream.CopyToAsync(ms, cancellationToken);
+
+            var contentType = string.IsNullOrWhiteSpace(response.Headers.ContentType)
+                ? "application/octet-stream"
+                : response.Headers.ContentType;
+
+            return new StoredObject(ms.ToArray(), contentType);
+        }
+        catch (AmazonS3Exception ex) when (ex.StatusCode == HttpStatusCode.NotFound || ex.ErrorCode == "NoSuchKey")
+        {
+            return null;
+        }
+    }
+
+    private async Task<StoredObjectMetadata?> GetS3MetadataAsync(
+        ResolvedStorageSettings settings,
+        string key,
+        CancellationToken cancellationToken)
+    {
+        var client = await GetClientAsync(settings, cancellationToken);
+        await EnsureBucketExistsAsync(client, settings, cancellationToken);
+
+        try
+        {
+            var response = await client.GetObjectMetadataAsync(new GetObjectMetadataRequest
+            {
+                BucketName = settings.Bucket,
+                Key = NormalizeStorageKey(key)
+            }, cancellationToken);
+
+            var contentType = string.IsNullOrWhiteSpace(response.Headers.ContentType)
+                ? "application/octet-stream"
+                : response.Headers.ContentType;
+            var sizeBytes = response.Headers.ContentLength;
+            var sha256 = ResolveSha256(response.Metadata);
+
+            return new StoredObjectMetadata(sizeBytes, contentType, sha256);
+        }
+        catch (AmazonS3Exception ex) when (ex.StatusCode == HttpStatusCode.NotFound || ex.ErrorCode == "NoSuchKey")
+        {
+            return null;
+        }
+    }
+
+    private async Task<IReadOnlyList<StoredObjectListItem>> ListS3ByPrefixAsync(
+        ResolvedStorageSettings settings,
+        string prefix,
+        CancellationToken cancellationToken)
+    {
+        var client = await GetClientAsync(settings, cancellationToken);
+        await EnsureBucketExistsAsync(client, settings, cancellationToken);
+
+        var normalizedPrefix = string.IsNullOrWhiteSpace(prefix)
+            ? string.Empty
+            : NormalizeStorageKey(prefix);
+
+        var results = new List<StoredObjectListItem>();
+        string? continuationToken = null;
+        do
+        {
+            var response = await client.ListObjectsV2Async(new ListObjectsV2Request
+            {
+                BucketName = settings.Bucket,
+                Prefix = normalizedPrefix,
+                ContinuationToken = continuationToken
+            }, cancellationToken);
+
+            results.AddRange(response.S3Objects.Select(obj => new StoredObjectListItem(
+                obj.Key,
+                obj.Size,
+                obj.LastModified.ToUniversalTime())));
+
+            continuationToken = response.IsTruncated ? response.NextContinuationToken : null;
+        } while (!string.IsNullOrWhiteSpace(continuationToken));
+
+        return results;
+    }
+
+    private async Task UploadLocalAsync(
+        ResolvedStorageSettings settings,
+        string key,
+        Stream content,
+        string contentType,
+        IReadOnlyDictionary<string, string>? metadata,
+        CancellationToken cancellationToken)
+    {
+        var objectPath = ResolveLocalObjectPath(settings, key, createParentDirectory: true);
+
+        await using (var stream = new FileStream(
+            objectPath,
+            FileMode.Create,
+            FileAccess.Write,
+            FileShare.None,
+            bufferSize: 81920,
+            useAsync: true))
+        {
+            await content.CopyToAsync(stream, cancellationToken);
+        }
+
+        var document = new LocalObjectMetadataDocument
+        {
+            ContentType = string.IsNullOrWhiteSpace(contentType) ? "application/octet-stream" : contentType.Trim(),
+            Metadata = metadata?
+                .Where(x => !string.IsNullOrWhiteSpace(x.Key) && !string.IsNullOrWhiteSpace(x.Value))
+                .ToDictionary(x => x.Key.Trim(), x => x.Value.Trim(), StringComparer.OrdinalIgnoreCase)
+                ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        };
+
+        await WriteLocalMetadataAsync(objectPath, document, cancellationToken);
+    }
+
+    private async Task<StoredObject?> GetLocalAsync(
+        ResolvedStorageSettings settings,
+        string key,
+        CancellationToken cancellationToken)
+    {
+        var objectPath = ResolveLocalObjectPath(settings, key, createParentDirectory: false);
+        if (!File.Exists(objectPath))
+        {
+            return null;
+        }
+
+        var bytes = await File.ReadAllBytesAsync(objectPath, cancellationToken);
+        var metadata = await TryReadLocalMetadataAsync(objectPath, cancellationToken);
+        var contentType = string.IsNullOrWhiteSpace(metadata?.ContentType)
+            ? InferContentTypeFromKey(key)
+            : metadata.ContentType!.Trim();
+
+        return new StoredObject(bytes, contentType);
+    }
+
+    private async Task<StoredObjectMetadata?> GetLocalMetadataAsync(
+        ResolvedStorageSettings settings,
+        string key,
+        CancellationToken cancellationToken)
+    {
+        var objectPath = ResolveLocalObjectPath(settings, key, createParentDirectory: false);
+        if (!File.Exists(objectPath))
+        {
+            return null;
+        }
+
+        var fileInfo = new FileInfo(objectPath);
+        var metadata = await TryReadLocalMetadataAsync(objectPath, cancellationToken);
+        var contentType = string.IsNullOrWhiteSpace(metadata?.ContentType)
+            ? InferContentTypeFromKey(key)
+            : metadata.ContentType!.Trim();
+
+        var sha256 = string.Empty;
+        if (metadata?.Metadata is not null &&
+            metadata.Metadata.TryGetValue("sha256", out var storedSha256) &&
+            !string.IsNullOrWhiteSpace(storedSha256))
+        {
+            sha256 = storedSha256.Trim().ToLowerInvariant();
+        }
+        else
+        {
+            await using var stream = new FileStream(
+                objectPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                bufferSize: 81920,
+                useAsync: true);
+            var hash = await SHA256.HashDataAsync(stream, cancellationToken);
+            sha256 = Convert.ToHexString(hash).ToLowerInvariant();
+        }
+
+        return new StoredObjectMetadata(fileInfo.Length, contentType, sha256);
+    }
+
+    private IReadOnlyList<StoredObjectListItem> ListLocalByPrefix(ResolvedStorageSettings settings, string prefix)
+    {
+        var rootPath = ResolveLocalRootPath(settings, ensureExists: false);
+        if (!Directory.Exists(rootPath))
+        {
+            return [];
+        }
+
+        var normalizedPrefix = string.IsNullOrWhiteSpace(prefix)
+            ? string.Empty
+            : NormalizeStorageKey(prefix);
+
+        var files = Directory
+            .EnumerateFiles(rootPath, "*", SearchOption.AllDirectories)
+            .Where(path => !path.EndsWith(".meta.json", StringComparison.OrdinalIgnoreCase))
+            .Select(path =>
+            {
+                var relative = Path.GetRelativePath(rootPath, path).Replace('\\', '/');
+                var info = new FileInfo(path);
+                return new StoredObjectListItem(relative, info.Length, info.LastWriteTimeUtc);
+            })
+            .Where(item => string.IsNullOrWhiteSpace(normalizedPrefix) ||
+                           item.Key.StartsWith(normalizedPrefix, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        return files;
+    }
+
+    private void DeleteLocal(ResolvedStorageSettings settings, string key)
+    {
+        var objectPath = ResolveLocalObjectPath(settings, key, createParentDirectory: false);
+        if (File.Exists(objectPath))
+        {
+            File.Delete(objectPath);
+        }
+
+        var metadataPath = ResolveLocalMetadataPath(objectPath);
+        if (File.Exists(metadataPath))
+        {
+            File.Delete(metadataPath);
+        }
+    }
+
+    private string ResolveLocalObjectPath(ResolvedStorageSettings settings, string key, bool createParentDirectory)
+    {
+        var normalizedKey = NormalizeStorageKey(key);
+        var rootPath = ResolveLocalRootPath(settings, ensureExists: createParentDirectory);
+        var relativePath = normalizedKey.Replace('/', Path.DirectorySeparatorChar);
+        var fullPath = Path.GetFullPath(Path.Combine(rootPath, relativePath));
+
+        if (!IsSubPath(rootPath, fullPath))
+        {
+            throw new InvalidOperationException("Storage key escapes configured local storage root path.");
+        }
+
+        if (createParentDirectory)
+        {
+            var directoryPath = Path.GetDirectoryName(fullPath);
+            if (!string.IsNullOrWhiteSpace(directoryPath))
+            {
+                Directory.CreateDirectory(directoryPath);
+            }
+        }
+
+        return fullPath;
+    }
+
+    private string ResolveLocalRootPath(ResolvedStorageSettings settings, bool ensureExists)
+    {
+        var localRootPath = settings.LocalRootPath.Trim();
+        var absolutePath = Path.IsPathRooted(localRootPath)
+            ? Path.GetFullPath(localRootPath)
+            : Path.GetFullPath(Path.Combine(_hostEnvironment.ContentRootPath, localRootPath));
+
+        if (ensureExists)
+        {
+            Directory.CreateDirectory(absolutePath);
+        }
+
+        return absolutePath;
+    }
+
+    private static bool IsSubPath(string rootPath, string candidatePath)
+    {
+        var normalizedRoot = rootPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + Path.DirectorySeparatorChar;
+        return candidatePath.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string ResolveLocalMetadataPath(string objectPath)
+    {
+        return $"{objectPath}.meta.json";
+    }
+
+    private static async Task WriteLocalMetadataAsync(
+        string objectPath,
+        LocalObjectMetadataDocument document,
+        CancellationToken cancellationToken)
+    {
+        var metadataPath = ResolveLocalMetadataPath(objectPath);
+        var tempPath = $"{metadataPath}.tmp";
+
+        await using (var stream = new FileStream(
+            tempPath,
+            FileMode.Create,
+            FileAccess.Write,
+            FileShare.None,
+            bufferSize: 4096,
+            useAsync: true))
+        {
+            await JsonSerializer.SerializeAsync(stream, document, LocalMetadataJsonOptions, cancellationToken);
+        }
+
+        File.Move(tempPath, metadataPath, overwrite: true);
+    }
+
+    private static async Task<LocalObjectMetadataDocument?> TryReadLocalMetadataAsync(
+        string objectPath,
+        CancellationToken cancellationToken)
+    {
+        var metadataPath = ResolveLocalMetadataPath(objectPath);
+        if (!File.Exists(metadataPath))
+        {
+            return null;
+        }
+
+        try
+        {
+            await using var stream = new FileStream(
+                metadataPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite,
+                bufferSize: 4096,
+                useAsync: true);
+            return await JsonSerializer.DeserializeAsync<LocalObjectMetadataDocument>(
+                stream,
+                LocalMetadataJsonOptions,
+                cancellationToken);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static ResolvedStorageSettings ResolveFromStorage(S3StorageConfig config)
+    {
+        return new ResolvedStorageSettings(
+            UseS3: config.UseS3,
+            LocalRootPath: string.IsNullOrWhiteSpace(config.LocalRootPath) ? "Storage" : config.LocalRootPath.Trim(),
             Endpoint: config.Endpoint.Trim(),
             Bucket: config.Bucket.Trim(),
             AccessKey: config.AccessKey.Trim(),
@@ -308,9 +610,11 @@ public sealed class S3ObjectStorageService(
             AutoCreateBucket: config.AutoCreateBucket);
     }
 
-    private static ResolvedS3Settings ResolveFromFallback(S3Options options)
+    private static ResolvedStorageSettings ResolveFromFallback(S3Options options)
     {
-        return new ResolvedS3Settings(
+        return new ResolvedStorageSettings(
+            UseS3: options.UseS3,
+            LocalRootPath: string.IsNullOrWhiteSpace(options.LocalRootPath) ? "Storage" : options.LocalRootPath.Trim(),
             Endpoint: options.Endpoint.Trim(),
             Bucket: options.Bucket.Trim(),
             AccessKey: options.AccessKey.Trim(),
@@ -320,8 +624,18 @@ public sealed class S3ObjectStorageService(
             AutoCreateBucket: options.AutoCreateBucket);
     }
 
-    private static void ValidateSettings(ResolvedS3Settings settings)
+    private static void ValidateSettings(ResolvedStorageSettings settings)
     {
+        if (!settings.UseS3)
+        {
+            if (string.IsNullOrWhiteSpace(settings.LocalRootPath))
+            {
+                throw new InvalidOperationException("Local storage root path is not configured.");
+            }
+
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(settings.Endpoint))
         {
             throw new InvalidOperationException("S3 endpoint is not configured. Check admin settings or S3_ENDPOINT.");
@@ -341,6 +655,31 @@ public sealed class S3ObjectStorageService(
         {
             throw new InvalidOperationException("S3 credentials are not configured. Check admin settings or S3_ACCESS_KEY/S3_SECRET_KEY.");
         }
+    }
+
+    private static string NormalizeStorageKey(string rawKey)
+    {
+        if (string.IsNullOrWhiteSpace(rawKey))
+        {
+            throw new InvalidOperationException("Storage key is required.");
+        }
+
+        var cleaned = rawKey.Trim().Replace('\\', '/').TrimStart('/');
+        var parts = cleaned.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0)
+        {
+            throw new InvalidOperationException("Storage key is invalid.");
+        }
+
+        foreach (var part in parts)
+        {
+            if (part is "." or "..")
+            {
+                throw new InvalidOperationException("Storage key contains invalid path traversal segments.");
+            }
+        }
+
+        return string.Join('/', parts);
     }
 
     private static string ResolveSha256(MetadataCollection metadata)
@@ -381,7 +720,27 @@ public sealed class S3ObjectStorageService(
         return false;
     }
 
-    private sealed record ResolvedS3Settings(
+    private static string InferContentTypeFromKey(string key)
+    {
+        var extension = Path.GetExtension(key).ToLowerInvariant();
+        return extension switch
+        {
+            ".json" => "application/json",
+            ".txt" => "text/plain; charset=utf-8",
+            ".png" => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".gif" => "image/gif",
+            ".webp" => "image/webp",
+            ".svg" => "image/svg+xml",
+            ".zip" => "application/zip",
+            ".jar" => "application/java-archive",
+            _ => "application/octet-stream"
+        };
+    }
+
+    private sealed record ResolvedStorageSettings(
+        bool UseS3,
+        string LocalRootPath,
         string Endpoint,
         string Bucket,
         string AccessKey,
@@ -389,4 +748,10 @@ public sealed class S3ObjectStorageService(
         bool ForcePathStyle,
         bool UseSsl,
         bool AutoCreateBucket);
+
+    private sealed class LocalObjectMetadataDocument
+    {
+        public string ContentType { get; set; } = "application/octet-stream";
+        public Dictionary<string, string> Metadata { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    }
 }

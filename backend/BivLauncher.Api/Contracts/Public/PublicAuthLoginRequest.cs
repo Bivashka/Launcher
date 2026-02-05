@@ -19,4 +19,7 @@ public sealed class PublicAuthLoginRequest
 
     [MaxLength(128)]
     public string HwidHash { get; set; } = string.Empty;
+
+    [MaxLength(16)]
+    public string TwoFactorCode { get; set; } = string.Empty;
 }

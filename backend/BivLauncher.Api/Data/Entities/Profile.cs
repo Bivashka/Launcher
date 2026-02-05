@@ -10,6 +10,8 @@ public sealed class Profile
     public string IconKey { get; set; } = string.Empty;
     public int Priority { get; set; } = 100;
     public int RecommendedRamMb { get; set; } = 2048;
+    public string JvmArgsDefault { get; set; } = string.Empty;
+    public string GameArgsDefault { get; set; } = string.Empty;
     public string BundledJavaPath { get; set; } = string.Empty;
     public string BundledRuntimeKey { get; set; } = string.Empty;
     public string BundledRuntimeSha256 { get; set; } = string.Empty;

@@ -30,4 +30,16 @@ public sealed class BrandingSettingsUpsertRequest
 
     [MaxLength(32)]
     public string LogoText { get; set; } = string.Empty;
+
+    [MaxLength(1024)]
+    public string BackgroundImageUrl { get; set; } = string.Empty;
+
+    [Range(0, 0.95)]
+    public double BackgroundOverlayOpacity { get; set; } = 0.55;
+
+    [MaxLength(16)]
+    public string LoginCardPosition { get; set; } = "center";
+
+    [Range(340, 640)]
+    public int LoginCardWidth { get; set; } = 460;
 }

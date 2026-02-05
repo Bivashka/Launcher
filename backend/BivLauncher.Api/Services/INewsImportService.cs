@@ -4,5 +4,5 @@ namespace BivLauncher.Api.Services;
 
 public interface INewsImportService
 {
-    Task<NewsSourcesSyncResponse> SyncAsync(Guid? sourceId, CancellationToken cancellationToken = default);
+    Task<NewsSourcesSyncResponse> SyncAsync(Guid? sourceId, bool force = false, CancellationToken cancellationToken = default);
 }

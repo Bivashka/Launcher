@@ -5,4 +5,9 @@ public sealed record PublicAuthLoginResponse(
     string TokenType,
     string Username,
     string ExternalId,
-    IReadOnlyList<string> Roles);
+    IReadOnlyList<string> Roles,
+    bool RequiresTwoFactor = false,
+    bool TwoFactorEnrolled = true,
+    string TwoFactorProvisioningUri = "",
+    string TwoFactorSecret = "",
+    string Message = "");

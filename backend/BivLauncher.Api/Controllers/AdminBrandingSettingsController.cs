@@ -32,7 +32,11 @@ public sealed class AdminBrandingSettingsController(
             SupportUrl: request.SupportUrl.Trim(),
             PrimaryColor: request.PrimaryColor.Trim(),
             AccentColor: request.AccentColor.Trim(),
-            LogoText: request.LogoText.Trim());
+            LogoText: request.LogoText.Trim(),
+            BackgroundImageUrl: request.BackgroundImageUrl.Trim(),
+            BackgroundOverlayOpacity: request.BackgroundOverlayOpacity,
+            LoginCardPosition: request.LoginCardPosition.Trim(),
+            LoginCardWidth: request.LoginCardWidth);
 
         var saved = await brandingProvider.SaveBrandingAsync(branding, cancellationToken);
         var actor = User.Identity?.Name ?? "admin";
@@ -45,7 +49,10 @@ public sealed class AdminBrandingSettingsController(
             {
                 saved.ProductName,
                 saved.DeveloperName,
-                saved.LogoText
+                saved.LogoText,
+                saved.LoginCardPosition,
+                saved.LoginCardWidth,
+                hasBackgroundImage = !string.IsNullOrWhiteSpace(saved.BackgroundImageUrl)
             },
             cancellationToken: cancellationToken);
         return Ok(Map(saved));
@@ -60,6 +67,10 @@ public sealed class AdminBrandingSettingsController(
             branding.SupportUrl,
             branding.PrimaryColor,
             branding.AccentColor,
-            branding.LogoText);
+            branding.LogoText,
+            branding.BackgroundImageUrl,
+            branding.BackgroundOverlayOpacity,
+            branding.LoginCardPosition,
+            branding.LoginCardWidth);
     }
 }

@@ -47,5 +47,6 @@ public sealed class InstallResult
 public sealed class LaunchResult
 {
     public int ExitCode { get; init; }
+    public string JavaExecutable { get; init; } = string.Empty;
     public bool Success => ExitCode == 0;
 }

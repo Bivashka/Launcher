@@ -103,7 +103,11 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
         await Task.WhenAll(stdOutTask, stdErrTask, process.WaitForExitAsync(cancellationToken));
         logService.LogInfo($"Process exited with code {process.ExitCode}");
 
-        return new LaunchResult { ExitCode = process.ExitCode };
+        return new LaunchResult
+        {
+            ExitCode = process.ExitCode,
+            JavaExecutable = javaExecutable
+        };
     }
 
     private static async Task PumpOutputAsync(StreamReader reader, Action<string> onLine, CancellationToken cancellationToken)

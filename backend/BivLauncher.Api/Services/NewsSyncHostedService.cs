@@ -71,7 +71,7 @@ public sealed class NewsSyncHostedService(
 
         try
         {
-            var result = await importService.SyncAsync(sourceId: null, cancellationToken);
+            var result = await importService.SyncAsync(sourceId: null, force: false, cancellationToken);
             _logger.LogInformation(
                 "News auto-sync completed. Sources: {SourcesProcessed}, Imported: {Imported}",
                 result.SourcesProcessed,

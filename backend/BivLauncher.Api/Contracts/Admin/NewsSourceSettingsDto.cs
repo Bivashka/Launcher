@@ -7,6 +7,9 @@ public sealed record NewsSourceSettingsDto(
     string Url,
     bool Enabled,
     int MaxItems,
+    int MinFetchIntervalMinutes,
+    DateTime? LastFetchAttemptAtUtc,
     DateTime? LastSyncAtUtc,
+    DateTime? LastContentChangeAtUtc,
     string LastSyncError,
     DateTime UpdatedAtUtc);

@@ -21,6 +21,10 @@ public sealed class BrandingConfig
     public string PrimaryColor { get; set; } = string.Empty;
     public string AccentColor { get; set; } = string.Empty;
     public string LogoText { get; set; } = "BLP";
+    public string BackgroundImageUrl { get; set; } = string.Empty;
+    public double BackgroundOverlayOpacity { get; set; } = 0.55;
+    public string LoginCardPosition { get; set; } = "center";
+    public int LoginCardWidth { get; set; } = 460;
 }
 
 public sealed class LauncherConstraints
@@ -28,6 +32,9 @@ public sealed class LauncherConstraints
     public bool ManagedLauncher { get; set; } = true;
     public int MinRamMb { get; set; } = 1024;
     public int ReservedSystemRamMb { get; set; } = 1024;
+    public bool InstallTelemetryEnabled { get; set; } = true;
+    public bool DiscordRpcEnabled { get; set; } = true;
+    public bool DiscordRpcPrivacyMode { get; set; }
 }
 
 public sealed class LauncherUpdateInfo

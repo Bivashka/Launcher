@@ -35,6 +35,8 @@ public sealed class AdminProfilesController(
                 x.IconKey,
                 x.Priority,
                 x.RecommendedRamMb,
+                x.JvmArgsDefault,
+                x.GameArgsDefault,
                 x.BundledJavaPath,
                 x.BundledRuntimeKey,
                 x.BundledRuntimeSha256,
@@ -64,6 +66,8 @@ public sealed class AdminProfilesController(
                 x.IconKey,
                 x.Priority,
                 x.RecommendedRamMb,
+                x.JvmArgsDefault,
+                x.GameArgsDefault,
                 x.BundledJavaPath,
                 x.BundledRuntimeKey,
                 x.BundledRuntimeSha256,
@@ -83,6 +87,14 @@ public sealed class AdminProfilesController(
     {
         var normalizedSlug = NormalizeSlug(request.Slug);
         var normalizedRuntimeKey = NormalizeBundledRuntimeKey(request.BundledRuntimeKey);
+        if (!TryValidateLaunchArgs(request.JvmArgsDefault, out var jvmError))
+        {
+            return BadRequest(new { error = $"JvmArgsDefault: {jvmError}" });
+        }
+        if (!TryValidateLaunchArgs(request.GameArgsDefault, out var gameError))
+        {
+            return BadRequest(new { error = $"GameArgsDefault: {gameError}" });
+        }
         if (!IsSlugValid(normalizedSlug))
         {
             return BadRequest(new { error = "Slug must contain only lowercase latin letters, numbers, and '-'." });
@@ -103,6 +115,8 @@ public sealed class AdminProfilesController(
             IconKey = request.IconKey.Trim(),
             Priority = request.Priority,
             RecommendedRamMb = request.RecommendedRamMb,
+            JvmArgsDefault = NormalizeLaunchArgs(request.JvmArgsDefault),
+            GameArgsDefault = NormalizeLaunchArgs(request.GameArgsDefault),
             BundledJavaPath = NormalizeBundledJavaPath(request.BundledJavaPath),
             BundledRuntimeKey = normalizedRuntimeKey
         };
@@ -138,6 +152,14 @@ public sealed class AdminProfilesController(
 
         var normalizedSlug = NormalizeSlug(request.Slug);
         var normalizedRuntimeKey = NormalizeBundledRuntimeKey(request.BundledRuntimeKey);
+        if (!TryValidateLaunchArgs(request.JvmArgsDefault, out var jvmError))
+        {
+            return BadRequest(new { error = $"JvmArgsDefault: {jvmError}" });
+        }
+        if (!TryValidateLaunchArgs(request.GameArgsDefault, out var gameError))
+        {
+            return BadRequest(new { error = $"GameArgsDefault: {gameError}" });
+        }
         if (!IsSlugValid(normalizedSlug))
         {
             return BadRequest(new { error = "Slug must contain only lowercase latin letters, numbers, and '-'." });
@@ -156,6 +178,8 @@ public sealed class AdminProfilesController(
         profile.IconKey = request.IconKey.Trim();
         profile.Priority = request.Priority;
         profile.RecommendedRamMb = request.RecommendedRamMb;
+        profile.JvmArgsDefault = NormalizeLaunchArgs(request.JvmArgsDefault);
+        profile.GameArgsDefault = NormalizeLaunchArgs(request.GameArgsDefault);
         profile.BundledJavaPath = NormalizeBundledJavaPath(request.BundledJavaPath);
         if (!string.Equals(profile.BundledRuntimeKey, normalizedRuntimeKey, StringComparison.Ordinal))
         {
@@ -250,9 +274,19 @@ public sealed class AdminProfilesController(
         [FromBody] ProfileRebuildRequest? request,
         CancellationToken cancellationToken)
     {
+        var rebuildRequest = request ?? new ProfileRebuildRequest();
+        if (!TryValidateLaunchArgs(rebuildRequest.JvmArgsDefault, out var jvmError))
+        {
+            return BadRequest(new { error = $"JvmArgsDefault: {jvmError}" });
+        }
+        if (!TryValidateLaunchArgs(rebuildRequest.GameArgsDefault, out var gameError))
+        {
+            return BadRequest(new { error = $"GameArgsDefault: {gameError}" });
+        }
+
         try
         {
-            var build = await buildPipelineService.RebuildProfileAsync(id, request ?? new ProfileRebuildRequest(), cancellationToken);
+            var build = await buildPipelineService.RebuildProfileAsync(id, rebuildRequest, cancellationToken);
             var profile = await dbContext.Profiles
                 .AsNoTracking()
                 .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
@@ -334,6 +368,8 @@ public sealed class AdminProfilesController(
             profile.IconKey,
             profile.Priority,
             profile.RecommendedRamMb,
+            profile.JvmArgsDefault,
+            profile.GameArgsDefault,
             profile.BundledJavaPath,
             profile.BundledRuntimeKey,
             profile.BundledRuntimeSha256,
@@ -367,5 +403,35 @@ public sealed class AdminProfilesController(
         return string.IsNullOrWhiteSpace(bundledRuntimeKey)
             ? string.Empty
             : bundledRuntimeKey.Trim().Replace('\\', '/').TrimStart('/');
+    }
+
+    private static string NormalizeLaunchArgs(string? rawArgs)
+    {
+        if (string.IsNullOrWhiteSpace(rawArgs))
+        {
+            return string.Empty;
+        }
+
+        var normalized = rawArgs.Replace("\r\n", "\n").Trim();
+        return normalized.Length <= 4096 ? normalized : normalized[..4096];
+    }
+
+    private static bool TryValidateLaunchArgs(string? rawArgs, out string error)
+    {
+        var normalized = rawArgs?.Trim() ?? string.Empty;
+        if (normalized.Length > 4096)
+        {
+            error = "must be 4096 characters or less.";
+            return false;
+        }
+
+        if (normalized.IndexOfAny([';', '&', '|', '`']) >= 0)
+        {
+            error = "contains forbidden separators (;, &, |, `).";
+            return false;
+        }
+
+        error = string.Empty;
+        return true;
     }
 }

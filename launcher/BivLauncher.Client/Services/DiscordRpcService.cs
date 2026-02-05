@@ -9,6 +9,24 @@ public sealed class DiscordRpcService(ILogService logService) : IDiscordRpcServi
     private DiscordRpcClient? _client;
     private string _currentAppId = string.Empty;
     private DateTime _sessionStartedUtc = DateTime.UtcNow;
+    private bool _globallyEnabled = true;
+    private bool _privacyMode;
+    private string _productName = "BivLauncher";
+
+    public void ConfigurePolicy(bool enabled, bool privacyMode, string productName)
+    {
+        lock (_syncRoot)
+        {
+            _globallyEnabled = enabled;
+            _privacyMode = privacyMode;
+            _productName = string.IsNullOrWhiteSpace(productName) ? "BivLauncher" : productName.Trim();
+
+            if (!_globallyEnabled)
+            {
+                DisposeClient();
+            }
+        }
+    }
 
     public void UpdateIdlePresence(ManagedServerItem? server)
     {
@@ -57,6 +75,12 @@ public sealed class DiscordRpcService(ILogService logService) : IDiscordRpcServi
     {
         lock (_syncRoot)
         {
+            if (!_globallyEnabled)
+            {
+                DisposeClient();
+                return;
+            }
+
             if (!TryEnsureClient(server))
             {
                 return;
@@ -69,20 +93,15 @@ public sealed class DiscordRpcService(ILogService logService) : IDiscordRpcServi
 
             try
             {
-                var details = string.IsNullOrWhiteSpace(server!.DiscordRpcDetails)
-                    ? server.DisplayName
-                    : server.DiscordRpcDetails.Trim();
-
-                var state = string.IsNullOrWhiteSpace(server.DiscordRpcState)
-                    ? fallbackState
-                    : server.DiscordRpcState.Trim();
+                var details = ResolveDetails(server!, fallbackState);
+                var state = ResolveState(server!, fallbackState);
 
                 var presence = new RichPresence
                 {
                     Details = details,
                     State = state,
                     Timestamps = new Timestamps(_sessionStartedUtc),
-                    Assets = BuildAssets(server)
+                    Assets = _privacyMode ? null : BuildAssets(server!)
                 };
 
                 _client.SetPresence(presence);
@@ -96,7 +115,7 @@ public sealed class DiscordRpcService(ILogService logService) : IDiscordRpcServi
 
     private bool TryEnsureClient(ManagedServerItem? server)
     {
-        if (server is null || !server.DiscordRpcEnabled || string.IsNullOrWhiteSpace(server.DiscordRpcAppId))
+        if (!_globallyEnabled || server is null || !server.DiscordRpcEnabled || string.IsNullOrWhiteSpace(server.DiscordRpcAppId))
         {
             DisposeClient();
             return false;
@@ -130,6 +149,36 @@ public sealed class DiscordRpcService(ILogService logService) : IDiscordRpcServi
             DisposeClient();
             return false;
         }
+    }
+
+    private string ResolveDetails(ManagedServerItem server, string fallbackState)
+    {
+        if (_privacyMode)
+        {
+            return _productName;
+        }
+
+        if (!string.IsNullOrWhiteSpace(server.DiscordRpcDetails))
+        {
+            return server.DiscordRpcDetails.Trim();
+        }
+
+        return server.DisplayName;
+    }
+
+    private string ResolveState(ManagedServerItem server, string fallbackState)
+    {
+        if (_privacyMode)
+        {
+            return fallbackState;
+        }
+
+        if (!string.IsNullOrWhiteSpace(server.DiscordRpcState))
+        {
+            return server.DiscordRpcState.Trim();
+        }
+
+        return fallbackState;
     }
 
     private static Assets? BuildAssets(ManagedServerItem server)

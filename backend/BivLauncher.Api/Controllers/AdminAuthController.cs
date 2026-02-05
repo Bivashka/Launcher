@@ -1,10 +1,12 @@
 using BivLauncher.Api.Contracts.Admin;
 using BivLauncher.Api.Data;
 using BivLauncher.Api.Data.Entities;
+using BivLauncher.Api.Infrastructure;
 using BivLauncher.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 
 namespace BivLauncher.Api.Controllers;
@@ -25,6 +27,7 @@ public sealed class AdminAuthController(
     }
 
     [HttpPost("setup")]
+    [EnableRateLimiting(RateLimitPolicies.AdminAuthPolicy)]
     public async Task<IActionResult> Setup([FromBody] AdminSetupRequest request, CancellationToken cancellationToken)
     {
         var adminExists = await dbContext.AdminUsers.AnyAsync(cancellationToken);
@@ -59,6 +62,7 @@ public sealed class AdminAuthController(
     }
 
     [HttpPost("login")]
+    [EnableRateLimiting(RateLimitPolicies.AdminAuthPolicy)]
     public async Task<IActionResult> Login([FromBody] AdminLoginRequest request, CancellationToken cancellationToken)
     {
         var normalizedUsername = request.Username.Trim();

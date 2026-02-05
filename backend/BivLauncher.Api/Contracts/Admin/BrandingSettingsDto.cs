@@ -7,4 +7,8 @@ public sealed record BrandingSettingsDto(
     string SupportUrl,
     string PrimaryColor,
     string AccentColor,
-    string LogoText);
+    string LogoText,
+    string BackgroundImageUrl,
+    double BackgroundOverlayOpacity,
+    string LoginCardPosition,
+    int LoginCardWidth);

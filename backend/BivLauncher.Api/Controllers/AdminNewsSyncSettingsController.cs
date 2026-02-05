@@ -99,7 +99,7 @@ public sealed class AdminNewsSyncSettingsController(
 
         try
         {
-            var result = await newsImportService.SyncAsync(sourceId: null, cancellationToken);
+            var result = await newsImportService.SyncAsync(sourceId: null, force: true, cancellationToken);
 
             config.LastRunAtUtc = DateTime.UtcNow;
             config.LastRunError = string.Empty;

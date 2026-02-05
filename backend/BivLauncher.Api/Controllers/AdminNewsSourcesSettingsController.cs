@@ -16,7 +16,7 @@ public sealed class AdminNewsSourcesSettingsController(
     INewsImportService newsImportService,
     IAdminAuditService auditService) : ControllerBase
 {
-    private static readonly HashSet<string> AllowedTypes = ["rss", "json", "markdown"];
+    private static readonly HashSet<string> AllowedTypes = ["rss", "json", "markdown", "telegram", "vk"];
 
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<NewsSourceSettingsDto>>> Get(CancellationToken cancellationToken)
@@ -51,6 +51,7 @@ public sealed class AdminNewsSourcesSettingsController(
             var type = item.Type.Trim().ToLowerInvariant();
             var url = item.Url.Trim();
             var maxItems = Math.Clamp(item.MaxItems, 1, 20);
+            var minFetchIntervalMinutes = Math.Clamp(item.MinFetchIntervalMinutes, 1, 1440);
 
             if (string.IsNullOrWhiteSpace(name))
             {
@@ -85,6 +86,7 @@ public sealed class AdminNewsSourcesSettingsController(
             target.Url = url;
             target.Enabled = item.Enabled;
             target.MaxItems = maxItems;
+            target.MinFetchIntervalMinutes = minFetchIntervalMinutes;
             target.UpdatedAtUtc = now;
             keepIds.Add(target.Id);
         }
@@ -126,7 +128,8 @@ public sealed class AdminNewsSourcesSettingsController(
     [HttpPost("sync")]
     public async Task<ActionResult<NewsSourcesSyncResponse>> Sync(
         [FromQuery] Guid? sourceId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        [FromQuery] bool force = false)
     {
         if (sourceId.HasValue)
         {
@@ -140,7 +143,7 @@ public sealed class AdminNewsSourcesSettingsController(
             }
         }
 
-        var summary = await newsImportService.SyncAsync(sourceId, cancellationToken);
+        var summary = await newsImportService.SyncAsync(sourceId, force, cancellationToken);
 
         var actor = User.Identity?.Name ?? "admin";
         await auditService.WriteAsync(
@@ -151,6 +154,7 @@ public sealed class AdminNewsSourcesSettingsController(
             details: new
             {
                 sourceId,
+                force,
                 summary.SourcesProcessed,
                 summary.Imported,
                 failedSources = summary.Results.Count(x => !string.IsNullOrWhiteSpace(x.Error))
@@ -169,7 +173,10 @@ public sealed class AdminNewsSourcesSettingsController(
             source.Url,
             source.Enabled,
             source.MaxItems,
+            source.MinFetchIntervalMinutes,
+            source.LastFetchAttemptAtUtc,
             source.LastSyncAtUtc,
+            source.LastContentChangeAtUtc,
             source.LastSyncError,
             source.UpdatedAtUtc);
     }

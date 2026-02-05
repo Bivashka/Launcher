@@ -13,4 +13,12 @@ public interface ILauncherApiService
     Task<bool> HasCapeAsync(string apiBaseUrl, string username, CancellationToken cancellationToken = default);
     Task<LauncherManifest> GetManifestAsync(string apiBaseUrl, string profileSlug, CancellationToken cancellationToken = default);
     Task<Stream> OpenAssetReadStreamAsync(string apiBaseUrl, string s3Key, CancellationToken cancellationToken = default);
+    Task<PublicCrashReportCreateResponse> SubmitCrashReportAsync(
+        string apiBaseUrl,
+        PublicCrashReportCreateRequest request,
+        CancellationToken cancellationToken = default);
+    Task<PublicInstallTelemetryTrackResponse> SubmitInstallTelemetryAsync(
+        string apiBaseUrl,
+        PublicInstallTelemetryTrackRequest request,
+        CancellationToken cancellationToken = default);
 }

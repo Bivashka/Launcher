@@ -140,6 +140,17 @@ namespace BivLauncher.Api.Data.Migrations
                         .HasMaxLength(512)
                         .HasColumnType("character varying(512)");
 
+                    b.Property<DateTime?>("TwoFactorEnrolledAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("TwoFactorRequired")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("TwoFactorSecret")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
                     b.Property<DateTime>("UpdatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -167,10 +178,25 @@ namespace BivLauncher.Api.Data.Migrations
                     b.Property<bool>("AllowDevFallback")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("AuthMode")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("LoginFieldKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.Property<string>("LoginUrl")
                         .IsRequired()
                         .HasMaxLength(512)
                         .HasColumnType("character varying(512)");
+
+                    b.Property<string>("PasswordFieldKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
 
                     b.Property<int>("TimeoutSeconds")
                         .HasColumnType("integer");
@@ -263,6 +289,101 @@ namespace BivLauncher.Api.Data.Migrations
                     b.ToTable("CapeAssets");
                 });
 
+            modelBuilder.Entity("BivLauncher.Api.Data.Entities.CrashReport", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CrashId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ErrorType")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<int?>("ExitCode")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("JavaVersion")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("LauncherVersion")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("LogExcerpt")
+                        .IsRequired()
+                        .HasMaxLength(16384)
+                        .HasColumnType("character varying(16384)");
+
+                    b.Property<string>("MetadataJson")
+                        .IsRequired()
+                        .HasMaxLength(4096)
+                        .HasColumnType("character varying(4096)");
+
+                    b.Property<DateTime>("OccurredAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("OsVersion")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("ProfileSlug")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<DateTime?>("ResolvedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("RouteCode")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("ServerName")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CrashId")
+                        .IsUnique();
+
+                    b.HasIndex("CreatedAtUtc");
+
+                    b.HasIndex("ProfileSlug");
+
+                    b.HasIndex("Status", "CreatedAtUtc");
+
+                    b.ToTable("CrashReports");
+                });
+
             modelBuilder.Entity("BivLauncher.Api.Data.Entities.DiscordRpcConfig", b =>
                 {
                     b.Property<Guid>("Id")
@@ -326,6 +447,83 @@ namespace BivLauncher.Api.Data.Migrations
                     b.ToTable("DiscordRpcConfigs");
                 });
 
+            modelBuilder.Entity("BivLauncher.Api.Data.Entities.DiscordRpcGlobalConfig", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("PrivacyMode")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UpdatedAtUtc");
+
+                    b.ToTable("DiscordRpcGlobalConfigs");
+                });
+
+            modelBuilder.Entity("BivLauncher.Api.Data.Entities.DocumentationArticle", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("BodyMarkdown")
+                        .IsRequired()
+                        .HasMaxLength(64000)
+                        .HasColumnType("character varying(64000)");
+
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Order")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("Published")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Slug")
+                        .IsRequired()
+                        .HasMaxLength(96)
+                        .HasColumnType("character varying(96)");
+
+                    b.Property<string>("Summary")
+                        .IsRequired()
+                        .HasMaxLength(1024)
+                        .HasColumnType("character varying(1024)");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Slug")
+                        .IsUnique();
+
+                    b.HasIndex("Category", "Order");
+
+                    b.HasIndex("Published", "UpdatedAtUtc");
+
+                    b.ToTable("DocumentationArticles");
+                });
+
             modelBuilder.Entity("BivLauncher.Api.Data.Entities.HardwareBan", b =>
                 {
                     b.Property<Guid>("Id")
@@ -358,6 +556,25 @@ namespace BivLauncher.Api.Data.Migrations
                     b.HasIndex("HwidHash");
 
                     b.ToTable("HardwareBans");
+                });
+
+            modelBuilder.Entity("BivLauncher.Api.Data.Entities.InstallTelemetryConfig", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UpdatedAtUtc");
+
+                    b.ToTable("InstallTelemetryConfigs");
                 });
 
             modelBuilder.Entity("BivLauncher.Api.Data.Entities.NewsItem", b =>
@@ -435,8 +652,24 @@ namespace BivLauncher.Api.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("CacheEtag")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<string>("CacheLastModified")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
                     b.Property<bool>("Enabled")
                         .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("LastContentChangeAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("LastFetchAttemptAtUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTime?>("LastSyncAtUtc")
                         .HasColumnType("timestamp with time zone");
@@ -447,6 +680,9 @@ namespace BivLauncher.Api.Data.Migrations
                         .HasColumnType("character varying(1024)");
 
                     b.Property<int>("MaxItems")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("MinFetchIntervalMinutes")
                         .HasColumnType("integer");
 
                     b.Property<string>("Name")
@@ -540,10 +776,20 @@ namespace BivLauncher.Api.Data.Migrations
                     b.Property<bool>("Enabled")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("GameArgsDefault")
+                        .IsRequired()
+                        .HasMaxLength(4096)
+                        .HasColumnType("character varying(4096)");
+
                     b.Property<string>("IconKey")
                         .IsRequired()
                         .HasMaxLength(512)
                         .HasColumnType("character varying(512)");
+
+                    b.Property<string>("JvmArgsDefault")
+                        .IsRequired()
+                        .HasMaxLength(4096)
+                        .HasColumnType("character varying(4096)");
 
                     b.Property<string>("LatestBuildId")
                         .IsRequired()
@@ -582,6 +828,46 @@ namespace BivLauncher.Api.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("Profiles");
+                });
+
+            modelBuilder.Entity("BivLauncher.Api.Data.Entities.ProjectInstallStat", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("FirstSeenAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LastLauncherVersion")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime>("LastSeenAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ProjectKey")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("ProjectName")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<int>("SeenCount")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LastSeenAtUtc");
+
+                    b.HasIndex("ProjectKey")
+                        .IsUnique();
+
+                    b.ToTable("ProjectInstallStats");
                 });
 
             modelBuilder.Entity("BivLauncher.Api.Data.Entities.RuntimeRetentionConfig", b =>
@@ -648,6 +934,11 @@ namespace BivLauncher.Api.Data.Migrations
                     b.Property<bool>("ForcePathStyle")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("LocalRootPath")
+                        .IsRequired()
+                        .HasMaxLength(1024)
+                        .HasColumnType("character varying(1024)");
+
                     b.Property<string>("SecretKey")
                         .IsRequired()
                         .HasMaxLength(256)
@@ -655,6 +946,9 @@ namespace BivLauncher.Api.Data.Migrations
 
                     b.Property<DateTime>("UpdatedAtUtc")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("UseS3")
+                        .HasColumnType("boolean");
 
                     b.Property<bool>("UseSsl")
                         .HasColumnType("boolean");
@@ -760,6 +1054,59 @@ namespace BivLauncher.Api.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("SkinAssets");
+                });
+
+            modelBuilder.Entity("BivLauncher.Api.Data.Entities.TwoFactorConfig", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UpdatedAtUtc");
+
+                    b.ToTable("TwoFactorConfigs");
+                });
+
+            modelBuilder.Entity("BivLauncher.Api.Data.Entities.WizardPreflightRun", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Actor")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("ChecksJson")
+                        .IsRequired()
+                        .HasMaxLength(16384)
+                        .HasColumnType("character varying(16384)");
+
+                    b.Property<int>("PassedCount")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("RanAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("TotalCount")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RanAtUtc");
+
+                    b.HasIndex("Actor", "RanAtUtc");
+
+                    b.ToTable("WizardPreflightRuns");
                 });
 
             modelBuilder.Entity("BivLauncher.Api.Data.Entities.Build", b =>

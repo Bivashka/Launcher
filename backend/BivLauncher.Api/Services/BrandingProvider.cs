@@ -27,7 +27,11 @@ public sealed class BrandingProvider(
         SupportUrl: "https://example.com/support",
         PrimaryColor: "#2F6FED",
         AccentColor: "#20C997",
-        LogoText: "BLP");
+        LogoText: "BLP",
+        BackgroundImageUrl: string.Empty,
+        BackgroundOverlayOpacity: 0.55,
+        LoginCardPosition: "center",
+        LoginCardWidth: 460);
 
     public async Task<BrandingConfig> GetBrandingAsync(CancellationToken cancellationToken = default)
     {
@@ -81,11 +85,51 @@ public sealed class BrandingProvider(
             SupportUrl: NormalizeValue(branding.SupportUrl, DefaultBranding.SupportUrl),
             PrimaryColor: NormalizeValue(branding.PrimaryColor, DefaultBranding.PrimaryColor),
             AccentColor: NormalizeValue(branding.AccentColor, DefaultBranding.AccentColor),
-            LogoText: NormalizeValue(branding.LogoText, DefaultBranding.LogoText));
+            LogoText: NormalizeValue(branding.LogoText, DefaultBranding.LogoText),
+            BackgroundImageUrl: NormalizeOptionalValue(branding.BackgroundImageUrl),
+            BackgroundOverlayOpacity: ClampDouble(branding.BackgroundOverlayOpacity, 0, 0.95, DefaultBranding.BackgroundOverlayOpacity),
+            LoginCardPosition: NormalizeLoginCardPosition(branding.LoginCardPosition),
+            LoginCardWidth: ClampInt(branding.LoginCardWidth, 340, 640, DefaultBranding.LoginCardWidth));
     }
 
     private static string NormalizeValue(string? value, string fallback)
     {
         return string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+    }
+
+    private static string NormalizeOptionalValue(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
+    }
+
+    private static double ClampDouble(double value, double min, double max, double fallback)
+    {
+        if (double.IsNaN(value) || double.IsInfinity(value))
+        {
+            return fallback;
+        }
+
+        return Math.Clamp(value, min, max);
+    }
+
+    private static int ClampInt(int value, int min, int max, int fallback)
+    {
+        if (value <= 0)
+        {
+            return fallback;
+        }
+
+        return Math.Clamp(value, min, max);
+    }
+
+    private static string NormalizeLoginCardPosition(string? position)
+    {
+        var normalized = (position ?? string.Empty).Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "left" => "left",
+            "right" => "right",
+            _ => "center"
+        };
     }
 }

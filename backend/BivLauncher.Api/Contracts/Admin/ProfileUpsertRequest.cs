@@ -28,6 +28,12 @@ public sealed class ProfileUpsertRequest
     [Range(512, 65536)]
     public int RecommendedRamMb { get; set; } = 2048;
 
+    [MaxLength(4096)]
+    public string JvmArgsDefault { get; set; } = string.Empty;
+
+    [MaxLength(4096)]
+    public string GameArgsDefault { get; set; } = string.Empty;
+
     [MaxLength(512)]
     public string BundledJavaPath { get; set; } = string.Empty;
 

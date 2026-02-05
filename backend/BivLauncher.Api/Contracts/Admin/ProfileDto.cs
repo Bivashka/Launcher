@@ -9,6 +9,8 @@ public sealed record ProfileDto(
     string IconKey,
     int Priority,
     int RecommendedRamMb,
+    string JvmArgsDefault,
+    string GameArgsDefault,
     string BundledJavaPath,
     string BundledRuntimeKey,
     string BundledRuntimeSha256,

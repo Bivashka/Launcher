@@ -112,8 +112,8 @@ public sealed class BuildPipelineService(
                 McVersion: mcVersion,
                 ClientVersion: clientVersion,
                 CreatedAtUtc: DateTime.UtcNow,
-                JvmArgsDefault: ResolveValue(request.JvmArgsDefault, options.Value.DefaultJvmArgs, "-Xms1024M -Xmx2048M"),
-                GameArgsDefault: ResolveValue(request.GameArgsDefault, options.Value.DefaultGameArgs, string.Empty),
+                JvmArgsDefault: ResolveValue(request.JvmArgsDefault, profile.JvmArgsDefault, options.Value.DefaultJvmArgs, "-Xms1024M -Xmx2048M"),
+                GameArgsDefault: ResolveValue(request.GameArgsDefault, profile.GameArgsDefault, options.Value.DefaultGameArgs, string.Empty),
                 JavaRuntime: javaRuntimePath,
                 JavaRuntimeArtifactKey: javaRuntimeArtifactKey,
                 JavaRuntimeArtifactSha256: javaRuntimeArtifactMetadata.Sha256,
@@ -222,6 +222,26 @@ public sealed class BuildPipelineService(
         }
 
         return [profileRoot];
+    }
+
+    private static string ResolveValue(string? preferred, string? fallback, string nextFallback, string hardFallback)
+    {
+        if (!string.IsNullOrWhiteSpace(preferred))
+        {
+            return preferred.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(fallback))
+        {
+            return fallback.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(nextFallback))
+        {
+            return nextFallback.Trim();
+        }
+
+        return hardFallback;
     }
 
     private static string ResolveValue(string? preferred, string? fallback, string hardFallback)

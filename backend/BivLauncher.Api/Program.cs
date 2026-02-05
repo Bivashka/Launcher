@@ -1,8 +1,10 @@
 using BivLauncher.Api.Data;
 using BivLauncher.Api.Data.Entities;
+using BivLauncher.Api.Infrastructure;
 using BivLauncher.Api.Options;
 using BivLauncher.Api.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -22,6 +24,9 @@ builder.Services.Configure<NewsRetentionOptions>(builder.Configuration.GetSectio
 builder.Services.Configure<RuntimeRetentionOptions>(builder.Configuration.GetSection(RuntimeRetentionOptions.SectionName));
 builder.Services.Configure<BuildPipelineOptions>(builder.Configuration.GetSection(BuildPipelineOptions.SectionName));
 builder.Services.Configure<AuthProviderOptions>(builder.Configuration.GetSection(AuthProviderOptions.SectionName));
+builder.Services.Configure<DeveloperSupportOptions>(builder.Configuration.GetSection(DeveloperSupportOptions.SectionName));
+builder.Services.Configure<InstallTelemetryOptions>(builder.Configuration.GetSection(InstallTelemetryOptions.SectionName));
+builder.Services.Configure<DiscordRpcOptions>(builder.Configuration.GetSection(DiscordRpcOptions.SectionName));
 
 var connectionString = builder.Configuration["DB_CONN"]
     ?? builder.Configuration.GetConnectionString("DefaultConnection")
@@ -35,6 +40,8 @@ builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 builder.Services.AddScoped<IAdminAuditService, AdminAuditService>();
 builder.Services.AddScoped<IBuildPipelineService, BuildPipelineService>();
 builder.Services.AddScoped<IExternalAuthService, ExternalAuthService>();
+builder.Services.AddSingleton<ITwoFactorService, TwoFactorService>();
+builder.Services.AddSingleton<IStorageMigrationService, StorageMigrationService>();
 builder.Services.AddScoped<INewsRetentionService, NewsRetentionService>();
 builder.Services.AddScoped<IRuntimeRetentionService, RuntimeRetentionService>();
 builder.Services.AddScoped<INewsImportService, NewsImportService>();
@@ -86,6 +93,18 @@ builder.Services.PostConfigure<JwtOptions>(options =>
 
 builder.Services.PostConfigure<S3Options>(options =>
 {
+    var useS3 = builder.Configuration["S3_USE_S3"];
+    if (bool.TryParse(useS3, out var parsedUseS3))
+    {
+        options.UseS3 = parsedUseS3;
+    }
+
+    var localRoot = builder.Configuration["S3_LOCAL_ROOT"];
+    if (!string.IsNullOrWhiteSpace(localRoot))
+    {
+        options.LocalRootPath = localRoot.Trim();
+    }
+
     options.Endpoint = builder.Configuration["S3_ENDPOINT"] ?? options.Endpoint;
     options.Bucket = builder.Configuration["S3_BUCKET"] ?? options.Bucket;
     options.AccessKey = builder.Configuration["S3_ACCESS_KEY"] ?? options.AccessKey;
@@ -176,6 +195,12 @@ builder.Services.PostConfigure<RuntimeRetentionOptions>(options =>
 
 builder.Services.PostConfigure<AuthProviderOptions>(options =>
 {
+    var authModeRaw = builder.Configuration["AUTH_PROVIDER_MODE"];
+    if (!string.IsNullOrWhiteSpace(authModeRaw))
+    {
+        options.AuthMode = authModeRaw.Trim();
+    }
+
     var explicitLoginUrl = builder.Configuration["AUTH_PROVIDER_LOGIN_URL"];
     if (!string.IsNullOrWhiteSpace(explicitLoginUrl))
     {
@@ -203,6 +228,18 @@ builder.Services.PostConfigure<AuthProviderOptions>(options =>
         }
     }
 
+    var loginFieldRaw = builder.Configuration["AUTH_PROVIDER_LOGIN_FIELD"];
+    if (!string.IsNullOrWhiteSpace(loginFieldRaw))
+    {
+        options.LoginFieldKey = loginFieldRaw.Trim();
+    }
+
+    var passwordFieldRaw = builder.Configuration["AUTH_PROVIDER_PASSWORD_FIELD"];
+    if (!string.IsNullOrWhiteSpace(passwordFieldRaw))
+    {
+        options.PasswordFieldKey = passwordFieldRaw.Trim();
+    }
+
     var timeoutRaw = builder.Configuration["AUTH_PROVIDER_TIMEOUT_SECONDS"];
     if (int.TryParse(timeoutRaw, out var timeoutSeconds))
     {
@@ -213,6 +250,39 @@ builder.Services.PostConfigure<AuthProviderOptions>(options =>
     if (bool.TryParse(allowDevFallbackRaw, out var allowDevFallback))
     {
         options.AllowDevFallback = allowDevFallback;
+    }
+});
+
+builder.Services.PostConfigure<DeveloperSupportOptions>(options =>
+{
+    options.DisplayName = builder.Configuration["DEV_SUPPORT_NAME"] ?? options.DisplayName;
+    options.Telegram = builder.Configuration["DEV_SUPPORT_TELEGRAM"] ?? options.Telegram;
+    options.Discord = builder.Configuration["DEV_SUPPORT_DISCORD"] ?? options.Discord;
+    options.Website = builder.Configuration["DEV_SUPPORT_WEBSITE"] ?? options.Website;
+    options.Notes = builder.Configuration["DEV_SUPPORT_NOTES"] ?? options.Notes;
+});
+
+builder.Services.PostConfigure<InstallTelemetryOptions>(options =>
+{
+    var enabledRaw = builder.Configuration["INSTALL_TELEMETRY_ENABLED"];
+    if (bool.TryParse(enabledRaw, out var enabled))
+    {
+        options.Enabled = enabled;
+    }
+});
+
+builder.Services.PostConfigure<DiscordRpcOptions>(options =>
+{
+    var enabledRaw = builder.Configuration["DISCORD_RPC_ENABLED"];
+    if (bool.TryParse(enabledRaw, out var enabled))
+    {
+        options.Enabled = enabled;
+    }
+
+    var privacyRaw = builder.Configuration["DISCORD_RPC_PRIVACY_MODE"];
+    if (bool.TryParse(privacyRaw, out var privacyMode))
+    {
+        options.PrivacyMode = privacyMode;
     }
 });
 
@@ -233,6 +303,10 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     });
 
 builder.Services.AddAuthorization();
+builder.Services.AddRateLimiter(options =>
+{
+    RateLimitPolicies.Configure(options);
+});
 
 var app = builder.Build();
 
@@ -249,6 +323,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors("AdminClient");
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 
