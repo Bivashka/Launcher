@@ -111,7 +111,7 @@ public partial class MainWindowViewModel : ViewModelBase
     private string _productName = "BivLauncher";
 
     [ObservableProperty]
-    private string _tagline = "РЈРїСЂР°РІР»СЏРµРјС‹Р№ Р»Р°СѓРЅС‡РµСЂ";
+    private string _tagline = "Управляемый лаунчер";
 
     [ObservableProperty]
     private IBrush _launcherBackgroundBrush = new LinearGradientBrush
@@ -166,7 +166,7 @@ public partial class MainWindowViewModel : ViewModelBase
     private double _loginCardWidth = 460;
 
     [ObservableProperty]
-    private string _statusText = "Р—Р°РіСЂСѓР·РєР°...";
+    private string _statusText = "Загрузка...";
 
     [ObservableProperty]
     private bool _isBusy;
@@ -229,7 +229,7 @@ public partial class MainWindowViewModel : ViewModelBase
     private string _playerLoggedInAs = string.Empty;
 
     [ObservableProperty]
-    private string _authStatusText = "РќРµ РІС‹РїРѕР»РЅРµРЅ РІС…РѕРґ.";
+    private string _authStatusText = "Не выполнен вход.";
 
     [ObservableProperty]
     private bool _isPlayerLoggedIn;
