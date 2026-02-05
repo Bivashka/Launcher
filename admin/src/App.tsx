@@ -1214,7 +1214,15 @@ function toSlug(value: string): string {
 }
 
 function App() {
-  const apiBaseUrl = useMemo(() => import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080', [])
+  const apiBaseUrl = useMemo(() => {
+    const configured = import.meta.env.VITE_API_BASE_URL
+    if (configured && configured.trim()) {
+      return configured.trim()
+    }
+
+    const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:'
+    return `${protocol}//${window.location.hostname}:8080`
+  }, [])
   const currentOrigin = useMemo(() => window.location.origin, [])
 
   const [phase, setPhase] = useState<Phase>('loading')
