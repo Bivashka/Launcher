@@ -120,9 +120,9 @@ public partial class MainWindowViewModel : ViewModelBase
         EndPoint = new RelativePoint(1, 1, RelativeUnit.Relative),
         GradientStops = new GradientStops
         {
-            new GradientStop(Color.Parse("#07111E"), 0),
-            new GradientStop(Color.Parse("#0C1C30"), 0.55),
-            new GradientStop(Color.Parse("#0A1524"), 1)
+            new GradientStop(Color.Parse("#22150F"), 0),
+            new GradientStop(Color.Parse("#1A120F"), 0.55),
+            new GradientStop(Color.Parse("#120D0B"), 1)
         }
     };
 
@@ -133,25 +133,25 @@ public partial class MainWindowViewModel : ViewModelBase
         EndPoint = new RelativePoint(1, 0, RelativeUnit.Relative),
         GradientStops = new GradientStops
         {
-            new GradientStop(Color.Parse("#103357"), 0),
-            new GradientStop(Color.Parse("#17416E"), 1)
+            new GradientStop(Color.Parse("#5B341F"), 0),
+            new GradientStop(Color.Parse("#7B4A2A"), 1)
         }
     };
 
     [ObservableProperty]
-    private IBrush _heroBorderBrush = new SolidColorBrush(Color.Parse("#4A7098"));
+    private IBrush _heroBorderBrush = new SolidColorBrush(Color.Parse("#A66A42"));
 
     [ObservableProperty]
-    private IBrush _loginCardBackgroundBrush = new SolidColorBrush(Color.Parse("#121F34"));
+    private IBrush _loginCardBackgroundBrush = new SolidColorBrush(Color.Parse("#2B1E16"));
 
     [ObservableProperty]
-    private IBrush _loginCardBorderBrush = new SolidColorBrush(Color.Parse("#2E557F"));
+    private IBrush _loginCardBorderBrush = new SolidColorBrush(Color.Parse("#7C583D"));
 
     [ObservableProperty]
-    private IBrush _playButtonBackgroundBrush = new SolidColorBrush(Color.Parse("#1F8F63"));
+    private IBrush _playButtonBackgroundBrush = new SolidColorBrush(Color.Parse("#33A874"));
 
     [ObservableProperty]
-    private IBrush _playButtonBorderBrush = new SolidColorBrush(Color.Parse("#4EC598"));
+    private IBrush _playButtonBorderBrush = new SolidColorBrush(Color.Parse("#7CE1B5"));
 
     [ObservableProperty]
     private IImage? _brandingBackgroundImage;
@@ -1429,11 +1429,11 @@ public partial class MainWindowViewModel : ViewModelBase
             ? T("tagline.default")
             : branding.Tagline.Trim();
 
-        var primary = ParseColorOrFallback(branding.PrimaryColor, "#2F6FED");
-        var accent = ParseColorOrFallback(branding.AccentColor, "#20C997");
-        var deep = ParseColorOrFallback("#07111E", "#07111E");
-        var panelBase = ParseColorOrFallback("#121F34", "#121F34");
-        var cardBorderBase = ParseColorOrFallback("#2E557F", "#2E557F");
+        var primary = ParseColorOrFallback(branding.PrimaryColor, "#FF8B38");
+        var accent = ParseColorOrFallback(branding.AccentColor, "#45D39C");
+        var deep = ParseColorOrFallback("#120D0B", "#120D0B");
+        var panelBase = ParseColorOrFallback("#2B1E16", "#2B1E16");
+        var cardBorderBase = ParseColorOrFallback("#7C583D", "#7C583D");
 
         LauncherBackgroundBrush = new LinearGradientBrush
         {

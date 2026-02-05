@@ -792,3 +792,178 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 }
+
+/* Full Redesign: Ember + Mint (non-blue) */
+:root {
+  --ui-bg-soft: rgba(26, 18, 13, 0.94);
+  --ui-bg-hard: rgba(16, 11, 8, 0.96);
+  --ui-panel: rgba(35, 24, 17, 0.9);
+  --ui-panel-alt: rgba(45, 30, 20, 0.86);
+  --ui-border: rgba(255, 171, 103, 0.34);
+  --ui-border-strong: rgba(255, 145, 73, 0.5);
+  --ui-text: #fff1e6;
+  --ui-muted: #d7baa4;
+  --ui-primary: #ff8b38;
+  --ui-primary-strong: #ff6f4a;
+  --ui-accent: #45d39c;
+  --ui-danger: #ff9b86;
+  --ui-success: #adf8cf;
+}
+
+.panel {
+  background:
+    radial-gradient(circle at 86% 12%, rgba(69, 211, 156, 0.14), transparent 48%),
+    radial-gradient(circle at 8% 0%, rgba(255, 146, 72, 0.16), transparent 42%),
+    linear-gradient(150deg, var(--ui-bg-soft), var(--ui-bg-hard));
+  color: var(--ui-text);
+  border-color: var(--ui-border);
+  box-shadow: 0 34px 80px rgba(10, 6, 4, 0.56), inset 0 1px 0 rgba(255, 214, 180, 0.08);
+}
+
+.panel h1,
+.panel h2,
+.panel h3 {
+  color: #fff4eb;
+}
+
+.muted,
+.panel .muted {
+  color: var(--ui-muted);
+}
+
+.status-pill {
+  color: var(--ui-success);
+  background: rgba(38, 101, 76, 0.34);
+  border-color: rgba(124, 255, 195, 0.42);
+}
+
+.auth-hero,
+.auth-form,
+.dashboard-sidebar,
+.dashboard-header,
+.overview-hero,
+.wizard-board,
+.wizard-quick,
+.wizard-preflight,
+.form-small,
+.grid-2 > section:not(.form-small),
+.list li,
+.wizard-steps li,
+.wizard-preflight-list li,
+.wizard-preflight-history-list li,
+.stat-card,
+.branding-preview-login > div,
+.markdown-preview {
+  background: linear-gradient(160deg, rgba(42, 28, 18, 0.9), rgba(24, 17, 13, 0.92));
+  border-color: var(--ui-border);
+  box-shadow: 0 12px 30px rgba(8, 5, 3, 0.38);
+}
+
+.auth-hero {
+  background:
+    radial-gradient(circle at 0% 0%, rgba(255, 148, 76, 0.26), transparent 46%),
+    radial-gradient(circle at 98% 98%, rgba(71, 213, 160, 0.2), transparent 42%),
+    linear-gradient(148deg, rgba(51, 31, 20, 0.9), rgba(26, 18, 13, 0.94));
+}
+
+.auth-kicker {
+  color: #ffc79b;
+}
+
+.auth-chip-grid span,
+.overview-tags span {
+  background: linear-gradient(132deg, rgba(63, 36, 21, 0.84), rgba(45, 25, 16, 0.82));
+  color: #ffe4cf;
+  border-color: rgba(255, 169, 103, 0.4);
+}
+
+.form input,
+.form select,
+.form textarea {
+  background: rgba(30, 20, 14, 0.9);
+  border-color: rgba(255, 169, 103, 0.3);
+  color: #fff2e7;
+}
+
+.form input:focus,
+.form select:focus,
+.form textarea:focus {
+  border-color: rgba(255, 162, 88, 0.88);
+  box-shadow: 0 0 0 3px rgba(255, 136, 58, 0.2);
+}
+
+button {
+  background: linear-gradient(132deg, var(--ui-primary), var(--ui-primary-strong));
+  border-color: rgba(255, 183, 133, 0.82);
+  box-shadow: 0 10px 24px rgba(133, 62, 23, 0.36);
+}
+
+button:hover {
+  box-shadow: 0 12px 26px rgba(153, 72, 28, 0.42);
+}
+
+.nav-item {
+  background: rgba(48, 30, 20, 0.78);
+  border-color: rgba(255, 164, 96, 0.26);
+}
+
+.nav-item small,
+.list-text small {
+  color: #d6b59d;
+}
+
+.nav-item.active {
+  background: linear-gradient(135deg, rgba(255, 142, 67, 0.96), rgba(240, 89, 77, 0.92));
+  border-color: rgba(255, 201, 152, 0.9);
+  box-shadow: 0 10px 24px rgba(131, 50, 23, 0.38);
+}
+
+.nav-item.active small {
+  color: #fff2e5;
+}
+
+.logout-btn {
+  background: linear-gradient(136deg, #ff5f5f, #e33e5c);
+  border-color: rgba(255, 170, 170, 0.8);
+}
+
+.wizard-summary {
+  border-color: rgba(119, 255, 188, 0.42);
+  background: rgba(32, 78, 56, 0.42);
+}
+
+.wizard-summary strong {
+  color: #dcffe9;
+}
+
+.wizard-summary small {
+  color: #9be6c5;
+}
+
+.wizard-progress-line > div {
+  background: linear-gradient(90deg, var(--ui-primary), var(--ui-accent));
+}
+
+.wizard-state {
+  border-color: rgba(255, 164, 93, 0.42);
+  background: rgba(84, 49, 30, 0.52);
+  color: #ffe5cf;
+}
+
+.wizard-state.done {
+  border-color: rgba(118, 255, 198, 0.46);
+  background: rgba(35, 82, 59, 0.56);
+  color: #d9ffe9;
+}
+
+.warning-note {
+  color: #ffc88f;
+}
+
+.notice {
+  color: #a8f6cb;
+}
+
+.error {
+  color: var(--ui-danger);
+}
