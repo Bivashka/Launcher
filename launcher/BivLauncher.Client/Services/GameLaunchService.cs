@@ -2,6 +2,7 @@ using BivLauncher.Client.Models;
 using System.Diagnostics;
 using System.Text;
 using System.Globalization;
+using System.IO.Compression;
 
 namespace BivLauncher.Client.Services;
 
@@ -161,19 +162,21 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
             var preferredAbsolutePath = ResolveSafePath(instanceDirectory, normalizedPreferred);
             if (File.Exists(preferredAbsolutePath))
             {
-                if (IsLikelyJarArchive(preferredAbsolutePath))
+                if (TryValidateJarArchive(preferredAbsolutePath, requireMainClass: true, out var preferredReason))
                 {
                     return preferredAbsolutePath;
                 }
 
                 logService.LogInfo(
-                    $"Selected route jar '{normalizedPreferred}' exists but is not a valid JAR archive. Trying fallback jar.");
+                    $"Selected route jar '{normalizedPreferred}' is not launchable: {preferredReason}. Trying fallback jar.");
 
                 var fallbackByPreferred = ResolveBestJarCandidate(
                     manifest,
                     instanceDirectory,
                     preferredFileName: Path.GetFileName(normalizedPreferred),
-                    excludedAbsolutePath: preferredAbsolutePath);
+                    excludedAbsolutePath: preferredAbsolutePath,
+                    requireMainClass: true,
+                    out var fallbackReason);
                 if (!string.IsNullOrWhiteSpace(fallbackByPreferred))
                 {
                     var resolvedRelative = NormalizePath(Path.GetRelativePath(instanceDirectory, fallbackByPreferred));
@@ -182,8 +185,8 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
                 }
 
                 throw new InvalidDataException(
-                    $"Selected route jar '{normalizedPreferred}' is not a valid JAR archive. " +
-                    "Upload a real .jar file or fix MainJarPath/RuJarPath.");
+                    $"Selected route jar '{normalizedPreferred}' is not launchable ({preferredReason}). " +
+                    $"No fallback launchable jar found. Details: {fallbackReason}");
             }
 
             var preferredFileName = Path.GetFileName(normalizedPreferred);
@@ -191,7 +194,9 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
                 manifest,
                 instanceDirectory,
                 preferredFileName,
-                excludedAbsolutePath: string.Empty);
+                excludedAbsolutePath: string.Empty,
+                requireMainClass: true,
+                out var fallbackMissingReason);
             if (!string.IsNullOrWhiteSpace(fallbackByMissingPreferred))
             {
                 var resolvedRelative = NormalizePath(Path.GetRelativePath(instanceDirectory, fallbackByMissingPreferred));
@@ -201,7 +206,8 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
             }
 
             throw new FileNotFoundException(
-                $"Selected route jar '{normalizedPreferred}' does not exist in instance directory.",
+                $"Selected route jar '{normalizedPreferred}' does not exist and no fallback launchable jar was found. " +
+                $"Details: {fallbackMissingReason}",
                 preferredAbsolutePath);
         }
 
@@ -209,13 +215,16 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
             manifest,
             instanceDirectory,
             preferredFileName: string.Empty,
-            excludedAbsolutePath: string.Empty);
+            excludedAbsolutePath: string.Empty,
+            requireMainClass: true,
+            out var autoResolveReason);
         if (!string.IsNullOrWhiteSpace(autoResolved))
         {
             return autoResolved;
         }
 
-        throw new InvalidOperationException("No launchable .jar file found in manifest or instance directory.");
+        throw new InvalidOperationException(
+            $"No launchable .jar file found in manifest or instance directory. Details: {autoResolveReason}");
     }
 
     private static string ResolveClasspath(LauncherManifest manifest, string instanceDirectory, string preferredJarPath)
@@ -352,7 +361,7 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
         }
 
         var path = ResolveSafePath(instanceDirectory, normalized);
-        if (File.Exists(path) && IsLikelyJarArchive(path))
+        if (File.Exists(path) && TryValidateJarArchive(path, requireMainClass: false, out _))
         {
             return path;
         }
@@ -362,14 +371,18 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
             manifest,
             instanceDirectory,
             preferredFileName,
-            excludedAbsolutePath: path);
+            excludedAbsolutePath: path,
+            requireMainClass: false,
+            out _);
     }
 
     private static string ResolveBestJarCandidate(
         LauncherManifest manifest,
         string instanceDirectory,
         string preferredFileName,
-        string excludedAbsolutePath)
+        string excludedAbsolutePath,
+        bool requireMainClass,
+        out string diagnostic)
     {
         var normalizedPreferredFileName = string.IsNullOrWhiteSpace(preferredFileName)
             ? string.Empty
@@ -378,7 +391,7 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
             ? string.Empty
             : Path.GetFullPath(excludedAbsolutePath);
 
-        var candidates = new List<(string RelativePath, string AbsolutePath, int Score, bool IsValidJar)>();
+        var candidates = new List<(string RelativePath, string AbsolutePath, int Score)>();
         var seenAbsolutePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var manifestPath in manifest.Files.Select(x => x.Path))
@@ -406,12 +419,7 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
             }
 
             var normalizedRelativePath = NormalizePath(manifestPath);
-            var isValidJar = IsLikelyJarArchive(absolutePath);
-            candidates.Add((
-                normalizedRelativePath,
-                absolutePath,
-                ScoreJarCandidate(normalizedRelativePath, normalizedPreferredFileName, fromManifest: true, isValidJar),
-                isValidJar));
+            candidates.Add((normalizedRelativePath, absolutePath, ScoreJarCandidate(normalizedRelativePath, normalizedPreferredFileName, fromManifest: true)));
         }
 
         if (Directory.Exists(instanceDirectory))
@@ -430,34 +438,39 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
                 }
 
                 var normalizedRelativePath = NormalizePath(Path.GetRelativePath(instanceDirectory, absolutePath));
-                var isValidJar = IsLikelyJarArchive(absolutePath);
-                candidates.Add((
-                    normalizedRelativePath,
-                    absolutePath,
-                    ScoreJarCandidate(normalizedRelativePath, normalizedPreferredFileName, fromManifest: false, isValidJar),
-                    isValidJar));
+                candidates.Add((normalizedRelativePath, absolutePath, ScoreJarCandidate(normalizedRelativePath, normalizedPreferredFileName, fromManifest: false)));
             }
         }
 
-        return candidates
+        var invalidDiagnostics = new List<string>();
+        foreach (var candidate in candidates
             .OrderByDescending(x => x.Score)
             .ThenBy(x => x.RelativePath.Length)
-            .ThenBy(x => x.RelativePath, StringComparer.OrdinalIgnoreCase)
-            .Where(x => x.IsValidJar)
-            .Select(x => x.AbsolutePath)
-            .FirstOrDefault() ?? string.Empty;
+            .ThenBy(x => x.RelativePath, StringComparer.OrdinalIgnoreCase))
+        {
+            if (TryValidateJarArchive(candidate.AbsolutePath, requireMainClass, out var validationReason))
+            {
+                diagnostic = string.Empty;
+                return candidate.AbsolutePath;
+            }
+
+            if (invalidDiagnostics.Count < 3)
+            {
+                invalidDiagnostics.Add($"{candidate.RelativePath}: {validationReason}");
+            }
+        }
+
+        diagnostic = invalidDiagnostics.Count == 0
+            ? "No .jar candidates found."
+            : string.Join(" | ", invalidDiagnostics);
+        return string.Empty;
     }
 
-    private static int ScoreJarCandidate(string relativePath, string preferredFileName, bool fromManifest, bool isValidJar)
+    private static int ScoreJarCandidate(string relativePath, string preferredFileName, bool fromManifest)
     {
         var normalizedRelativePath = NormalizePath(relativePath).TrimStart('/');
         var fileName = Path.GetFileName(normalizedRelativePath);
         var score = fromManifest ? 250 : 0;
-
-        if (!isValidJar)
-        {
-            score -= 5000;
-        }
 
         if (!string.IsNullOrWhiteSpace(preferredFileName) &&
             string.Equals(fileName, preferredFileName, StringComparison.OrdinalIgnoreCase))
@@ -500,31 +513,61 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
         return score;
     }
 
-    private static bool IsLikelyJarArchive(string filePath)
+    private static bool TryValidateJarArchive(string filePath, bool requireMainClass, out string reason)
     {
         try
         {
             var fileInfo = new FileInfo(filePath);
-            if (!fileInfo.Exists || fileInfo.Length < 4)
+            if (!fileInfo.Exists)
             {
+                reason = "file not found";
                 return false;
             }
 
-            using var stream = File.OpenRead(filePath);
-            Span<byte> header = stackalloc byte[4];
-            var read = stream.Read(header);
-            if (read < 4)
+            if (fileInfo.Length < 4)
             {
+                reason = "file is too small";
                 return false;
             }
 
-            return header[0] == 0x50 &&
-                   header[1] == 0x4B &&
-                   (header[2] == 0x03 || header[2] == 0x05 || header[2] == 0x07) &&
-                   (header[3] == 0x04 || header[3] == 0x06 || header[3] == 0x08);
+            using var archive = ZipFile.OpenRead(filePath);
+            if (archive.Entries.Count == 0)
+            {
+                reason = "archive has no entries";
+                return false;
+            }
+
+            if (!requireMainClass)
+            {
+                reason = string.Empty;
+                return true;
+            }
+
+            var manifestEntry = archive.Entries
+                .FirstOrDefault(x => x.FullName.Equals("META-INF/MANIFEST.MF", StringComparison.OrdinalIgnoreCase));
+            if (manifestEntry is null)
+            {
+                reason = "META-INF/MANIFEST.MF is missing";
+                return false;
+            }
+
+            using var reader = new StreamReader(manifestEntry.Open(), Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+            var manifestContent = reader.ReadToEnd();
+            var hasMainClass = manifestContent
+                .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                .Any(line => line.TrimStart().StartsWith("Main-Class:", StringComparison.OrdinalIgnoreCase));
+            if (!hasMainClass)
+            {
+                reason = "Main-Class is missing in MANIFEST.MF";
+                return false;
+            }
+
+            reason = string.Empty;
+            return true;
         }
-        catch
+        catch (Exception ex)
         {
+            reason = ex.Message;
             return false;
         }
     }
