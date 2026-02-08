@@ -34,6 +34,8 @@ public sealed class InstallProgressInfo
     public required string Message { get; init; }
     public int ProcessedFiles { get; init; }
     public int TotalFiles { get; init; }
+    public int DownloadedFiles { get; init; }
+    public int VerifiedFiles { get; init; }
     public string CurrentFilePath { get; init; } = string.Empty;
 }
 

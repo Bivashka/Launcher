@@ -132,7 +132,7 @@
           <Border Classes="featurePanel"
                   Background="{Binding PanelBackgroundBrush}"
                   BorderBrush="{Binding PanelBorderBrush}">
-            <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,*" RowSpacing="12">
+            <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,*" RowSpacing="12">
               <TextBlock Classes="sectionTitle"
                          Foreground="{Binding PrimaryTextBrush}"
                          Text="{Binding PlayButtonText}" />
@@ -165,7 +165,39 @@
                          Foreground="{Binding SecondaryTextBrush}"
                          Text="{Binding AuthStatusText}"
                          TextWrapping="Wrap" />
-              <StackPanel Grid.Row="5"
+
+              <Border Grid.Row="5"
+                      IsVisible="{Binding IsFileSyncInProgress}"
+                      CornerRadius="12"
+                      BorderThickness="1"
+                      Background="{Binding ListBackgroundBrush}"
+                      BorderBrush="{Binding ListBorderBrush}"
+                      Padding="12">
+                <StackPanel Spacing="7">
+                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                    <TextBlock Foreground="{Binding PrimaryTextBrush}"
+                               FontWeight="SemiBold"
+                               Text="{Binding FileSyncStageText}" />
+                    <TextBlock Grid.Column="1"
+                               Foreground="{Binding PrimaryTextBrush}"
+                               Text="{Binding FileSyncPercentText}" />
+                  </Grid>
+                  <ProgressBar Minimum="0"
+                               Maximum="100"
+                               Height="8"
+                               Value="{Binding FileSyncProgressPercent}" />
+                  <TextBlock Classes="subtle"
+                             Foreground="{Binding SecondaryTextBrush}"
+                             Text="{Binding FileSyncSummaryText}" />
+                  <TextBlock Classes="subtle"
+                             Foreground="{Binding SecondaryTextBrush}"
+                             Text="{Binding FileSyncCurrentFileText}"
+                             TextWrapping="Wrap"
+                             MaxHeight="36" />
+                </StackPanel>
+              </Border>
+
+              <StackPanel Grid.Row="6"
                           Orientation="Horizontal"
                           Spacing="10"
                           VerticalAlignment="Bottom">

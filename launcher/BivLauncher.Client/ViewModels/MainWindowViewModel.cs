@@ -327,6 +327,30 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty]
     private int _updateDownloadProgressPercent;
 
+    [ObservableProperty]
+    private bool _isFileSyncInProgress;
+
+    [ObservableProperty]
+    private string _fileSyncStageText = string.Empty;
+
+    [ObservableProperty]
+    private string _fileSyncCurrentFileText = string.Empty;
+
+    [ObservableProperty]
+    private int _fileSyncProgressPercent;
+
+    [ObservableProperty]
+    private int _fileSyncProcessedFiles;
+
+    [ObservableProperty]
+    private int _fileSyncTotalFiles;
+
+    [ObservableProperty]
+    private int _fileSyncDownloadedFiles;
+
+    [ObservableProperty]
+    private int _fileSyncVerifiedFiles;
+
     public string RefreshButtonText => T("button.refresh");
     public string SaveSettingsButtonText => T("button.saveSettings");
     public string ServersHeaderText => T("header.servers");
@@ -373,6 +397,10 @@ public partial class MainWindowViewModel : ViewModelBase
     public string UpdateDownloadProgressText => IsUpdateDownloading
         ? $"Downloading... {UpdateDownloadProgressPercent}%"
         : UpdateDownloadStatusText;
+    public string FileSyncSummaryText => FileSyncTotalFiles > 0
+        ? $"{FileSyncProcessedFiles}/{FileSyncTotalFiles}  Downloaded: {FileSyncDownloadedFiles}  Verified: {FileSyncVerifiedFiles}"
+        : "Preparing file synchronization...";
+    public string FileSyncPercentText => $"{FileSyncProgressPercent}%";
     public bool HasUpdateReleaseNotes => !string.IsNullOrWhiteSpace(UpdateReleaseNotes);
     public bool IsUpdatePackageReady => !string.IsNullOrWhiteSpace(DownloadedUpdatePackagePath) && File.Exists(DownloadedUpdatePackagePath);
     public bool HasBrandingBackgroundImage => BrandingBackgroundImage is not null;
@@ -576,6 +604,31 @@ public partial class MainWindowViewModel : ViewModelBase
         OnPropertyChanged(nameof(UpdateDownloadProgressText));
     }
 
+    partial void OnFileSyncProgressPercentChanged(int value)
+    {
+        OnPropertyChanged(nameof(FileSyncPercentText));
+    }
+
+    partial void OnFileSyncProcessedFilesChanged(int value)
+    {
+        OnPropertyChanged(nameof(FileSyncSummaryText));
+    }
+
+    partial void OnFileSyncTotalFilesChanged(int value)
+    {
+        OnPropertyChanged(nameof(FileSyncSummaryText));
+    }
+
+    partial void OnFileSyncDownloadedFilesChanged(int value)
+    {
+        OnPropertyChanged(nameof(FileSyncSummaryText));
+    }
+
+    partial void OnFileSyncVerifiedFilesChanged(int value)
+    {
+        OnPropertyChanged(nameof(FileSyncSummaryText));
+    }
+
     partial void OnBrandingBackgroundImageChanged(IImage? value)
     {
         OnPropertyChanged(nameof(HasBrandingBackgroundImage));
@@ -631,6 +684,55 @@ public partial class MainWindowViewModel : ViewModelBase
     private bool CanOperate() => !IsBusy;
 
     private bool CanVerifyOrLaunch() => !IsBusy && IsPlayerLoggedIn && SelectedServer is not null;
+
+    private void StartFileSyncProgress()
+    {
+        IsFileSyncInProgress = true;
+        FileSyncStageText = "Syncing client files...";
+        FileSyncCurrentFileText = string.Empty;
+        FileSyncProgressPercent = 0;
+        FileSyncProcessedFiles = 0;
+        FileSyncTotalFiles = 0;
+        FileSyncDownloadedFiles = 0;
+        FileSyncVerifiedFiles = 0;
+    }
+
+    private void UpdateFileSyncProgress(InstallProgressInfo info)
+    {
+        FileSyncProcessedFiles = Math.Max(0, info.ProcessedFiles);
+        FileSyncTotalFiles = Math.Max(0, info.TotalFiles);
+        FileSyncDownloadedFiles = Math.Max(0, info.DownloadedFiles);
+        FileSyncVerifiedFiles = Math.Max(0, info.VerifiedFiles);
+        FileSyncCurrentFileText = string.IsNullOrWhiteSpace(info.CurrentFilePath) ? info.Message : info.CurrentFilePath;
+
+        if (FileSyncTotalFiles > 0)
+        {
+            FileSyncProgressPercent = (int)Math.Clamp(
+                (double)FileSyncProcessedFiles / FileSyncTotalFiles * 100d,
+                0d,
+                100d);
+        }
+        else
+        {
+            FileSyncProgressPercent = 0;
+        }
+    }
+
+    private void CompleteFileSyncProgress(InstallResult result)
+    {
+        FileSyncProcessedFiles = result.DownloadedFiles + result.VerifiedFiles;
+        FileSyncTotalFiles = FileSyncProcessedFiles;
+        FileSyncDownloadedFiles = result.DownloadedFiles;
+        FileSyncVerifiedFiles = result.VerifiedFiles;
+        FileSyncProgressPercent = 100;
+        FileSyncStageText = "Client files are ready.";
+        FileSyncCurrentFileText = string.Empty;
+    }
+
+    private void StopFileSyncProgress()
+    {
+        IsFileSyncInProgress = false;
+    }
 
     private async Task RefreshAsync()
     {
@@ -757,24 +859,33 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             HasCrash = false;
             CrashSummary = string.Empty;
-
-            StatusText = T("status.fetchingManifest");
-            var manifest = await _launcherApiService.GetManifestAsync(ApiBaseUrl, SelectedServer.ProfileSlug);
-
-            var progress = new Progress<InstallProgressInfo>(info =>
+            StartFileSyncProgress();
+            try
             {
-                var currentPath = string.IsNullOrWhiteSpace(info.CurrentFilePath) ? info.Message : info.CurrentFilePath;
-                StatusText = F("status.verifyingProgress", info.ProcessedFiles, info.TotalFiles, currentPath);
-            });
+                StatusText = T("status.fetchingManifest");
+                var manifest = await _launcherApiService.GetManifestAsync(ApiBaseUrl, SelectedServer.ProfileSlug);
 
-            var result = await _manifestInstallerService.VerifyAndInstallAsync(
-                ApiBaseUrl,
-                manifest,
-                InstallDirectory,
-                progress);
+                var progress = new Progress<InstallProgressInfo>(info =>
+                {
+                    UpdateFileSyncProgress(info);
+                    var currentPath = string.IsNullOrWhiteSpace(info.CurrentFilePath) ? info.Message : info.CurrentFilePath;
+                    StatusText = F("status.verifyingProgress", info.ProcessedFiles, info.TotalFiles, currentPath);
+                });
 
-            StatusText = F("status.verifyComplete", result.DownloadedFiles, result.VerifiedFiles);
-            _logService.LogInfo(StatusText);
+                var result = await _manifestInstallerService.VerifyAndInstallAsync(
+                    ApiBaseUrl,
+                    manifest,
+                    InstallDirectory,
+                    progress);
+
+                CompleteFileSyncProgress(result);
+                StatusText = F("status.verifyComplete", result.DownloadedFiles, result.VerifiedFiles);
+                _logService.LogInfo(StatusText);
+            }
+            finally
+            {
+                StopFileSyncProgress();
+            }
         });
     }
 
@@ -804,8 +915,10 @@ public partial class MainWindowViewModel : ViewModelBase
                 StatusText = T("status.fetchingManifest");
                 manifest = await _launcherApiService.GetManifestAsync(ApiBaseUrl, selectedServer.ProfileSlug);
 
+                StartFileSyncProgress();
                 var progress = new Progress<InstallProgressInfo>(info =>
                 {
+                    UpdateFileSyncProgress(info);
                     var currentPath = string.IsNullOrWhiteSpace(info.CurrentFilePath) ? info.Message : info.CurrentFilePath;
                     StatusText = F("status.verifyingProgress", info.ProcessedFiles, info.TotalFiles, currentPath);
                 });
@@ -815,6 +928,8 @@ public partial class MainWindowViewModel : ViewModelBase
                     manifest,
                     InstallDirectory,
                     progress);
+                CompleteFileSyncProgress(installResult);
+                StopFileSyncProgress();
 
                 StatusText = T("status.launchingJava");
                 launchRoute = ResolveLaunchRoute(selectedServer);
@@ -844,6 +959,7 @@ public partial class MainWindowViewModel : ViewModelBase
             catch (Exception ex)
             {
                 launchException = ex;
+                StopFileSyncProgress();
                 _logService.LogError(ex.ToString());
             }
 

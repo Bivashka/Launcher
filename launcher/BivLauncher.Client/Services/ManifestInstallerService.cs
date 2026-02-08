@@ -84,6 +84,8 @@ public sealed class ManifestInstallerService(
                 Message = file.Path,
                 ProcessedFiles = processed,
                 TotalFiles = totalFiles,
+                DownloadedFiles = downloaded,
+                VerifiedFiles = verified,
                 CurrentFilePath = file.Path
             });
         }

@@ -145,41 +145,39 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
         return "java";
     }
 
-    private static string ResolveGameJar(LauncherManifest manifest, string instanceDirectory, string preferredJarPath)
+    private string ResolveGameJar(LauncherManifest manifest, string instanceDirectory, string preferredJarPath)
     {
-        var normalizedPreferred = preferredJarPath.Trim();
+        var normalizedPreferred = NormalizeRelativeJarPath(preferredJarPath);
         if (!string.IsNullOrWhiteSpace(normalizedPreferred))
         {
-            var preferredAbsolutePath = Path.Combine(instanceDirectory, normalizedPreferred.Replace('/', Path.DirectorySeparatorChar));
-            if (!File.Exists(preferredAbsolutePath))
+            var preferredAbsolutePath = ResolveSafePath(instanceDirectory, normalizedPreferred);
+            if (File.Exists(preferredAbsolutePath))
             {
-                throw new FileNotFoundException("Selected route minecraft.jar does not exist in instance directory.", preferredAbsolutePath);
+                return preferredAbsolutePath;
             }
 
-            return preferredAbsolutePath;
+            var preferredFileName = Path.GetFileName(normalizedPreferred);
+            var fallbackByPreferred = ResolveBestJarCandidate(manifest, instanceDirectory, preferredFileName);
+            if (!string.IsNullOrWhiteSpace(fallbackByPreferred))
+            {
+                var resolvedRelative = NormalizePath(Path.GetRelativePath(instanceDirectory, fallbackByPreferred));
+                logService.LogInfo(
+                    $"Selected route jar '{normalizedPreferred}' was not found. Fallback jar: {resolvedRelative}");
+                return fallbackByPreferred;
+            }
+
+            throw new FileNotFoundException(
+                $"Selected route jar '{normalizedPreferred}' does not exist in instance directory.",
+                preferredAbsolutePath);
         }
 
-        var jarEntry = manifest.Files
-            .Select(x => x.Path)
-            .FirstOrDefault(path =>
-                path.EndsWith(".jar", StringComparison.OrdinalIgnoreCase) &&
-                path.Contains("minecraft", StringComparison.OrdinalIgnoreCase))
-            ?? manifest.Files
-                .Select(x => x.Path)
-                .FirstOrDefault(path => path.EndsWith(".jar", StringComparison.OrdinalIgnoreCase));
-
-        if (string.IsNullOrWhiteSpace(jarEntry))
+        var autoResolved = ResolveBestJarCandidate(manifest, instanceDirectory, preferredFileName: string.Empty);
+        if (!string.IsNullOrWhiteSpace(autoResolved))
         {
-            throw new InvalidOperationException("No .jar file was found in manifest. Cannot launch.");
+            return autoResolved;
         }
 
-        var jarPath = Path.Combine(instanceDirectory, jarEntry.Replace('/', Path.DirectorySeparatorChar));
-        if (!File.Exists(jarPath))
-        {
-            throw new FileNotFoundException("Game jar file does not exist in instance directory.", jarPath);
-        }
-
-        return jarPath;
+        throw new InvalidOperationException("No launchable .jar file found in manifest or instance directory.");
     }
 
     private static string ResolveClasspath(LauncherManifest manifest, string instanceDirectory, string preferredJarPath)
@@ -199,7 +197,7 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
             }
         }
 
-        var selectedRouteJar = TryResolveRouteJar(instanceDirectory, preferredJarPath);
+        var selectedRouteJar = TryResolveRouteJar(manifest, instanceDirectory, preferredJarPath);
         if (!string.IsNullOrWhiteSpace(selectedRouteJar) &&
             !resolved.Contains(selectedRouteJar, StringComparer.OrdinalIgnoreCase))
         {
@@ -302,16 +300,137 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
         return fullPath;
     }
 
-    private static string TryResolveRouteJar(string instanceDirectory, string preferredJarPath)
+    private static string NormalizePath(string rawPath)
     {
-        var normalized = preferredJarPath.Trim();
+        return rawPath.Replace('\\', '/');
+    }
+
+    private static string TryResolveRouteJar(LauncherManifest manifest, string instanceDirectory, string preferredJarPath)
+    {
+        var normalized = NormalizeRelativeJarPath(preferredJarPath);
         if (string.IsNullOrWhiteSpace(normalized))
         {
             return string.Empty;
         }
 
-        var path = Path.Combine(instanceDirectory, normalized.Replace('/', Path.DirectorySeparatorChar));
-        return File.Exists(path) ? path : string.Empty;
+        var path = ResolveSafePath(instanceDirectory, normalized);
+        if (File.Exists(path))
+        {
+            return path;
+        }
+
+        var preferredFileName = Path.GetFileName(normalized);
+        return ResolveBestJarCandidate(manifest, instanceDirectory, preferredFileName);
+    }
+
+    private static string ResolveBestJarCandidate(
+        LauncherManifest manifest,
+        string instanceDirectory,
+        string preferredFileName)
+    {
+        var normalizedPreferredFileName = string.IsNullOrWhiteSpace(preferredFileName)
+            ? string.Empty
+            : preferredFileName.Trim();
+
+        var candidates = new List<(string RelativePath, string AbsolutePath, int Score)>();
+        var seenAbsolutePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var manifestPath in manifest.Files.Select(x => x.Path))
+        {
+            if (!manifestPath.EndsWith(".jar", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var absolutePath = ResolveSafePath(instanceDirectory, manifestPath);
+            if (!File.Exists(absolutePath))
+            {
+                continue;
+            }
+
+            if (!seenAbsolutePaths.Add(absolutePath))
+            {
+                continue;
+            }
+
+            var normalizedRelativePath = NormalizePath(manifestPath);
+            candidates.Add((normalizedRelativePath, absolutePath, ScoreJarCandidate(normalizedRelativePath, normalizedPreferredFileName, fromManifest: true)));
+        }
+
+        if (Directory.Exists(instanceDirectory))
+        {
+            foreach (var absolutePath in Directory.EnumerateFiles(instanceDirectory, "*.jar", SearchOption.AllDirectories))
+            {
+                if (!seenAbsolutePaths.Add(absolutePath))
+                {
+                    continue;
+                }
+
+                var normalizedRelativePath = NormalizePath(Path.GetRelativePath(instanceDirectory, absolutePath));
+                candidates.Add((normalizedRelativePath, absolutePath, ScoreJarCandidate(normalizedRelativePath, normalizedPreferredFileName, fromManifest: false)));
+            }
+        }
+
+        return candidates
+            .OrderByDescending(x => x.Score)
+            .ThenBy(x => x.RelativePath.Length)
+            .ThenBy(x => x.RelativePath, StringComparer.OrdinalIgnoreCase)
+            .Select(x => x.AbsolutePath)
+            .FirstOrDefault() ?? string.Empty;
+    }
+
+    private static int ScoreJarCandidate(string relativePath, string preferredFileName, bool fromManifest)
+    {
+        var normalizedRelativePath = NormalizePath(relativePath).TrimStart('/');
+        var fileName = Path.GetFileName(normalizedRelativePath);
+        var score = fromManifest ? 250 : 0;
+
+        if (!string.IsNullOrWhiteSpace(preferredFileName) &&
+            string.Equals(fileName, preferredFileName, StringComparison.OrdinalIgnoreCase))
+        {
+            score += 1000;
+        }
+
+        if (string.Equals(fileName, "minecraft.jar", StringComparison.OrdinalIgnoreCase))
+        {
+            score += 900;
+        }
+        else if (fileName.Contains("minecraft", StringComparison.OrdinalIgnoreCase))
+        {
+            score += 650;
+        }
+
+        if (!normalizedRelativePath.Contains('/', StringComparison.Ordinal))
+        {
+            score += 280;
+        }
+
+        if (normalizedRelativePath.StartsWith("libraries/", StringComparison.OrdinalIgnoreCase) ||
+            normalizedRelativePath.Contains("/libraries/", StringComparison.OrdinalIgnoreCase))
+        {
+            score -= 700;
+        }
+
+        if (normalizedRelativePath.StartsWith("lib/", StringComparison.OrdinalIgnoreCase) ||
+            normalizedRelativePath.Contains("/lib/", StringComparison.OrdinalIgnoreCase))
+        {
+            score -= 250;
+        }
+
+        if (normalizedRelativePath.StartsWith("natives/", StringComparison.OrdinalIgnoreCase) ||
+            normalizedRelativePath.Contains("/natives/", StringComparison.OrdinalIgnoreCase))
+        {
+            score -= 320;
+        }
+
+        return score;
+    }
+
+    private static string NormalizeRelativeJarPath(string rawPath)
+    {
+        return string.IsNullOrWhiteSpace(rawPath)
+            ? string.Empty
+            : rawPath.Trim().Replace('\\', '/').TrimStart('/');
     }
 
     private static string NormalizeLaunchMode(string mode)
