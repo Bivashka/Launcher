@@ -125,7 +125,7 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
             EnsureArgumentWithValue(gameArgs, "--assetsDir", Path.Combine(instanceDirectory, "assets"));
             if (string.Equals(resolvedMainClassForCompatibility, "net.minecraft.launchwrapper.Launch", StringComparison.OrdinalIgnoreCase))
             {
-                EnsureLegacyLaunchwrapperDefaults(gameArgs, manifest, instanceDirectory, resolvedClasspathForCompatibility);
+                EnsureLegacyLaunchwrapperDefaults(gameArgs, route, manifest, instanceDirectory, resolvedClasspathForCompatibility);
             }
             legacyCompatibilityHome = PrepareLegacyCompatibilityHome(instanceDirectory);
             // Some legacy launchers still resolve minecraft home via APPDATA/HOME.
@@ -921,11 +921,14 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
 
     private void EnsureLegacyLaunchwrapperDefaults(
         List<string> gameArgs,
+        GameLaunchRoute route,
         LauncherManifest manifest,
         string instanceDirectory,
         string resolvedClasspath)
     {
-        EnsureArgumentWithValue(gameArgs, "--version", string.IsNullOrWhiteSpace(manifest.McVersion) ? "legacy" : manifest.McVersion.Trim());
+        var mcVersionArg = ResolveLegacyVersion(route, manifest, instanceDirectory);
+        EnsureArgumentWithValue(gameArgs, "--version", mcVersionArg);
+        logService.LogInfo($"Legacy launchwrapper args: using --version {mcVersionArg}.");
 
         if (HasArgument(gameArgs, "--tweakClass"))
         {
@@ -945,6 +948,65 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
         gameArgs.Add("--tweakClass");
         gameArgs.Add("cpw.mods.fml.common.launcher.FMLTweaker");
         logService.LogInfo("Legacy launchwrapper args: added --tweakClass cpw.mods.fml.common.launcher.FMLTweaker.");
+    }
+
+    private static string ResolveLegacyVersion(GameLaunchRoute route, LauncherManifest manifest, string instanceDirectory)
+    {
+        var routeVersion = NormalizeVersion(route.McVersion);
+        if (!string.IsNullOrWhiteSpace(routeVersion))
+        {
+            return routeVersion;
+        }
+
+        var manifestVersion = NormalizeVersion(manifest.McVersion);
+        if (!string.IsNullOrWhiteSpace(manifestVersion))
+        {
+            return manifestVersion;
+        }
+
+        var inferred = TryInferVersionFromDeobfMap(instanceDirectory);
+        if (!string.IsNullOrWhiteSpace(inferred))
+        {
+            return inferred;
+        }
+
+        return "legacy";
+    }
+
+    private static string NormalizeVersion(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return string.Empty;
+        }
+
+        var normalized = raw.Trim();
+        return string.Equals(normalized, "1.21.1", StringComparison.OrdinalIgnoreCase) ? string.Empty : normalized;
+    }
+
+    private static string TryInferVersionFromDeobfMap(string instanceDirectory)
+    {
+        const string prefix = "deobfuscation_data_";
+        const string suffix = ".zip";
+
+        foreach (var filePath in Directory.EnumerateFiles(instanceDirectory, "deobfuscation_data_*.zip", SearchOption.AllDirectories))
+        {
+            var fileName = Path.GetFileName(filePath);
+            if (!fileName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ||
+                !fileName.EndsWith(suffix, StringComparison.OrdinalIgnoreCase) ||
+                fileName.Length <= prefix.Length + suffix.Length)
+            {
+                continue;
+            }
+
+            var version = fileName.Substring(prefix.Length, fileName.Length - prefix.Length - suffix.Length).Trim();
+            if (!string.IsNullOrWhiteSpace(version))
+            {
+                return version;
+            }
+        }
+
+        return string.Empty;
     }
 
     private static bool ContainsClasspathClass(string classpath, string className)

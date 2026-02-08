@@ -2395,7 +2395,8 @@ public partial class MainWindowViewModel : ViewModelBase
                 RouteCode = "ru",
                 Address = server.RuProxyAddress.Trim(),
                 Port = server.RuProxyPort,
-                PreferredJarPath = server.RuJarPath.Trim()
+                PreferredJarPath = server.RuJarPath.Trim(),
+                McVersion = server.McVersion
             };
         }
 
@@ -2404,7 +2405,8 @@ public partial class MainWindowViewModel : ViewModelBase
             RouteCode = "main",
             Address = server.MainAddress.Trim(),
             Port = server.MainPort,
-            PreferredJarPath = server.MainJarPath.Trim()
+            PreferredJarPath = server.MainJarPath.Trim(),
+            McVersion = server.McVersion
         };
     }
 

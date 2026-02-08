@@ -6,4 +6,5 @@ public sealed class GameLaunchRoute
     public string Address { get; init; } = string.Empty;
     public int Port { get; init; } = 25565;
     public string PreferredJarPath { get; init; } = string.Empty;
+    public string McVersion { get; init; } = string.Empty;
 }
