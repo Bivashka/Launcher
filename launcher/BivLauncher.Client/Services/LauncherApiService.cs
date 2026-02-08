@@ -1,5 +1,6 @@
 using BivLauncher.Client.Models;
 using System.Net;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 
@@ -53,6 +54,33 @@ public sealed class LauncherApiService : ILauncherApiService
 
         var payload = JsonSerializer.Deserialize<PublicAuthLoginResponse>(body, JsonOptions);
         return payload ?? throw new InvalidOperationException("Login response is empty.");
+    }
+
+    public async Task<PublicAuthSessionResponse> GetSessionAsync(
+        string apiBaseUrl,
+        string accessToken,
+        string tokenType = "Bearer",
+        CancellationToken cancellationToken = default)
+    {
+        var token = accessToken.Trim();
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            throw new InvalidOperationException("Session token is required.");
+        }
+
+        var uri = BuildUri(apiBaseUrl, "/api/public/auth/session");
+        using var response = await SendWithRetryAsync(
+            () => BuildAuthorizedRequest(HttpMethod.Get, uri, token, tokenType),
+            cancellationToken);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw CreateApiException("Session", response, body);
+        }
+
+        var payload = JsonSerializer.Deserialize<PublicAuthSessionResponse>(body, JsonOptions);
+        return payload ?? throw new InvalidOperationException("Session response is empty.");
     }
 
     public Task<bool> HasSkinAsync(string apiBaseUrl, string username, CancellationToken cancellationToken = default)
@@ -195,6 +223,14 @@ public sealed class LauncherApiService : ILauncherApiService
         {
             Content = new StringContent(json, Encoding.UTF8, "application/json")
         };
+    }
+
+    private static HttpRequestMessage BuildAuthorizedRequest(HttpMethod method, Uri uri, string accessToken, string tokenType)
+    {
+        var request = new HttpRequestMessage(method, uri);
+        var normalizedType = string.IsNullOrWhiteSpace(tokenType) ? "Bearer" : tokenType.Trim();
+        request.Headers.Authorization = new AuthenticationHeaderValue(normalizedType, accessToken.Trim());
+        return request;
     }
 
     private static bool ShouldRetry(HttpStatusCode statusCode)

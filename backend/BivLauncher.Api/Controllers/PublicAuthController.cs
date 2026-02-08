@@ -3,9 +3,11 @@ using BivLauncher.Api.Data;
 using BivLauncher.Api.Data.Entities;
 using BivLauncher.Api.Infrastructure;
 using BivLauncher.Api.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 
 namespace BivLauncher.Api.Controllers;
 
@@ -19,6 +21,67 @@ public sealed class PublicAuthController(
     IJwtTokenService jwtTokenService,
     ITwoFactorService twoFactorService) : ControllerBase
 {
+    [Authorize]
+    [HttpGet("session")]
+    public async Task<ActionResult<PublicAuthSessionResponse>> Session(CancellationToken cancellationToken)
+    {
+        var externalId = User.FindFirstValue("external_id")?.Trim() ?? string.Empty;
+        var username = User.Identity?.Name?.Trim() ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(externalId) && string.IsNullOrWhiteSpace(username))
+        {
+            return Unauthorized(new { error = "Invalid player session token." });
+        }
+
+        AuthAccount? account = null;
+
+        if (!string.IsNullOrWhiteSpace(externalId))
+        {
+            account = await dbContext.AuthAccounts
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.ExternalId == externalId, cancellationToken);
+        }
+
+        if (account is null && !string.IsNullOrWhiteSpace(username))
+        {
+            account = await dbContext.AuthAccounts
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.Username == username, cancellationToken);
+        }
+
+        if (account is null)
+        {
+            return Unauthorized(new { error = "Player session is not recognized." });
+        }
+
+        if (account.Banned)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { error = "Account is banned." });
+        }
+
+        var now = DateTime.UtcNow;
+        var activeAccountBan = await dbContext.HardwareBans
+            .AsNoTracking()
+            .Where(x =>
+                x.AccountId == account.Id &&
+                (x.ExpiresAtUtc == null || x.ExpiresAtUtc > now))
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .Select(x => x.Reason)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (activeAccountBan is not null)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { error = $"Account is banned: {activeAccountBan}" });
+        }
+
+        var roles = NormalizeRoles(account.Roles.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+
+        return Ok(new PublicAuthSessionResponse(
+            Username: account.Username,
+            ExternalId: account.ExternalId,
+            Roles: roles));
+    }
+
     [HttpPost("login")]
     public async Task<ActionResult<PublicAuthLoginResponse>> Login(
         [FromBody] PublicAuthLoginRequest request,
@@ -76,16 +139,7 @@ public sealed class PublicAuthController(
         var normalizedUsername = string.IsNullOrWhiteSpace(authResult.Username)
             ? username
             : authResult.Username.Trim();
-        var roles = authResult.Roles
-            .Where(x => !string.IsNullOrWhiteSpace(x))
-            .Select(x => x.Trim())
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        if (roles.Count == 0)
-        {
-            roles.Add("player");
-        }
+        var roles = NormalizeRoles(authResult.Roles);
 
         var account = await dbContext.AuthAccounts.FirstOrDefaultAsync(
             x => x.ExternalId == normalizedExternalId,
@@ -233,5 +287,21 @@ public sealed class PublicAuthController(
         }
 
         return new string(rawCode.Where(char.IsDigit).ToArray());
+    }
+
+    private static List<string> NormalizeRoles(IEnumerable<string> roles)
+    {
+        var normalized = roles
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => x.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (normalized.Count == 0)
+        {
+            normalized.Add("player");
+        }
+
+        return normalized;
     }
 }

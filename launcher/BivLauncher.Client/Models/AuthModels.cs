@@ -22,3 +22,10 @@ public sealed class PublicAuthLoginResponse
     public string TwoFactorSecret { get; set; } = string.Empty;
     public string Message { get; set; } = string.Empty;
 }
+
+public sealed class PublicAuthSessionResponse
+{
+    public string Username { get; set; } = string.Empty;
+    public string ExternalId { get; set; } = string.Empty;
+    public List<string> Roles { get; set; } = [];
+}

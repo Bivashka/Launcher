@@ -9,6 +9,11 @@ public interface ILauncherApiService
         string apiBaseUrl,
         PublicAuthLoginRequest request,
         CancellationToken cancellationToken = default);
+    Task<PublicAuthSessionResponse> GetSessionAsync(
+        string apiBaseUrl,
+        string accessToken,
+        string tokenType = "Bearer",
+        CancellationToken cancellationToken = default);
     Task<bool> HasSkinAsync(string apiBaseUrl, string username, CancellationToken cancellationToken = default);
     Task<bool> HasCapeAsync(string apiBaseUrl, string username, CancellationToken cancellationToken = default);
     Task<LauncherManifest> GetManifestAsync(string apiBaseUrl, string profileSlug, CancellationToken cancellationToken = default);

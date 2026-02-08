@@ -45,6 +45,11 @@ public partial class MainWindowViewModel : ViewModelBase
     private bool _isSyncingJavaModeOption;
     private bool _isSyncingRouteOption;
     private bool _installTelemetrySent;
+    private string _playerAuthToken = string.Empty;
+    private string _playerAuthTokenType = "Bearer";
+    private string _playerAuthExternalId = string.Empty;
+    private List<string> _playerAuthRoles = [];
+    private string _playerAuthApiBaseUrl = string.Empty;
 
     private LauncherSettings _settings = new();
 
@@ -372,6 +377,8 @@ public partial class MainWindowViewModel : ViewModelBase
         TwoFactorSetupSecret = string.Empty;
         TwoFactorSetupUri = string.Empty;
         AuthStatusText = T("status.notLoggedIn");
+        LoadStoredPlayerSessionState();
+        await TryRestorePlayerSessionAsync();
 
         await RefreshAsync();
         StatusText = T("status.ready");
@@ -1089,9 +1096,18 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private async Task SaveSettingsAsync()
     {
+        await PersistSettingsSnapshotAsync(updateStatusText: true);
+    }
+
+    private async Task PersistSettingsSnapshotAsync(bool updateStatusText = false)
+    {
         _settings = BuildSettingsSnapshot();
         await _settingsService.SaveAsync(_settings);
-        StatusText = T("status.settingsSaved");
+
+        if (updateStatusText)
+        {
+            StatusText = T("status.settingsSaved");
+        }
     }
 
     private async Task CopyCrashAsync()
@@ -1129,6 +1145,11 @@ public partial class MainWindowViewModel : ViewModelBase
     private LauncherSettings BuildSettingsSnapshot()
     {
         var configuredApiBaseUrl = TryResolveConfiguredApiBaseUrl();
+        var hasActiveSession = IsPlayerLoggedIn &&
+                               !string.IsNullOrWhiteSpace(_playerAuthToken) &&
+                               !string.IsNullOrWhiteSpace(PlayerLoggedInAs);
+        var authRoles = hasActiveSession ? NormalizePlayerRoles(_playerAuthRoles) : [];
+
         return new LauncherSettings
         {
             ApiBaseUrl = string.IsNullOrWhiteSpace(configuredApiBaseUrl)
@@ -1148,7 +1169,13 @@ public partial class MainWindowViewModel : ViewModelBase
                 .OrderBy(x => x.ProfileSlug, StringComparer.OrdinalIgnoreCase)
                 .ToList(),
             SelectedServerId = SelectedServer?.ServerId.ToString() ?? string.Empty,
-            LastPlayerUsername = PlayerUsername.Trim()
+            LastPlayerUsername = PlayerUsername.Trim(),
+            PlayerAuthToken = hasActiveSession ? _playerAuthToken : string.Empty,
+            PlayerAuthTokenType = hasActiveSession ? _playerAuthTokenType : "Bearer",
+            PlayerAuthUsername = hasActiveSession ? PlayerLoggedInAs.Trim() : string.Empty,
+            PlayerAuthExternalId = hasActiveSession ? _playerAuthExternalId : string.Empty,
+            PlayerAuthRoles = hasActiveSession ? authRoles : [],
+            PlayerAuthApiBaseUrl = hasActiveSession ? _playerAuthApiBaseUrl : string.Empty
         };
     }
 
@@ -1190,22 +1217,174 @@ public partial class MainWindowViewModel : ViewModelBase
                 return;
             }
 
-            IsPlayerLoggedIn = true;
-            IsSettingsOpen = false;
-            IsTwoFactorStepActive = false;
-            TwoFactorSetupSecret = string.Empty;
-            TwoFactorSetupUri = string.Empty;
-            PlayerTwoFactorCode = string.Empty;
-            PlayerLoggedInAs = response.Username;
-            PlayerPassword = string.Empty;
-            var hasSkin = await _launcherApiService.HasSkinAsync(ApiBaseUrl, response.Username);
-            var hasCape = await _launcherApiService.HasCapeAsync(ApiBaseUrl, response.Username);
-            HasSkin = hasSkin;
-            HasCape = hasCape;
-            AuthStatusText = F("status.loggedInAs", response.Username, string.Join(", ", response.Roles));
+            SetAuthenticatedPlayerSession(
+                response.Token,
+                response.TokenType,
+                response.Username,
+                response.ExternalId,
+                response.Roles,
+                ApiBaseUrl);
+
+            await RefreshPlayerCosmeticsAsync(response.Username);
+            await PersistSettingsSnapshotAsync();
             StatusText = T("status.ready");
             _logService.LogInfo($"Player login success: {response.Username} ({response.ExternalId})");
         });
+    }
+
+    private void LoadStoredPlayerSessionState()
+    {
+        _playerAuthToken = (_settings.PlayerAuthToken ?? string.Empty).Trim();
+        _playerAuthTokenType = string.IsNullOrWhiteSpace(_settings.PlayerAuthTokenType)
+            ? "Bearer"
+            : _settings.PlayerAuthTokenType.Trim();
+        _playerAuthExternalId = (_settings.PlayerAuthExternalId ?? string.Empty).Trim();
+        _playerAuthRoles = NormalizePlayerRoles(_settings.PlayerAuthRoles);
+        _playerAuthApiBaseUrl = NormalizeBaseUrlOrEmpty(_settings.PlayerAuthApiBaseUrl);
+    }
+
+    private async Task TryRestorePlayerSessionAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_playerAuthToken))
+        {
+            return;
+        }
+
+        var currentApiBaseUrl = NormalizeBaseUrl(ApiBaseUrl);
+        if (!string.IsNullOrWhiteSpace(_playerAuthApiBaseUrl) &&
+            !string.Equals(_playerAuthApiBaseUrl, currentApiBaseUrl, StringComparison.OrdinalIgnoreCase))
+        {
+            ClearAuthenticatedPlayerSession();
+            await PersistSettingsSnapshotAsync();
+            return;
+        }
+
+        try
+        {
+            var session = await _launcherApiService.GetSessionAsync(ApiBaseUrl, _playerAuthToken, _playerAuthTokenType);
+            SetAuthenticatedPlayerSession(
+                _playerAuthToken,
+                _playerAuthTokenType,
+                session.Username,
+                session.ExternalId,
+                session.Roles,
+                currentApiBaseUrl);
+
+            await RefreshPlayerCosmeticsAsync(session.Username);
+            await PersistSettingsSnapshotAsync();
+            _logService.LogInfo($"Player session restored: {session.Username} ({session.ExternalId})");
+        }
+        catch (LauncherApiException apiException) when (
+            apiException.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+        {
+            ClearAuthenticatedPlayerSession();
+            await PersistSettingsSnapshotAsync();
+            _logService.LogInfo("Stored player session was rejected by API. Login is required.");
+        }
+        catch (Exception ex)
+        {
+            var fallbackUsername = string.IsNullOrWhiteSpace(_settings.PlayerAuthUsername)
+                ? PlayerUsername.Trim()
+                : _settings.PlayerAuthUsername.Trim();
+            if (string.IsNullOrWhiteSpace(fallbackUsername))
+            {
+                _logService.LogError($"Player session restore failed: {ex.Message}");
+                return;
+            }
+
+            SetAuthenticatedPlayerSession(
+                _playerAuthToken,
+                _playerAuthTokenType,
+                fallbackUsername,
+                _playerAuthExternalId,
+                _playerAuthRoles,
+                currentApiBaseUrl);
+
+            _logService.LogError($"Player session validation failed, restored cached session: {ex.Message}");
+        }
+    }
+
+    private void SetAuthenticatedPlayerSession(
+        string token,
+        string tokenType,
+        string username,
+        string externalId,
+        IEnumerable<string> roles,
+        string sourceApiBaseUrl)
+    {
+        var normalizedUsername = username.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedUsername))
+        {
+            throw new InvalidOperationException("Authenticated username is empty.");
+        }
+
+        _playerAuthToken = token.Trim();
+        _playerAuthTokenType = string.IsNullOrWhiteSpace(tokenType) ? "Bearer" : tokenType.Trim();
+        _playerAuthExternalId = string.IsNullOrWhiteSpace(externalId)
+            ? normalizedUsername
+            : externalId.Trim();
+        _playerAuthRoles = NormalizePlayerRoles(roles);
+        _playerAuthApiBaseUrl = NormalizeBaseUrl(sourceApiBaseUrl);
+
+        IsPlayerLoggedIn = true;
+        IsSettingsOpen = false;
+        IsTwoFactorStepActive = false;
+        TwoFactorSetupSecret = string.Empty;
+        TwoFactorSetupUri = string.Empty;
+        PlayerTwoFactorCode = string.Empty;
+        PlayerPassword = string.Empty;
+        PlayerLoggedInAs = normalizedUsername;
+        PlayerUsername = normalizedUsername;
+        AuthStatusText = F("status.loggedInAs", normalizedUsername, string.Join(", ", _playerAuthRoles));
+    }
+
+    private async Task RefreshPlayerCosmeticsAsync(string username)
+    {
+        var normalized = username.Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            HasSkin = false;
+            HasCape = false;
+            return;
+        }
+
+        try
+        {
+            HasSkin = await _launcherApiService.HasSkinAsync(ApiBaseUrl, normalized);
+            HasCape = await _launcherApiService.HasCapeAsync(ApiBaseUrl, normalized);
+        }
+        catch (Exception ex)
+        {
+            HasSkin = false;
+            HasCape = false;
+            _logService.LogError($"Failed to refresh player cosmetics: {ex.Message}");
+        }
+    }
+
+    private void ClearAuthenticatedPlayerSession()
+    {
+        _playerAuthToken = string.Empty;
+        _playerAuthTokenType = "Bearer";
+        _playerAuthExternalId = string.Empty;
+        _playerAuthRoles = [];
+        _playerAuthApiBaseUrl = string.Empty;
+        PlayerLoggedInAs = string.Empty;
+    }
+
+    private static List<string> NormalizePlayerRoles(IEnumerable<string>? roles)
+    {
+        var normalized = (roles ?? [])
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => x.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (normalized.Count == 0)
+        {
+            normalized.Add("player");
+        }
+
+        return normalized;
     }
 
     private void OnLogLineAdded(string line)
@@ -1260,6 +1439,7 @@ public partial class MainWindowViewModel : ViewModelBase
 
         if (!value)
         {
+            ClearAuthenticatedPlayerSession();
             IsSettingsOpen = false;
             IsTwoFactorStepActive = false;
             TwoFactorSetupSecret = string.Empty;

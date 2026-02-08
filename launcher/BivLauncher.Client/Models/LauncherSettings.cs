@@ -11,6 +11,12 @@ public sealed class LauncherSettings
     public List<ProfileRouteSelection> ProfileRouteSelections { get; set; } = [];
     public string SelectedServerId { get; set; } = string.Empty;
     public string LastPlayerUsername { get; set; } = string.Empty;
+    public string PlayerAuthToken { get; set; } = string.Empty;
+    public string PlayerAuthTokenType { get; set; } = "Bearer";
+    public string PlayerAuthUsername { get; set; } = string.Empty;
+    public string PlayerAuthExternalId { get; set; } = string.Empty;
+    public List<string> PlayerAuthRoles { get; set; } = [];
+    public string PlayerAuthApiBaseUrl { get; set; } = string.Empty;
 }
 
 public sealed class ProfileRouteSelection
