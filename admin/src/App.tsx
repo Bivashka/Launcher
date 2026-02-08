@@ -4953,7 +4953,7 @@ function App() {
             </div>
 
             <div className={`grid-2 split-build-servers ${(activePage === 'build' || activePage === 'servers') ? '' : 'is-hidden'} ${activePage === 'build' ? 'show-build' : 'show-servers'}`}>
-              <section className="form form-small">
+              <section className="form form-small form-actions">
                 <h3>Скины / Плащи</h3>
                 <div className="action-block">
                   <h4>Косметика игрока</h4>
@@ -5254,7 +5254,7 @@ function App() {
             </div>
 
             <div className={`grid-2 split-integrations-profiles ${(activePage === 'integrations' || activePage === 'servers') ? '' : 'is-hidden'} ${activePage === 'integrations' ? 'show-integrations' : 'show-servers'}`}>
-              <section className="form form-small">
+              <section className="form form-small form-actions">
                 <h3>Discord RPC</h3>
                 <div className="action-block">
                 <label className="checkbox">
@@ -5880,7 +5880,7 @@ function App() {
             </div>
 
             <div className={`grid-2 ${activePage === 'security' ? '' : 'is-hidden'}`}>
-              <section className="form form-small">
+              <section className="form form-small form-actions">
                 <h3>Bans</h3>
                 <div className="action-block">
                 <h4>HWID ban</h4>
@@ -5961,7 +5961,7 @@ function App() {
             </div>
 
             <div className={`grid-2 ${activePage === 'security' ? '' : 'is-hidden'}`}>
-              <section className="form form-small">
+              <section className="form form-small form-actions">
                 <h3>Two-factor authentication (2FA)</h3>
                 <div className="action-block">
                 <label className="checkbox">
@@ -6464,7 +6464,7 @@ function App() {
             </div>
 
             <div className={`grid-2 ${activePage === 'integrations' ? '' : 'is-hidden'}`}>
-              <section className="form form-small">
+              <section className="form form-small form-actions">
                 <h3>Storage Backend</h3>
                 <div className="action-block">
                 <select
@@ -6946,7 +6946,7 @@ function App() {
             </div>
 
             <div className={`grid-2 ${activePage === 'audit' ? '' : 'is-hidden'}`}>
-              <section className="form form-small">
+              <section className="form form-small form-actions">
                 <h3>Журнал аудита администратора</h3>
                 <small>
                   Действия по рантайму, CRUD, настройкам и авторизации с экспортом/очисткой ({auditLogs.length} записей загружено).

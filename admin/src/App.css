@@ -573,6 +573,17 @@
   padding: 0.5rem 0.78rem;
 }
 
+.form-actions {
+  grid-template-columns: repeat(2, minmax(280px, 1fr));
+  align-items: start;
+}
+
+.form-actions > h3,
+.form-actions > p,
+.form-actions > small {
+  grid-column: 1 / -1;
+}
+
 .form label {
   display: grid;
   gap: 0.3rem;
@@ -890,6 +901,20 @@ button:focus-visible {
   display: none;
 }
 
+.split-build-servers.show-build,
+.split-build-servers.show-servers,
+.split-integrations-profiles.show-integrations,
+.split-integrations-profiles.show-servers {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.split-build-servers.show-build > section:nth-child(1),
+.split-build-servers.show-servers > section:nth-child(2),
+.split-integrations-profiles.show-integrations > section:nth-child(1),
+.split-integrations-profiles.show-servers > section:nth-child(2) {
+  grid-column: 1 / -1;
+}
+
 .is-hidden {
   display: none !important;
 }
@@ -953,6 +978,7 @@ button:focus-visible {
   .auth-chip-grid,
   .grid-2,
   .grid-inline,
+  .form-actions,
   .wizard-quick-grid,
   .upload-row {
     grid-template-columns: 1fr;
