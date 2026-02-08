@@ -93,7 +93,7 @@
             ColumnDefinitions="*,380"
             ColumnSpacing="14">
         <Border Classes="featurePanel">
-          <Grid RowDefinitions="Auto,Auto,Auto,Auto,*" RowSpacing="12">
+          <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,*" RowSpacing="12">
             <TextBlock Classes="sectionTitle" Text="{Binding PlayButtonText}" />
             <TextBlock Grid.Row="1"
                        FontSize="24"
@@ -103,11 +103,21 @@
             <TextBlock Grid.Row="2"
                        Classes="subtle"
                        Text="{Binding SelectedServer.AddressDisplay, TargetNullValue='-'}" />
-            <TextBlock Grid.Row="3"
+            <Grid Grid.Row="3"
+                  ColumnDefinitions="Auto,*"
+                  ColumnSpacing="10">
+              <TextBlock VerticalAlignment="Center"
+                         Text="{Binding RouteLabelText}" />
+              <ComboBox Grid.Column="1"
+                        Width="180"
+                        ItemsSource="{Binding RouteOptions}"
+                        SelectedItem="{Binding SelectedRouteOption}" />
+            </Grid>
+            <TextBlock Grid.Row="4"
                        Classes="subtle"
                        Text="{Binding AuthStatusText}"
                        TextWrapping="Wrap" />
-            <StackPanel Grid.Row="4"
+            <StackPanel Grid.Row="5"
                         Orientation="Horizontal"
                         Spacing="10"
                         VerticalAlignment="Bottom">

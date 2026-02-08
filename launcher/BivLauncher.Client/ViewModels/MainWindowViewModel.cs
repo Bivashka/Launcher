@@ -393,7 +393,7 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         VerifyFilesCommand.NotifyCanExecuteChanged();
         LaunchCommand.NotifyCanExecuteChanged();
-        SyncSelectedRouteOption();
+        RebuildRouteOptions();
 
         if (value is null)
         {
@@ -1937,9 +1937,24 @@ public partial class MainWindowViewModel : ViewModelBase
         _isSyncingRouteOption = true;
         RouteOptions.Clear();
         RouteOptions.Add(new LocalizedOption { Value = "main", Label = T("route.main") });
-        RouteOptions.Add(new LocalizedOption { Value = "ru", Label = T("route.ru") });
+
+        if (SelectedServer is not null && SupportsRuRoute(SelectedServer))
+        {
+            RouteOptions.Add(new LocalizedOption { Value = "ru", Label = T("route.ru") });
+        }
+
+        if (!RouteOptions.Any(x => x.Value == selectedRoute))
+        {
+            selectedRoute = "main";
+        }
+
         SelectedRouteOption = RouteOptions.FirstOrDefault(x => x.Value == selectedRoute) ?? RouteOptions[0];
         _isSyncingRouteOption = false;
+    }
+
+    private static bool SupportsRuRoute(ManagedServerItem server)
+    {
+        return !string.IsNullOrWhiteSpace(server.RuProxyAddress);
     }
 
     private GameLaunchRoute ResolveLaunchRoute(ManagedServerItem server)
