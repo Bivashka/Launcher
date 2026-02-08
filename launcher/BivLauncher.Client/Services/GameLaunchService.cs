@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Globalization;
 using System.IO.Compression;
+using System.Security.Cryptography;
 
 namespace BivLauncher.Client.Services;
 
@@ -74,6 +75,7 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
 
         var launchMode = NormalizeLaunchMode(manifest.LaunchMode);
         var resolvedMainClassForCompatibility = string.Empty;
+        var legacyCompatibilityHome = string.Empty;
         if (launchMode == "mainclass")
         {
             var launchMainClass = manifest.LaunchMainClass.Trim();
@@ -118,49 +120,57 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
         {
             EnsureArgumentWithValue(gameArgs, "--gameDir", instanceDirectory);
             EnsureArgumentWithValue(gameArgs, "--assetsDir", Path.Combine(instanceDirectory, "assets"));
-            EnsureLegacyForgeDeobfMap(instanceDirectory);
+            legacyCompatibilityHome = PrepareLegacyCompatibilityHome(instanceDirectory);
             // Some legacy launchers still resolve minecraft home via APPDATA/HOME.
-            startInfo.Environment["APPDATA"] = instanceDirectory;
-            startInfo.Environment["HOME"] = instanceDirectory;
-            startInfo.Environment["USERPROFILE"] = instanceDirectory;
-            logService.LogInfo($"Legacy compatibility mode enabled: APPDATA/HOME redirected to {instanceDirectory}.");
+            startInfo.Environment["APPDATA"] = legacyCompatibilityHome;
+            startInfo.Environment["HOME"] = legacyCompatibilityHome;
+            startInfo.Environment["USERPROFILE"] = legacyCompatibilityHome;
+            logService.LogInfo(
+                $"Legacy compatibility mode enabled: gameDir={instanceDirectory}, compatHome={legacyCompatibilityHome}.");
         }
 
-        foreach (var arg in gameArgs)
+        try
         {
-            startInfo.ArgumentList.Add(arg);
-        }
-
-        using var process = new Process { StartInfo = startInfo };
-        process.Start();
-
-        logService.LogInfo($"Process started: {startInfo.FileName} {BuildArgsPreview(startInfo.ArgumentList)}");
-
-        using var cancellationRegistration = cancellationToken.Register(() =>
-        {
-            try
+            foreach (var arg in gameArgs)
             {
-                if (!process.HasExited)
+                startInfo.ArgumentList.Add(arg);
+            }
+
+            using var process = new Process { StartInfo = startInfo };
+            process.Start();
+
+            logService.LogInfo($"Process started: {startInfo.FileName} {BuildArgsPreview(startInfo.ArgumentList)}");
+
+            using var cancellationRegistration = cancellationToken.Register(() =>
+            {
+                try
                 {
-                    process.Kill(entireProcessTree: true);
+                    if (!process.HasExited)
+                    {
+                        process.Kill(entireProcessTree: true);
+                    }
                 }
-            }
-            catch
+                catch
+                {
+                }
+            });
+
+            var stdOutTask = PumpOutputAsync(process.StandardOutput, onProcessLine, cancellationToken);
+            var stdErrTask = PumpOutputAsync(process.StandardError, onProcessLine, cancellationToken);
+
+            await Task.WhenAll(stdOutTask, stdErrTask, process.WaitForExitAsync(cancellationToken));
+            logService.LogInfo($"Process exited with code {process.ExitCode}");
+
+            return new LaunchResult
             {
-            }
-        });
-
-        var stdOutTask = PumpOutputAsync(process.StandardOutput, onProcessLine, cancellationToken);
-        var stdErrTask = PumpOutputAsync(process.StandardError, onProcessLine, cancellationToken);
-
-        await Task.WhenAll(stdOutTask, stdErrTask, process.WaitForExitAsync(cancellationToken));
-        logService.LogInfo($"Process exited with code {process.ExitCode}");
-
-        return new LaunchResult
+                ExitCode = process.ExitCode,
+                JavaExecutable = javaExecutable
+            };
+        }
+        finally
         {
-            ExitCode = process.ExitCode,
-            JavaExecutable = javaExecutable
-        };
+            CleanupLegacyCompatibilityHome(legacyCompatibilityHome);
+        }
     }
 
     private static async Task PumpOutputAsync(StreamReader reader, Action<string> onLine, CancellationToken cancellationToken)
@@ -895,17 +905,74 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
         args.Add(value);
     }
 
-    private void EnsureLegacyForgeDeobfMap(string instanceDirectory)
+    private string PrepareLegacyCompatibilityHome(string instanceDirectory)
+    {
+        var profileName = new DirectoryInfo(instanceDirectory).Name;
+        var fullInstancePath = Path.GetFullPath(instanceDirectory);
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(fullInstancePath))).ToLowerInvariant();
+        var shortHash = hash[..12];
+        var legacyHome = Path.Combine(Path.GetTempPath(), "BivLauncher", "legacy-home", $"{profileName}-{shortHash}");
+        if (Directory.Exists(legacyHome))
+        {
+            CleanupLegacyCompatibilityHome(legacyHome);
+        }
+
+        var legacyRoot = Path.Combine(legacyHome, ".minecraft");
+        Directory.CreateDirectory(legacyRoot);
+
+        EnsureLegacyForgeDeobfMap(instanceDirectory, legacyRoot);
+        return legacyHome;
+    }
+
+    private void CleanupLegacyCompatibilityHome(string legacyHome)
+    {
+        if (string.IsNullOrWhiteSpace(legacyHome) || !Directory.Exists(legacyHome))
+        {
+            return;
+        }
+
+        try
+        {
+            Directory.Delete(legacyHome, recursive: true);
+        }
+        catch (Exception ex)
+        {
+            logService.LogInfo($"Legacy Forge support: could not cleanup compat home '{legacyHome}': {ex.Message}");
+        }
+    }
+
+    private void EnsureLegacyForgeDeobfMap(string instanceDirectory, string legacyMinecraftRoot)
     {
         var primaryLibDirectory = Path.Combine(instanceDirectory, "lib");
-        var secondaryLibDirectory = Path.Combine(instanceDirectory, ".minecraft", "lib");
+        var secondaryLibDirectory = Path.Combine(legacyMinecraftRoot, "lib");
         Directory.CreateDirectory(primaryLibDirectory);
         Directory.CreateDirectory(secondaryLibDirectory);
 
-        var hasAnyExisting = Directory.EnumerateFiles(primaryLibDirectory, "deobfuscation_data_*.zip", SearchOption.TopDirectoryOnly).Any() ||
-                             Directory.EnumerateFiles(secondaryLibDirectory, "deobfuscation_data_*.zip", SearchOption.TopDirectoryOnly).Any();
-        if (hasAnyExisting)
+        var existingPrimary = Directory
+            .EnumerateFiles(primaryLibDirectory, "deobfuscation_data_*.zip", SearchOption.TopDirectoryOnly)
+            .FirstOrDefault();
+        var existingSecondary = Directory
+            .EnumerateFiles(secondaryLibDirectory, "deobfuscation_data_*.zip", SearchOption.TopDirectoryOnly)
+            .FirstOrDefault();
+
+        if (!string.IsNullOrWhiteSpace(existingPrimary) && !string.IsNullOrWhiteSpace(existingSecondary))
         {
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(existingPrimary))
+        {
+            var fileName = Path.GetFileName(existingPrimary);
+            var secondaryTarget = Path.Combine(secondaryLibDirectory, fileName);
+            File.Copy(existingPrimary, secondaryTarget, overwrite: true);
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(existingSecondary))
+        {
+            var fileName = Path.GetFileName(existingSecondary);
+            var primaryTarget = Path.Combine(primaryLibDirectory, fileName);
+            File.Copy(existingSecondary, primaryTarget, overwrite: true);
             return;
         }
 
@@ -931,14 +998,14 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
             return;
         }
 
-        var fileName = Path.GetFileName(source);
-        var primaryTarget = Path.Combine(primaryLibDirectory, fileName);
-        var secondaryTarget = Path.Combine(secondaryLibDirectory, fileName);
-        File.Copy(source, primaryTarget, overwrite: true);
-        File.Copy(source, secondaryTarget, overwrite: true);
+        var sourceFileName = Path.GetFileName(source);
+        var sourcePrimaryTarget = Path.Combine(primaryLibDirectory, sourceFileName);
+        var sourceSecondaryTarget = Path.Combine(secondaryLibDirectory, sourceFileName);
+        File.Copy(source, sourcePrimaryTarget, overwrite: true);
+        File.Copy(source, sourceSecondaryTarget, overwrite: true);
 
-        var primaryRelative = NormalizePath(Path.GetRelativePath(instanceDirectory, primaryTarget));
-        var secondaryRelative = NormalizePath(Path.GetRelativePath(instanceDirectory, secondaryTarget));
+        var primaryRelative = NormalizePath(Path.GetRelativePath(instanceDirectory, sourcePrimaryTarget));
+        var secondaryRelative = NormalizePath(Path.GetRelativePath(instanceDirectory, sourceSecondaryTarget));
         logService.LogInfo($"Legacy Forge support: prepared {primaryRelative} and {secondaryRelative}.");
     }
 
