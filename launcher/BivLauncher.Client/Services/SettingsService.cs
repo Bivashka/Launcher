@@ -86,22 +86,31 @@ public sealed class SettingsService : ISettingsService
     private static string ResolveApplicationDirectory()
     {
         var portableDirectory = Path.Combine(AppContext.BaseDirectory, "launcher-data");
-        if (TryEnsureDirectory(portableDirectory))
+        if (TryEnsureWritableDirectory(portableDirectory))
         {
             return portableDirectory;
         }
 
         var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
         var fallbackDirectory = Path.Combine(appData, "BivLauncher");
-        Directory.CreateDirectory(fallbackDirectory);
-        return fallbackDirectory;
+        if (TryEnsureWritableDirectory(fallbackDirectory))
+        {
+            return fallbackDirectory;
+        }
+
+        var tempFallbackDirectory = Path.Combine(Path.GetTempPath(), "BivLauncher");
+        Directory.CreateDirectory(tempFallbackDirectory);
+        return tempFallbackDirectory;
     }
 
-    private static bool TryEnsureDirectory(string path)
+    private static bool TryEnsureWritableDirectory(string path)
     {
         try
         {
             Directory.CreateDirectory(path);
+            var probePath = Path.Combine(path, $".write-probe-{Guid.NewGuid():N}.tmp");
+            File.WriteAllText(probePath, "ok");
+            File.Delete(probePath);
             return true;
         }
         catch
