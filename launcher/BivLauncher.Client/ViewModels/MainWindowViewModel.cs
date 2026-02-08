@@ -344,16 +344,21 @@ public partial class MainWindowViewModel : ViewModelBase
         RefreshLocalizedBindings();
         LoadRouteSelections(_settings.ProfileRouteSelections ?? []);
 
-        var persistedApiBaseUrl = NormalizeBaseUrl(_settings.ApiBaseUrl);
-        var resolvedDefaultApiBaseUrl = ResolveDefaultApiBaseUrl();
-        if (IsLoopbackBaseUrl(persistedApiBaseUrl) && !IsLoopbackBaseUrl(resolvedDefaultApiBaseUrl))
+        var configuredApiBaseUrl = TryResolveConfiguredApiBaseUrl();
+        if (!string.IsNullOrWhiteSpace(configuredApiBaseUrl))
         {
-            persistedApiBaseUrl = resolvedDefaultApiBaseUrl;
-            _settings.ApiBaseUrl = persistedApiBaseUrl;
-            await _settingsService.SaveAsync(_settings);
+            ApiBaseUrl = configuredApiBaseUrl;
+            var persistedApiBaseUrl = NormalizeBaseUrlOrEmpty(_settings.ApiBaseUrl);
+            if (!string.Equals(persistedApiBaseUrl, configuredApiBaseUrl, StringComparison.OrdinalIgnoreCase))
+            {
+                _settings.ApiBaseUrl = configuredApiBaseUrl;
+                await _settingsService.SaveAsync(_settings);
+            }
         }
-
-        ApiBaseUrl = persistedApiBaseUrl;
+        else
+        {
+            ApiBaseUrl = NormalizeBaseUrl(_settings.ApiBaseUrl);
+        }
         InstallDirectory = string.IsNullOrWhiteSpace(_settings.InstallDirectory)
             ? _settingsService.GetDefaultInstallDirectory()
             : _settings.InstallDirectory;
@@ -1123,9 +1128,12 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private LauncherSettings BuildSettingsSnapshot()
     {
+        var configuredApiBaseUrl = TryResolveConfiguredApiBaseUrl();
         return new LauncherSettings
         {
-            ApiBaseUrl = NormalizeBaseUrl(ApiBaseUrl),
+            ApiBaseUrl = string.IsNullOrWhiteSpace(configuredApiBaseUrl)
+                ? NormalizeBaseUrl(ApiBaseUrl)
+                : configuredApiBaseUrl,
             InstallDirectory = InstallDirectory.Trim(),
             DebugMode = DebugMode,
             RamMb = RamMb,
@@ -1625,6 +1633,17 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private static string ResolveDefaultApiBaseUrl()
     {
+        var configuredApiBaseUrl = TryResolveConfiguredApiBaseUrl();
+        if (!string.IsNullOrWhiteSpace(configuredApiBaseUrl))
+        {
+            return configuredApiBaseUrl;
+        }
+
+        return LocalFallbackApiBaseUrl;
+    }
+
+    private static string? TryResolveConfiguredApiBaseUrl()
+    {
         var environmentBaseUrl = NormalizeBaseUrlOrEmpty(Environment.GetEnvironmentVariable(LauncherApiBaseUrlEnvVar));
         if (!string.IsNullOrWhiteSpace(environmentBaseUrl))
         {
@@ -1645,7 +1664,7 @@ public partial class MainWindowViewModel : ViewModelBase
             return normalizedBundledBaseUrl;
         }
 
-        return LocalFallbackApiBaseUrl;
+        return null;
     }
 
     private static string NormalizeBaseUrlOrEmpty(string? value)
@@ -1656,17 +1675,6 @@ public partial class MainWindowViewModel : ViewModelBase
         }
 
         return value.Trim().TrimEnd('/');
-    }
-
-    private static bool IsLoopbackBaseUrl(string? value)
-    {
-        var normalized = NormalizeBaseUrlOrEmpty(value);
-        if (string.IsNullOrWhiteSpace(normalized))
-        {
-            return false;
-        }
-
-        return Uri.TryCreate(normalized, UriKind.Absolute, out var uri) && uri.IsLoopback;
     }
 
     private static string NormalizeJavaMode(string? javaMode)

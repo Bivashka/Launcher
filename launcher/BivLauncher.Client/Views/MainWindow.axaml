@@ -56,42 +56,32 @@
               Background="{Binding LoginCardBackgroundBrush}"
               BorderBrush="{Binding LoginCardBorderBrush}"
               IsVisible="{Binding IsLoginRequired}">
-        <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="10">
+        <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="10">
           <TextBlock Classes="sectionTitle" Text="{Binding AccountHeaderText}" />
           <TextBlock Grid.Row="1" Classes="subtle" Text="{Binding StatusText}" TextWrapping="Wrap" />
 
-          <TextBlock Grid.Row="2" Text="{Binding ApiBaseUrlLabelText}" />
+          <TextBlock Grid.Row="2" Text="{Binding UsernameLabelText}" />
           <TextBox Grid.Row="3"
-                   Watermark="https://api.example.com"
-                   Text="{Binding ApiBaseUrl}" />
-
-          <TextBlock Grid.Row="4" Text="{Binding UsernameLabelText}" />
-          <TextBox Grid.Row="5"
                    Watermark="Player"
                    Text="{Binding PlayerUsername}" />
 
-          <TextBlock Grid.Row="6" Text="{Binding PasswordLabelText}" />
-          <TextBox Grid.Row="7"
+          <TextBlock Grid.Row="4" Text="{Binding PasswordLabelText}" />
+          <TextBox Grid.Row="5"
                    Text="{Binding PlayerPassword}"
                    PasswordChar="*" />
-          <StackPanel Grid.Row="8"
-                      Orientation="Horizontal"
-                      Spacing="8">
-            <Button Content="{Binding SaveSettingsButtonText}"
-                    Command="{Binding SaveSettingsCommand}" />
-            <Button Classes="playButton"
-                    Content="{Binding LoginButtonText}"
-                    Command="{Binding LoginCommand}" />
-          </StackPanel>
+          <Button Grid.Row="6"
+                  Classes="playButton"
+                  Content="{Binding LoginButtonText}"
+                  Command="{Binding LoginCommand}" />
 
-          <TextBlock Grid.Row="9"
+          <TextBlock Grid.Row="7"
                      Text="{Binding TwoFactorCodeLabelText}"
                      IsVisible="{Binding IsTwoFactorStepActive}" />
-          <TextBox Grid.Row="10"
+          <TextBox Grid.Row="8"
                    Watermark="123456"
                    Text="{Binding PlayerTwoFactorCode}"
                    IsVisible="{Binding IsTwoFactorStepActive}" />
-          <TextBlock Grid.Row="11"
+          <TextBlock Grid.Row="9"
                      Classes="subtle"
                      Text="{Binding TwoFactorHintText}"
                      TextWrapping="Wrap"
@@ -200,7 +190,7 @@
           <Border Classes="settingsDrawer"
                   HorizontalAlignment="Right"
                   Width="360">
-            <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,*" RowSpacing="10">
+            <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,*" RowSpacing="10">
               <Grid ColumnDefinitions="*,Auto">
                 <TextBlock Classes="sectionTitle" Text="{Binding SettingsHeaderText}" />
                 <Button Grid.Column="1"
@@ -209,31 +199,26 @@
                         Command="{Binding CloseSettingsCommand}" />
               </Grid>
 
-              <TextBlock Grid.Row="1" Text="{Binding ApiBaseUrlLabelText}" />
-              <TextBox Grid.Row="2"
-                       Watermark="https://api.example.com"
-                       Text="{Binding ApiBaseUrl}" />
-
-              <TextBlock Grid.Row="3" Text="{Binding LanguageLabelText}" />
-              <ComboBox Grid.Row="4"
+              <TextBlock Grid.Row="1" Text="{Binding LanguageLabelText}" />
+              <ComboBox Grid.Row="2"
                         ItemsSource="{Binding LanguageOptions}"
                         SelectedItem="{Binding SelectedLanguageOption}" />
 
-              <Button Grid.Row="5"
+              <Button Grid.Row="3"
                       Content="{Binding SaveSettingsButtonText}"
                       Command="{Binding SaveSettingsCommand}" />
 
-              <TextBlock Grid.Row="6"
+              <TextBlock Grid.Row="4"
                          Classes="sectionTitle"
                          Text="{Binding UpdateHeaderText}" />
-              <TextBlock Grid.Row="7"
+              <TextBlock Grid.Row="5"
                          Classes="subtle"
                          Text="{Binding CurrentVersionText}" />
-              <TextBlock Grid.Row="8"
+              <TextBlock Grid.Row="6"
                          Classes="subtle"
                          Text="{Binding LatestVersionText}" />
 
-              <StackPanel Grid.Row="9" Spacing="8">
+              <StackPanel Grid.Row="7" Spacing="8">
                 <TextBlock Classes="subtle"
                            Text="{Binding UpdateAvailabilityText}" />
                 <StackPanel Orientation="Horizontal" Spacing="8">
