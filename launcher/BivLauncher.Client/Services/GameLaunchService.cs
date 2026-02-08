@@ -129,48 +129,41 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
                 $"Legacy compatibility mode enabled: gameDir={instanceDirectory}, compatHome={legacyCompatibilityHome}.");
         }
 
-        try
+        foreach (var arg in gameArgs)
         {
-            foreach (var arg in gameArgs)
+            startInfo.ArgumentList.Add(arg);
+        }
+
+        using var process = new Process { StartInfo = startInfo };
+        process.Start();
+
+        logService.LogInfo($"Process started: {startInfo.FileName} {BuildArgsPreview(startInfo.ArgumentList)}");
+
+        using var cancellationRegistration = cancellationToken.Register(() =>
+        {
+            try
             {
-                startInfo.ArgumentList.Add(arg);
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                }
             }
-
-            using var process = new Process { StartInfo = startInfo };
-            process.Start();
-
-            logService.LogInfo($"Process started: {startInfo.FileName} {BuildArgsPreview(startInfo.ArgumentList)}");
-
-            using var cancellationRegistration = cancellationToken.Register(() =>
+            catch
             {
-                try
-                {
-                    if (!process.HasExited)
-                    {
-                        process.Kill(entireProcessTree: true);
-                    }
-                }
-                catch
-                {
-                }
-            });
+            }
+        });
 
-            var stdOutTask = PumpOutputAsync(process.StandardOutput, onProcessLine, cancellationToken);
-            var stdErrTask = PumpOutputAsync(process.StandardError, onProcessLine, cancellationToken);
+        var stdOutTask = PumpOutputAsync(process.StandardOutput, onProcessLine, cancellationToken);
+        var stdErrTask = PumpOutputAsync(process.StandardError, onProcessLine, cancellationToken);
 
-            await Task.WhenAll(stdOutTask, stdErrTask, process.WaitForExitAsync(cancellationToken));
-            logService.LogInfo($"Process exited with code {process.ExitCode}");
+        await Task.WhenAll(stdOutTask, stdErrTask, process.WaitForExitAsync(cancellationToken));
+        logService.LogInfo($"Process exited with code {process.ExitCode}");
 
-            return new LaunchResult
-            {
-                ExitCode = process.ExitCode,
-                JavaExecutable = javaExecutable
-            };
-        }
-        finally
+        return new LaunchResult
         {
-            CleanupLegacyCompatibilityHome(legacyCompatibilityHome);
-        }
+            ExitCode = process.ExitCode,
+            JavaExecutable = javaExecutable
+        };
     }
 
     private static async Task PumpOutputAsync(StreamReader reader, Action<string> onLine, CancellationToken cancellationToken)
@@ -911,33 +904,138 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
         var fullInstancePath = Path.GetFullPath(instanceDirectory);
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(fullInstancePath))).ToLowerInvariant();
         var shortHash = hash[..12];
-        var legacyHome = Path.Combine(Path.GetTempPath(), "BivLauncher", "legacy-home", $"{profileName}-{shortHash}");
-        if (Directory.Exists(legacyHome))
+        var localDataRoot = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (string.IsNullOrWhiteSpace(localDataRoot))
         {
-            CleanupLegacyCompatibilityHome(legacyHome);
+            localDataRoot = Path.GetTempPath();
         }
+
+        var legacyHome = Path.Combine(localDataRoot, "BivLauncher", "legacy-home", $"{profileName}-{shortHash}");
 
         var legacyRoot = Path.Combine(legacyHome, ".minecraft");
         Directory.CreateDirectory(legacyRoot);
+        EnsureLegacyMinecraftProjection(instanceDirectory, legacyRoot);
 
         EnsureLegacyForgeDeobfMap(instanceDirectory, legacyRoot);
         return legacyHome;
     }
 
-    private void CleanupLegacyCompatibilityHome(string legacyHome)
+    private void EnsureLegacyMinecraftProjection(string instanceDirectory, string legacyMinecraftRoot)
     {
-        if (string.IsNullOrWhiteSpace(legacyHome) || !Directory.Exists(legacyHome))
+        foreach (var dirName in new[]
+                 {
+                     "lib",
+                     "libraries",
+                     "mods",
+                     "coremods",
+                     "config",
+                     "resources",
+                     "texturepacks",
+                     "shaderpacks",
+                     "natives",
+                     "assets"
+                 })
+        {
+            var sourceDir = Path.Combine(instanceDirectory, dirName);
+            if (!Directory.Exists(sourceDir))
+            {
+                continue;
+            }
+
+            var projectedDir = Path.Combine(legacyMinecraftRoot, dirName);
+            EnsureDirectoryProjection(projectedDir, sourceDir);
+        }
+
+        var sourceMinecraftJar = Path.Combine(instanceDirectory, "minecraft.jar");
+        var projectedMinecraftJar = Path.Combine(legacyMinecraftRoot, "minecraft.jar");
+        if (File.Exists(sourceMinecraftJar))
+        {
+            CopyFileIfChanged(sourceMinecraftJar, projectedMinecraftJar);
+        }
+    }
+
+    private void EnsureDirectoryProjection(string projectedDir, string sourceDir)
+    {
+        if (Directory.Exists(projectedDir) && IsReparsePoint(projectedDir))
         {
             return;
         }
 
+        if (Directory.Exists(projectedDir))
+        {
+            MirrorDirectorySnapshot(sourceDir, projectedDir);
+            return;
+        }
+
+        if (File.Exists(projectedDir))
+        {
+            File.Delete(projectedDir);
+        }
+
         try
         {
-            Directory.Delete(legacyHome, recursive: true);
+            Directory.CreateSymbolicLink(projectedDir, sourceDir);
         }
         catch (Exception ex)
         {
-            logService.LogInfo($"Legacy Forge support: could not cleanup compat home '{legacyHome}': {ex.Message}");
+            // Symlink creation may fail on locked-down Windows policies; mirror files as fallback.
+            Directory.CreateDirectory(projectedDir);
+            MirrorDirectorySnapshot(sourceDir, projectedDir);
+            logService.LogInfo($"Legacy Forge support: projection fallback for '{projectedDir}': {ex.Message}");
+        }
+    }
+
+    private static bool IsReparsePoint(string path)
+    {
+        try
+        {
+            return (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void MirrorDirectorySnapshot(string sourceDir, string targetDir)
+    {
+        Directory.CreateDirectory(targetDir);
+
+        foreach (var sourceSubDir in Directory.EnumerateDirectories(sourceDir, "*", SearchOption.AllDirectories))
+        {
+            var relative = Path.GetRelativePath(sourceDir, sourceSubDir);
+            var targetSubDir = Path.Combine(targetDir, relative);
+            Directory.CreateDirectory(targetSubDir);
+        }
+
+        foreach (var sourceFile in Directory.EnumerateFiles(sourceDir, "*", SearchOption.AllDirectories))
+        {
+            var relative = Path.GetRelativePath(sourceDir, sourceFile);
+            var targetFile = Path.Combine(targetDir, relative);
+            CopyFileIfChanged(sourceFile, targetFile);
+        }
+    }
+
+    private static void CopyFileIfChanged(string sourceFile, string targetFile)
+    {
+        var targetDirectory = Path.GetDirectoryName(targetFile);
+        if (!string.IsNullOrWhiteSpace(targetDirectory))
+        {
+            Directory.CreateDirectory(targetDirectory);
+        }
+
+        if (!File.Exists(targetFile))
+        {
+            File.Copy(sourceFile, targetFile, overwrite: true);
+            return;
+        }
+
+        var sourceInfo = new FileInfo(sourceFile);
+        var targetInfo = new FileInfo(targetFile);
+        if (sourceInfo.Length != targetInfo.Length ||
+            sourceInfo.LastWriteTimeUtc > targetInfo.LastWriteTimeUtc.AddSeconds(1))
+        {
+            File.Copy(sourceFile, targetFile, overwrite: true);
         }
     }
 
