@@ -73,6 +73,7 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
         }
 
         var launchMode = NormalizeLaunchMode(manifest.LaunchMode);
+        var resolvedMainClassForCompatibility = string.Empty;
         if (launchMode == "mainclass")
         {
             var launchMainClass = manifest.LaunchMainClass.Trim();
@@ -85,6 +86,7 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
             startInfo.ArgumentList.Add("-cp");
             startInfo.ArgumentList.Add(classpath);
             startInfo.ArgumentList.Add(launchMainClass);
+            resolvedMainClassForCompatibility = launchMainClass;
         }
         else
         {
@@ -102,6 +104,7 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
                 startInfo.ArgumentList.Add("-cp");
                 startInfo.ArgumentList.Add(implicitClasspath);
                 startInfo.ArgumentList.Add(implicitMainClass);
+                resolvedMainClassForCompatibility = implicitMainClass;
             }
             else
             {
@@ -109,6 +112,13 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
                 throw new InvalidDataException(
                     $"Selected route jar '{jarRelativePath}' is not launchable with -jar and implicit mainclass fallback failed. {implicitReason}");
             }
+        }
+
+        if (RequiresInstanceHomeCompatibility(resolvedMainClassForCompatibility))
+        {
+            EnsureArgumentWithValue(gameArgs, "--gameDir", instanceDirectory);
+            EnsureArgumentWithValue(gameArgs, "--assetsDir", Path.Combine(instanceDirectory, "assets"));
+            EnsureLegacyForgeDeobfMap(instanceDirectory);
         }
 
         foreach (var arg in gameArgs)
@@ -854,6 +864,66 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
     private static string BuildArgsPreview(IEnumerable<string> args)
     {
         return string.Join(' ', args.Select(QuoteIfNeeded));
+    }
+
+    private static bool RequiresInstanceHomeCompatibility(string mainClass)
+    {
+        if (string.IsNullOrWhiteSpace(mainClass))
+        {
+            return false;
+        }
+
+        return string.Equals(mainClass, "net.minecraft.launchwrapper.Launch", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(mainClass, "net.minecraft.client.main.Main", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(mainClass, "net.minecraft.client.Minecraft", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void EnsureArgumentWithValue(List<string> args, string key, string value)
+    {
+        RemoveArgWithValue(args, key);
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        args.Add(key);
+        args.Add(value);
+    }
+
+    private void EnsureLegacyForgeDeobfMap(string instanceDirectory)
+    {
+        var libDirectory = Path.Combine(instanceDirectory, "lib");
+        Directory.CreateDirectory(libDirectory);
+
+        if (Directory.EnumerateFiles(libDirectory, "deobfuscation_data_*.zip", SearchOption.TopDirectoryOnly).Any())
+        {
+            return;
+        }
+
+        var normalizedLibDirectory = Path.GetFullPath(libDirectory);
+        var source = Directory
+            .EnumerateFiles(instanceDirectory, "deobfuscation_data_*.zip", SearchOption.AllDirectories)
+            .Where(path =>
+            {
+                var fullPath = Path.GetFullPath(path);
+                return !fullPath.StartsWith(normalizedLibDirectory, StringComparison.OrdinalIgnoreCase);
+            })
+            .OrderBy(path => path.Contains("forge", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+            .ThenBy(path => path.Length)
+            .FirstOrDefault();
+
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            logService.LogInfo(
+                "Legacy Forge support: deobfuscation_data_*.zip was not found in instance files. " +
+                "FML may fail until this file is present.");
+            return;
+        }
+
+        var target = Path.Combine(libDirectory, Path.GetFileName(source));
+        File.Copy(source, target, overwrite: true);
+        var relativeTarget = NormalizePath(Path.GetRelativePath(instanceDirectory, target));
+        logService.LogInfo($"Legacy Forge support: prepared {relativeTarget}.");
     }
 
     private static void AppendRouteArgs(ICollection<string> gameArgs, string address, int port)
