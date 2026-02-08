@@ -8,6 +8,17 @@ namespace BivLauncher.Client.Services;
 
 public sealed class GameLaunchService(ILogService logService) : IGameLaunchService
 {
+    private static readonly string[] ImplicitMainClassCandidates =
+    [
+        "net.minecraft.client.main.Main",
+        "net.minecraft.launchwrapper.Launch",
+        "cpw.mods.modlauncher.Launcher",
+        "cpw.mods.bootstraplauncher.BootstrapLauncher",
+        "net.fabricmc.loader.impl.launch.knot.KnotClient",
+        "org.quiltmc.loader.impl.launch.knot.KnotClient",
+        "net.minecraft.client.Minecraft"
+    ];
+
     public async Task<LaunchResult> LaunchAsync(
         LauncherManifest manifest,
         LauncherSettings settings,
@@ -78,8 +89,26 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
         else
         {
             var gameJar = ResolveGameJar(manifest, instanceDirectory, route.PreferredJarPath);
-            startInfo.ArgumentList.Add("-jar");
-            startInfo.ArgumentList.Add(gameJar);
+            if (TryValidateJarArchive(gameJar, requireMainClass: true, out _))
+            {
+                startInfo.ArgumentList.Add("-jar");
+                startInfo.ArgumentList.Add(gameJar);
+            }
+            else if (TryResolveImplicitMainClassLaunch(manifest, instanceDirectory, gameJar, out var implicitMainClass, out var implicitClasspath, out var implicitReason))
+            {
+                var jarRelativePath = NormalizePath(Path.GetRelativePath(instanceDirectory, gameJar));
+                logService.LogInfo(
+                    $"Jar '{jarRelativePath}' has no Main-Class. Using implicit mainclass launch: {implicitMainClass}.");
+                startInfo.ArgumentList.Add("-cp");
+                startInfo.ArgumentList.Add(implicitClasspath);
+                startInfo.ArgumentList.Add(implicitMainClass);
+            }
+            else
+            {
+                var jarRelativePath = NormalizePath(Path.GetRelativePath(instanceDirectory, gameJar));
+                throw new InvalidDataException(
+                    $"Selected route jar '{jarRelativePath}' is not launchable with -jar and implicit mainclass fallback failed. {implicitReason}");
+            }
         }
 
         foreach (var arg in gameArgs)
@@ -162,20 +191,20 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
             var preferredAbsolutePath = ResolveSafePath(instanceDirectory, normalizedPreferred);
             if (File.Exists(preferredAbsolutePath))
             {
-                if (TryValidateJarArchive(preferredAbsolutePath, requireMainClass: true, out var preferredReason))
+                if (TryValidateJarArchive(preferredAbsolutePath, requireMainClass: false, out _))
                 {
                     return preferredAbsolutePath;
                 }
 
                 logService.LogInfo(
-                    $"Selected route jar '{normalizedPreferred}' is not launchable: {preferredReason}. Trying fallback jar.");
+                    $"Selected route jar '{normalizedPreferred}' is not a valid JAR archive. Trying fallback jar.");
 
                 var fallbackByPreferred = ResolveBestJarCandidate(
                     manifest,
                     instanceDirectory,
                     preferredFileName: Path.GetFileName(normalizedPreferred),
                     excludedAbsolutePath: preferredAbsolutePath,
-                    requireMainClass: true,
+                    requireMainClass: false,
                     out var fallbackReason);
                 if (!string.IsNullOrWhiteSpace(fallbackByPreferred))
                 {
@@ -185,8 +214,8 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
                 }
 
                 throw new InvalidDataException(
-                    $"Selected route jar '{normalizedPreferred}' is not launchable ({preferredReason}). " +
-                    $"No fallback launchable jar found. Details: {fallbackReason}");
+                    $"Selected route jar '{normalizedPreferred}' is not a valid JAR archive. " +
+                    $"No fallback jar found. Details: {fallbackReason}");
             }
 
             var preferredFileName = Path.GetFileName(normalizedPreferred);
@@ -195,7 +224,7 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
                 instanceDirectory,
                 preferredFileName,
                 excludedAbsolutePath: string.Empty,
-                requireMainClass: true,
+                requireMainClass: false,
                 out var fallbackMissingReason);
             if (!string.IsNullOrWhiteSpace(fallbackByMissingPreferred))
             {
@@ -216,7 +245,7 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
             instanceDirectory,
             preferredFileName: string.Empty,
             excludedAbsolutePath: string.Empty,
-            requireMainClass: true,
+            requireMainClass: false,
             out var autoResolveReason);
         if (!string.IsNullOrWhiteSpace(autoResolved))
         {
@@ -225,6 +254,124 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
 
         throw new InvalidOperationException(
             $"No launchable .jar file found in manifest or instance directory. Details: {autoResolveReason}");
+    }
+
+    private static bool TryResolveImplicitMainClassLaunch(
+        LauncherManifest manifest,
+        string instanceDirectory,
+        string gameJarPath,
+        out string mainClass,
+        out string classpath,
+        out string reason)
+    {
+        var classpathEntries = BuildImplicitClasspathEntries(instanceDirectory, gameJarPath);
+        if (classpathEntries.Count == 0)
+        {
+            mainClass = string.Empty;
+            classpath = string.Empty;
+            reason = "No classpath jars found for implicit launch.";
+            return false;
+        }
+
+        var explicitMainClass = manifest.LaunchMainClass?.Trim() ?? string.Empty;
+        if (!string.IsNullOrWhiteSpace(explicitMainClass))
+        {
+            if (ContainsClass(classpathEntries, explicitMainClass))
+            {
+                mainClass = explicitMainClass;
+                classpath = string.Join(Path.PathSeparator, classpathEntries);
+                reason = string.Empty;
+                return true;
+            }
+        }
+
+        foreach (var candidate in ImplicitMainClassCandidates)
+        {
+            if (!ContainsClass(classpathEntries, candidate))
+            {
+                continue;
+            }
+
+            mainClass = candidate;
+            classpath = string.Join(Path.PathSeparator, classpathEntries);
+            reason = string.Empty;
+            return true;
+        }
+
+        mainClass = string.Empty;
+        classpath = string.Empty;
+        var checkedCandidates = !string.IsNullOrWhiteSpace(explicitMainClass)
+            ? $"{explicitMainClass}, {string.Join(", ", ImplicitMainClassCandidates)}"
+            : string.Join(", ", ImplicitMainClassCandidates);
+        reason = $"No known main class found in classpath jars. Checked: {checkedCandidates}.";
+        return false;
+    }
+
+    private static List<string> BuildImplicitClasspathEntries(string instanceDirectory, string gameJarPath)
+    {
+        var entries = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void AddIfExists(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return;
+            }
+
+            var fullPath = Path.GetFullPath(path);
+            if (!File.Exists(fullPath))
+            {
+                return;
+            }
+
+            if (seen.Add(fullPath))
+            {
+                entries.Add(fullPath);
+            }
+        }
+
+        AddIfExists(gameJarPath);
+
+        var librariesPath = Path.Combine(instanceDirectory, "libraries");
+        if (Directory.Exists(librariesPath))
+        {
+            foreach (var jar in Directory.EnumerateFiles(librariesPath, "*.jar", SearchOption.AllDirectories)
+                         .OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
+            {
+                AddIfExists(jar);
+            }
+        }
+
+        foreach (var jar in Directory.EnumerateFiles(instanceDirectory, "*.jar", SearchOption.TopDirectoryOnly)
+                     .OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
+        {
+            AddIfExists(jar);
+        }
+
+        return entries;
+    }
+
+    private static bool ContainsClass(IReadOnlyList<string> classpathJars, string className)
+    {
+        var entryName = className.Replace('.', '/') + ".class";
+        foreach (var jarPath in classpathJars)
+        {
+            try
+            {
+                using var archive = ZipFile.OpenRead(jarPath);
+                if (archive.Entries.Any(x => x.FullName.Equals(entryName, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return true;
+                }
+            }
+            catch
+            {
+                // Ignore unreadable jars while probing classpath candidates.
+            }
+        }
+
+        return false;
     }
 
     private static string ResolveClasspath(LauncherManifest manifest, string instanceDirectory, string preferredJarPath)
@@ -448,8 +595,7 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
             .ThenBy(x => x.RelativePath.Length)
             .ThenBy(x => x.RelativePath, StringComparer.OrdinalIgnoreCase))
         {
-            if (requireMainClass &&
-                !IsJarEligibleForJarMode(candidate.RelativePath, normalizedPreferredFileName, candidate.AbsolutePath))
+            if (!IsJarEligibleForJarMode(candidate.RelativePath, normalizedPreferredFileName, candidate.AbsolutePath))
             {
                 continue;
             }
@@ -512,6 +658,8 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
                normalizedRelativePath.Contains("/libraries/", StringComparison.OrdinalIgnoreCase) ||
                normalizedRelativePath.StartsWith("lib/", StringComparison.OrdinalIgnoreCase) ||
                normalizedRelativePath.Contains("/lib/", StringComparison.OrdinalIgnoreCase) ||
+               normalizedRelativePath.StartsWith("mods/", StringComparison.OrdinalIgnoreCase) ||
+               normalizedRelativePath.Contains("/mods/", StringComparison.OrdinalIgnoreCase) ||
                normalizedRelativePath.StartsWith("natives/", StringComparison.OrdinalIgnoreCase) ||
                normalizedRelativePath.Contains("/natives/", StringComparison.OrdinalIgnoreCase);
     }
