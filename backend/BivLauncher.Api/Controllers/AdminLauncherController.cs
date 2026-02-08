@@ -69,7 +69,10 @@ public sealed class AdminLauncherController(
         var projectPath = ResolveProjectPath();
         if (!System.IO.File.Exists(projectPath))
         {
-            return BadRequest(new { error = $"Launcher project file not found: {projectPath}" });
+            return BadRequest(new
+            {
+                error = $"Launcher project file not found. Checked path: {projectPath}"
+            });
         }
 
         var timeoutSeconds = ResolveTimeoutSeconds();
@@ -316,7 +319,15 @@ public sealed class AdminLauncherController(
         var configuredPath = configuration["LAUNCHER_BUILD_PROJECT_PATH"];
         if (!string.IsNullOrWhiteSpace(configuredPath))
         {
-            return ToAbsolutePath(configuredPath);
+            var configuredAbsolutePath = ToAbsolutePath(configuredPath);
+            if (System.IO.File.Exists(configuredAbsolutePath))
+            {
+                return configuredAbsolutePath;
+            }
+
+            logger.LogWarning(
+                "Configured LAUNCHER_BUILD_PROJECT_PATH does not exist: {ProjectPath}. Falling back to auto-detection.",
+                configuredAbsolutePath);
         }
 
         var candidates = new[]

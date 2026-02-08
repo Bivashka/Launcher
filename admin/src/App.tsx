@@ -1928,6 +1928,36 @@ function App() {
   async function loadAdminData(activeToken: string) {
     setError('')
     try {
+      const parseErrorMessage = async (response: Response): Promise<string> => {
+        try {
+          const raw = await response.text()
+          if (!raw) {
+            return ''
+          }
+
+          try {
+            const parsed = JSON.parse(raw) as ApiError
+            return (parsed.error ?? parsed.title ?? '').trim()
+          } catch {
+            return raw.trim().slice(0, 200)
+          }
+        } catch {
+          return ''
+        }
+      }
+
+      const readJsonOrDefault = async <T,>(response: Response, fallback: T): Promise<T> => {
+        if (!response.ok) {
+          return fallback
+        }
+
+        try {
+          return (await response.json()) as T
+        } catch {
+          return fallback
+        }
+      }
+
       const [profileData, serverData, newsData, newsSourcesData, newsSyncData, newsRetentionData, runtimeRetentionData, bansData, crashData, docsData, authProviderData, discordRpcSettingsData, twoFactorData, twoFactorAccountsData, brandingData, developerSupportData, installTelemetrySettingsData, projectInstallStatsData, s3Data] = await Promise.all([
         fetch(`${apiBaseUrl}/api/admin/profiles`, {
           headers: { Authorization: `Bearer ${activeToken}` },
@@ -1988,49 +2018,69 @@ function App() {
         }),
       ])
 
-      if (
-        !profileData.ok ||
-        !serverData.ok ||
-        !newsData.ok ||
-        !newsSourcesData.ok ||
-        !newsSyncData.ok ||
-        !newsRetentionData.ok ||
-        !runtimeRetentionData.ok ||
-        !bansData.ok ||
-        !crashData.ok ||
-        !docsData.ok ||
-        !authProviderData.ok ||
-        !discordRpcSettingsData.ok ||
-        !twoFactorData.ok ||
-        !twoFactorAccountsData.ok ||
-        !brandingData.ok ||
-        !developerSupportData.ok ||
-        !installTelemetrySettingsData.ok ||
-        !projectInstallStatsData.ok ||
-        !s3Data.ok
-      ) {
-        throw new Error('Unable to load admin data.')
+      if (profileData.status === 401 || serverData.status === 401) {
+        localStorage.removeItem('blp_admin_token')
+        setToken('')
+        setPhase('login')
+        throw new Error('Admin session expired. Log in again.')
       }
 
-      const loadedProfiles = (await profileData.json()) as Profile[]
-      const loadedServers = (await serverData.json()) as Server[]
-      const loadedNews = (await newsData.json()) as NewsItem[]
-      const loadedNewsSources = (await newsSourcesData.json()) as NewsSourceSettings[]
-      const loadedNewsSyncSettings = (await newsSyncData.json()) as NewsSyncSettings
-      const loadedNewsRetentionSettings = (await newsRetentionData.json()) as NewsRetentionSettings
-      const loadedRuntimeRetentionSettings = (await runtimeRetentionData.json()) as RuntimeRetentionSettings
-      const loadedBans = (await bansData.json()) as BanItem[]
-      const loadedCrashes = (await crashData.json()) as CrashReportItem[]
-      const loadedDocs = (await docsData.json()) as DocumentationArticle[]
-      const loadedAuthProviderSettings = (await authProviderData.json()) as AuthProviderSettings
-      const loadedDiscordRpcSettings = (await discordRpcSettingsData.json()) as DiscordRpcSettings
-      const loadedTwoFactorSettings = (await twoFactorData.json()) as TwoFactorSettings
-      const loadedTwoFactorAccounts = (await twoFactorAccountsData.json()) as TwoFactorAccount[]
-      const loadedBranding = (await brandingData.json()) as BrandingSettings
-      const loadedDeveloperSupport = (await developerSupportData.json()) as DeveloperSupportInfo
-      const loadedInstallTelemetrySettings = (await installTelemetrySettingsData.json()) as InstallTelemetrySettings
-      const loadedProjectInstallStats = (await projectInstallStatsData.json()) as ProjectInstallStat[]
-      const loadedS3Settings = (await s3Data.json()) as S3Settings
+      const endpointStatuses: Array<{ name: string; response: Response }> = [
+        { name: 'profiles', response: profileData },
+        { name: 'servers', response: serverData },
+        { name: 'news', response: newsData },
+        { name: 'news-sources', response: newsSourcesData },
+        { name: 'news-sync', response: newsSyncData },
+        { name: 'news-retention', response: newsRetentionData },
+        { name: 'runtime-retention', response: runtimeRetentionData },
+        { name: 'bans', response: bansData },
+        { name: 'crashes', response: crashData },
+        { name: 'docs', response: docsData },
+        { name: 'auth-provider', response: authProviderData },
+        { name: 'discord-rpc', response: discordRpcSettingsData },
+        { name: 'two-factor', response: twoFactorData },
+        { name: 'two-factor/accounts', response: twoFactorAccountsData },
+        { name: 'branding', response: brandingData },
+        { name: 'support/developer', response: developerSupportData },
+        { name: 'install-telemetry/settings', response: installTelemetrySettingsData },
+        { name: 'install-telemetry/projects', response: projectInstallStatsData },
+        { name: 'settings/s3', response: s3Data },
+      ]
+      const failedEndpoints = endpointStatuses.filter((item) => !item.response.ok)
+      if (failedEndpoints.length > 0) {
+        const failures = await Promise.all(
+          failedEndpoints.slice(0, 6).map(async (item) => {
+            const detail = await parseErrorMessage(item.response)
+            return `${item.name} (${item.response.status}${detail ? `: ${detail}` : ''})`
+          }),
+        )
+        setNotice(`Loaded with warnings: ${failures.join('; ')}`)
+      }
+
+      const loadedProfiles = await readJsonOrDefault<Profile[]>(profileData, [])
+      const loadedServers = await readJsonOrDefault<Server[]>(serverData, [])
+      const loadedNews = await readJsonOrDefault<NewsItem[]>(newsData, [])
+      const loadedNewsSources = await readJsonOrDefault<NewsSourceSettings[]>(newsSourcesData, [])
+      const loadedNewsSyncSettings = await readJsonOrDefault<NewsSyncSettings>(newsSyncData, defaultNewsSyncSettings)
+      const loadedNewsRetentionSettings = await readJsonOrDefault<NewsRetentionSettings>(newsRetentionData, defaultNewsRetentionSettings)
+      const loadedRuntimeRetentionSettings = await readJsonOrDefault<RuntimeRetentionSettings>(runtimeRetentionData, defaultRuntimeRetentionSettings)
+      const loadedBans = await readJsonOrDefault<BanItem[]>(bansData, [])
+      const loadedCrashes = await readJsonOrDefault<CrashReportItem[]>(crashData, [])
+      const loadedDocs = await readJsonOrDefault<DocumentationArticle[]>(docsData, [])
+      const loadedAuthProviderSettings = await readJsonOrDefault<AuthProviderSettings>(authProviderData, defaultAuthProviderSettings)
+      const loadedDiscordRpcSettings = await readJsonOrDefault<DiscordRpcSettings>(discordRpcSettingsData, defaultDiscordRpcSettings)
+      const loadedTwoFactorSettings = await readJsonOrDefault<TwoFactorSettings>(twoFactorData, defaultTwoFactorSettings)
+      const loadedTwoFactorAccounts = await readJsonOrDefault<TwoFactorAccount[]>(twoFactorAccountsData, [])
+      const loadedBranding = await readJsonOrDefault<BrandingSettings>(brandingData, defaultBrandingSettings)
+      const loadedDeveloperSupport = await readJsonOrDefault<DeveloperSupportInfo>(developerSupportData, defaultDeveloperSupportInfo)
+      const loadedInstallTelemetrySettings = await readJsonOrDefault<InstallTelemetrySettings>(installTelemetrySettingsData, defaultInstallTelemetrySettings)
+      const loadedProjectInstallStats = await readJsonOrDefault<ProjectInstallStat[]>(projectInstallStatsData, [])
+      const loadedS3Settings = await readJsonOrDefault<S3Settings>(s3Data, defaultS3Settings)
+
+      if (loadedProfiles.length === 0 && loadedServers.length === 0) {
+        throw new Error('Unable to load core admin data (profiles/servers). Check API logs.')
+      }
+
       setProfiles(loadedProfiles)
       setServers(loadedServers)
       setNewsItems(loadedNews)
@@ -3717,11 +3767,11 @@ function App() {
             const parsed = JSON.parse(text) as ApiError
             parsedError = parsed.error ?? parsed.title ?? ''
           } catch {
-            parsedError = text
+            parsedError = text.slice(0, 300)
           }
         }
 
-        throw new Error(parsedError || 'Launcher build failed.')
+        throw new Error(parsedError || `Launcher build failed (HTTP ${response.status}).`)
       }
 
       const blob = await response.blob()
