@@ -123,6 +123,7 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
         {
             EnsureArgumentWithValue(gameArgs, "--gameDir", instanceDirectory);
             EnsureArgumentWithValue(gameArgs, "--assetsDir", Path.Combine(instanceDirectory, "assets"));
+            EnsureLegacyJvmNativePaths(startInfo.ArgumentList, instanceDirectory);
             if (string.Equals(resolvedMainClassForCompatibility, "net.minecraft.launchwrapper.Launch", StringComparison.OrdinalIgnoreCase))
             {
                 EnsureLegacyLaunchwrapperDefaults(gameArgs, route, manifest, instanceDirectory, resolvedClasspathForCompatibility);
@@ -189,15 +190,71 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
 
     private static async Task PumpOutputAsync(StreamReader reader, Action<string> onLine, CancellationToken cancellationToken)
     {
-        while (!reader.EndOfStream && !cancellationToken.IsCancellationRequested)
+        var buffer = new char[4096];
+        var pending = new StringBuilder();
+
+        while (!cancellationToken.IsCancellationRequested)
         {
-            var line = await reader.ReadLineAsync(cancellationToken);
-            if (string.IsNullOrWhiteSpace(line))
+            int read;
+            try
+            {
+                read = await reader.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+
+            if (read <= 0)
+            {
+                break;
+            }
+
+            pending.Append(buffer, 0, read);
+            FlushCompletedLines(pending, onLine);
+        }
+
+        if (pending.Length > 0)
+        {
+            var tail = pending.ToString().Trim();
+            if (!string.IsNullOrWhiteSpace(tail))
+            {
+                onLine(tail);
+            }
+        }
+    }
+
+    private static void FlushCompletedLines(StringBuilder pending, Action<string> onLine)
+    {
+        var start = 0;
+        for (var i = 0; i < pending.Length; i++)
+        {
+            if (pending[i] != '\n')
             {
                 continue;
             }
 
-            onLine(line);
+            var length = i - start;
+            if (length > 0 && pending[i - 1] == '\r')
+            {
+                length--;
+            }
+
+            if (length > 0)
+            {
+                var line = pending.ToString(start, length).Trim();
+                if (!string.IsNullOrWhiteSpace(line))
+                {
+                    onLine(line);
+                }
+            }
+
+            start = i + 1;
+        }
+
+        if (start > 0)
+        {
+            pending.Remove(0, start);
         }
     }
 
@@ -917,6 +974,44 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
 
         args.Add(key);
         args.Add(value);
+    }
+
+    private void EnsureLegacyJvmNativePaths(IList<string> jvmArgs, string instanceDirectory)
+    {
+        var nativesDirectory = Path.Combine(instanceDirectory, "natives");
+        if (!Directory.Exists(nativesDirectory))
+        {
+            return;
+        }
+
+        EnsureJvmProperty(jvmArgs, "java.library.path", nativesDirectory);
+        EnsureJvmProperty(jvmArgs, "org.lwjgl.librarypath", nativesDirectory);
+        EnsureJvmProperty(jvmArgs, "net.java.games.input.librarypath", nativesDirectory);
+        logService.LogInfo($"Legacy JVM native paths configured: {nativesDirectory}");
+    }
+
+    private static void EnsureJvmProperty(IList<string> args, string propertyName, string value)
+    {
+        if (string.IsNullOrWhiteSpace(propertyName))
+        {
+            return;
+        }
+
+        var prefix = $"-D{propertyName}=";
+        for (var i = args.Count - 1; i >= 0; i--)
+        {
+            if (args[i].StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                args.RemoveAt(i);
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        args.Add($"{prefix}{value}");
     }
 
     private void EnsureLegacyLaunchwrapperDefaults(

@@ -872,11 +872,13 @@ public partial class MainWindowViewModel : ViewModelBase
                     StatusText = F("status.verifyingProgress", info.ProcessedFiles, info.TotalFiles, currentPath);
                 });
 
-                var result = await _manifestInstallerService.VerifyAndInstallAsync(
-                    ApiBaseUrl,
-                    manifest,
-                    InstallDirectory,
-                    progress);
+                var result = await Task.Run(() =>
+                        _manifestInstallerService.VerifyAndInstallAsync(
+                            ApiBaseUrl,
+                            manifest,
+                            InstallDirectory,
+                            progress),
+                    CancellationToken.None);
 
                 CompleteFileSyncProgress(result);
                 StatusText = F("status.verifyComplete", result.DownloadedFiles, result.VerifiedFiles);
@@ -923,11 +925,13 @@ public partial class MainWindowViewModel : ViewModelBase
                     StatusText = F("status.verifyingProgress", info.ProcessedFiles, info.TotalFiles, currentPath);
                 });
 
-                var installResult = await _manifestInstallerService.VerifyAndInstallAsync(
-                    ApiBaseUrl,
-                    manifest,
-                    InstallDirectory,
-                    progress);
+                var installResult = await Task.Run(() =>
+                        _manifestInstallerService.VerifyAndInstallAsync(
+                            ApiBaseUrl,
+                            manifest,
+                            InstallDirectory,
+                            progress),
+                    CancellationToken.None);
                 CompleteFileSyncProgress(installResult);
                 StopFileSyncProgress();
 
@@ -938,12 +942,14 @@ public partial class MainWindowViewModel : ViewModelBase
                 try
                 {
                     _discordRpcService.SetInGamePresence(selectedServer);
-                    launchResult = await _gameLaunchService.LaunchAsync(
-                        manifest,
-                        BuildSettingsSnapshot(),
-                        launchRoute,
-                        installResult.InstanceDirectory,
-                        line => _logService.LogInfo(line));
+                    launchResult = await Task.Run(() =>
+                            _gameLaunchService.LaunchAsync(
+                                manifest,
+                                BuildSettingsSnapshot(),
+                                launchRoute,
+                                installResult.InstanceDirectory,
+                                line => _logService.LogInfo(line)),
+                        CancellationToken.None);
                 }
                 finally
                 {
