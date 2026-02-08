@@ -238,10 +238,22 @@ public sealed class PublicController(
                 return;
             }
 
-            var hasAnyBuild = await dbContext.Builds
+            var hasBuildInProgress = await dbContext.Builds
                 .AsNoTracking()
-                .AnyAsync(x => x.ProfileId == profileId, cancellationToken);
-            if (hasAnyBuild)
+                .AnyAsync(x => x.ProfileId == profileId && x.Status == BuildStatus.Building, cancellationToken);
+            if (hasBuildInProgress)
+            {
+                return;
+            }
+
+            var latestFailedBuildAtUtc = await dbContext.Builds
+                .AsNoTracking()
+                .Where(x => x.ProfileId == profileId && x.Status == BuildStatus.Failed)
+                .OrderByDescending(x => x.CreatedAtUtc)
+                .Select(x => (DateTime?)x.CreatedAtUtc)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (latestFailedBuildAtUtc is DateTime failedAtUtc &&
+                failedAtUtc >= DateTime.UtcNow.AddMinutes(-5))
             {
                 return;
             }
