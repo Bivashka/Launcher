@@ -58,6 +58,13 @@ type RuntimeCleanupResponse = {
   deletedCount: number
 }
 type BuildResponse = { id: string; status: string; manifestKey: string; filesCount: number; totalSizeBytes: number }
+type LauncherBuildRequest = {
+  runtimeIdentifier: string
+  configuration: 'Release' | 'Debug'
+  selfContained: boolean
+  publishSingleFile: boolean
+  version: string
+}
 type CosmeticUploadResponse = { account: string; key: string; url: string }
 type DiscordRpcConfig = {
   id: string
@@ -714,6 +721,7 @@ const defaultS3Settings: S3Settings = {
 }
 
 const supportedLoaders = ['vanilla', 'forge', 'fabric', 'quilt', 'neoforge', 'liteloader'] as const
+const launcherRuntimeOptions = ['win-x64', 'win-arm64', 'linux-x64', 'osx-x64', 'osx-arm64'] as const
 const jvmArgPresets: Array<{ id: string; label: string; value: string }> = [
   { id: 'balanced', label: 'Balanced 2G', value: '-Xms1024M -Xmx2048M -XX:+UseG1GC -XX:+ParallelRefProcEnabled' },
   { id: 'performance', label: 'Performance 4G', value: '-Xms2048M -Xmx4096M -XX:+UseG1GC -XX:MaxGCPauseMillis=120 -XX:+UnlockExperimentalVMOptions' },
@@ -1126,6 +1134,24 @@ function toLocalDateTimeInputValue(value: Date): string {
   return `${year}-${month}-${day}T${hours}:${minutes}`
 }
 
+function extractDownloadFileName(contentDisposition: string | null): string | null {
+  if (!contentDisposition) {
+    return null
+  }
+
+  const utf8Match = /filename\*=UTF-8''([^;]+)/i.exec(contentDisposition)
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1].trim())
+    } catch {
+      return utf8Match[1].trim()
+    }
+  }
+
+  const basicMatch = /filename="?([^";]+)"?/i.exec(contentDisposition)
+  return basicMatch?.[1]?.trim() ?? null
+}
+
 function splitArgs(raw: string): string[] {
   const input = raw.trim()
   if (!input) {
@@ -1339,6 +1365,11 @@ function App() {
   const [rebuildLaunchMainClass, setRebuildLaunchMainClass] = useState('')
   const [rebuildLaunchClasspath, setRebuildLaunchClasspath] = useState('')
   const [rebuildPublishToServers, setRebuildPublishToServers] = useState(true)
+  const [launcherBuildRuntimeIdentifier, setLauncherBuildRuntimeIdentifier] = useState<typeof launcherRuntimeOptions[number]>('win-x64')
+  const [launcherBuildConfiguration, setLauncherBuildConfiguration] = useState<'Release' | 'Debug'>('Release')
+  const [launcherBuildSelfContained, setLauncherBuildSelfContained] = useState(true)
+  const [launcherBuildSingleFile, setLauncherBuildSingleFile] = useState(true)
+  const [launcherBuildVersion, setLauncherBuildVersion] = useState('')
   const runtimeMetadataProfile = useMemo(() => {
     if (editingProfileId) {
       return profiles.find((profile) => profile.id === editingProfileId) ?? null
@@ -3599,6 +3630,78 @@ function App() {
     return parsed.toISOString()
   }
 
+  async function onBuildLauncherAndDownload() {
+    if (!token) {
+      setError('Missing admin token')
+      return
+    }
+
+    const version = launcherBuildVersion.trim()
+    if (version && !/^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$/.test(version)) {
+      setError('Version must match pattern ^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$.')
+      return
+    }
+
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      const payload: LauncherBuildRequest = {
+        runtimeIdentifier: launcherBuildRuntimeIdentifier,
+        configuration: launcherBuildConfiguration,
+        selfContained: launcherBuildSelfContained,
+        publishSingleFile: launcherBuildSingleFile,
+        version,
+      }
+
+      const response = await fetch(`${apiBaseUrl}/api/admin/launcher/build`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      })
+
+      if (!response.ok) {
+        const text = await response.text()
+        let parsedError = ''
+        if (text) {
+          try {
+            const parsed = JSON.parse(text) as ApiError
+            parsedError = parsed.error ?? parsed.title ?? ''
+          } catch {
+            parsedError = text
+          }
+        }
+
+        throw new Error(parsedError || 'Launcher build failed.')
+      }
+
+      const blob = await response.blob()
+      if (blob.size <= 0) {
+        throw new Error('Launcher build returned an empty file.')
+      }
+
+      const fallbackVersion = version || 'dev'
+      const fallbackName = `launcher-${fallbackVersion}-${launcherBuildRuntimeIdentifier}.zip`
+      const fileName = extractDownloadFileName(response.headers.get('content-disposition')) || fallbackName
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = fileName
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      URL.revokeObjectURL(url)
+      setNotice(`Launcher build ready: ${fileName}`)
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : 'Launcher build failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function onProfileRebuild(profileId: string) {
     const argsErrors = [...rebuildJvmArgsAnalysis.errors, ...rebuildGameArgsAnalysis.errors]
     if (argsErrors.length > 0) {
@@ -4852,11 +4955,13 @@ function App() {
             <div className={`grid-2 split-build-servers ${(activePage === 'build' || activePage === 'servers') ? '' : 'is-hidden'} ${activePage === 'build' ? 'show-build' : 'show-servers'}`}>
               <section className="form form-small">
                 <h3>Скины / Плащи</h3>
-                <input
-                  placeholder="Имя пользователя или ExternalId"
-                  value={cosmeticsUser}
-                  onChange={(event) => setCosmeticsUser(event.target.value)}
-                />
+                <div className="action-block">
+                  <h4>Косметика игрока</h4>
+                  <input
+                    placeholder="Имя пользователя или ExternalId"
+                    value={cosmeticsUser}
+                    onChange={(event) => setCosmeticsUser(event.target.value)}
+                  />
                 <div className="upload-row">
                   <input
                     type="file"
@@ -4877,7 +4982,59 @@ function App() {
                     Загрузить плащ
                   </button>
                 </div>
-
+                </div>
+                {activePage === 'build' && (
+                <div className="action-block">
+                  <h4>Сборка лаунчера</h4>
+                  <small>Собирает `launcher/BivLauncher.Client` и сразу скачивает ZIP-артефакт.</small>
+                  <div className="grid-inline">
+                    <select
+                      value={launcherBuildRuntimeIdentifier}
+                      onChange={(event) => setLauncherBuildRuntimeIdentifier(event.target.value as typeof launcherRuntimeOptions[number])}
+                    >
+                      {launcherRuntimeOptions.map((runtime) => (
+                        <option key={runtime} value={runtime}>
+                          {runtime}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      value={launcherBuildConfiguration}
+                      onChange={(event) => setLauncherBuildConfiguration(event.target.value as 'Release' | 'Debug')}
+                    >
+                      <option value="Release">Release</option>
+                      <option value="Debug">Debug</option>
+                    </select>
+                  </div>
+                  <input
+                    placeholder="Version (optional, e.g. 1.2.3)"
+                    value={launcherBuildVersion}
+                    onChange={(event) => setLauncherBuildVersion(event.target.value)}
+                  />
+                  <label className="checkbox">
+                    <input
+                      type="checkbox"
+                      checked={launcherBuildSelfContained}
+                      onChange={(event) => setLauncherBuildSelfContained(event.target.checked)}
+                    />
+                    Self-contained publish
+                  </label>
+                  <label className="checkbox">
+                    <input
+                      type="checkbox"
+                      checked={launcherBuildSingleFile}
+                      onChange={(event) => setLauncherBuildSingleFile(event.target.checked)}
+                    />
+                    Single-file publish
+                  </label>
+                  <div className="button-row">
+                    <button type="button" onClick={onBuildLauncherAndDownload} disabled={busy || !token}>
+                      Собрать и скачать лаунчер
+                    </button>
+                  </div>
+                </div>
+                )}
+                <div className="action-block">
                 <h4>Артефакт Java Runtime</h4>
                 <select
                   value={runtimeProfileSlug}
@@ -4943,7 +5100,9 @@ function App() {
                     {!runtimeCleanupResult.dryRun ? `, deleted ${runtimeCleanupResult.deletedCount}` : ''}
                   </small>
                 ) : null}
+                </div>
 
+                <div className="action-block">
                 <h4>Runtime Retention Schedule</h4>
                 <label className="checkbox">
                   <input
@@ -5068,6 +5227,7 @@ function App() {
                     ))}
                   </ul>
                 ) : null}
+                </div>
               </section>
 
               <section>
@@ -5096,6 +5256,7 @@ function App() {
             <div className={`grid-2 split-integrations-profiles ${(activePage === 'integrations' || activePage === 'servers') ? '' : 'is-hidden'} ${activePage === 'integrations' ? 'show-integrations' : 'show-servers'}`}>
               <section className="form form-small">
                 <h3>Discord RPC</h3>
+                <div className="action-block">
                 <label className="checkbox">
                   <input
                     type="checkbox"
@@ -5124,6 +5285,8 @@ function App() {
                 <small>
                   Updated: {discordRpcSettings.updatedAtUtc ? new Date(discordRpcSettings.updatedAtUtc).toLocaleString() : 'fallback/default'}
                 </small>
+                </div>
+                <div className="action-block">
                 <div className="grid-inline">
                   <select value={discordScopeType} onChange={(event) => setDiscordScopeType(event.target.value as 'profile' | 'server')}>
                     <option value="profile">Profile</option>
@@ -5204,6 +5367,7 @@ function App() {
                   <button type="button" onClick={onDeleteDiscordConfig} disabled={busy || !token}>
                     Delete
                   </button>
+                </div>
                 </div>
               </section>
 
@@ -5718,6 +5882,7 @@ function App() {
             <div className={`grid-2 ${activePage === 'security' ? '' : 'is-hidden'}`}>
               <section className="form form-small">
                 <h3>Bans</h3>
+                <div className="action-block">
                 <h4>HWID ban</h4>
                 <input
                   placeholder="HWID hash"
@@ -5740,7 +5905,8 @@ function App() {
                 <button type="button" onClick={onCreateHwidBan} disabled={busy || !token}>
                   Ban HWID
                 </button>
-
+                </div>
+                <div className="action-block">
                 <h4>Account ban</h4>
                 <input
                   placeholder="Username or ExternalId"
@@ -5766,6 +5932,7 @@ function App() {
                 <button type="button" onClick={onResetAccountHwid} disabled={busy || !token}>
                   Reset account HWID
                 </button>
+                </div>
               </section>
 
               <section>
@@ -5796,6 +5963,7 @@ function App() {
             <div className={`grid-2 ${activePage === 'security' ? '' : 'is-hidden'}`}>
               <section className="form form-small">
                 <h3>Two-factor authentication (2FA)</h3>
+                <div className="action-block">
                 <label className="checkbox">
                   <input
                     type="checkbox"
@@ -5815,6 +5983,8 @@ function App() {
                 <button type="button" onClick={onSaveTwoFactorSettings} disabled={busy || !token}>
                   Save 2FA settings
                 </button>
+                </div>
+                <div className="action-block">
                 <div className="grid-inline">
                   <input
                     placeholder="Search username or externalId"
@@ -5841,6 +6011,7 @@ function App() {
                 <button type="button" onClick={onRefreshTwoFactorAccounts} disabled={busy || !token}>
                   Refresh 2FA accounts
                 </button>
+                </div>
               </section>
 
               <section>
@@ -6295,6 +6466,7 @@ function App() {
             <div className={`grid-2 ${activePage === 'integrations' ? '' : 'is-hidden'}`}>
               <section className="form form-small">
                 <h3>Storage Backend</h3>
+                <div className="action-block">
                 <select
                   value={s3Settings.useS3 ? 's3' : 'local'}
                   onChange={(event) =>
@@ -6375,7 +6547,8 @@ function App() {
                 <button type="button" onClick={onTestStorageSettings} disabled={busy || !token}>
                   Test storage
                 </button>
-
+                </div>
+                <div className="action-block">
                 <h4>Migration</h4>
                 <small className="muted">
                   Copy objects from current backend to target backend by key (safe dry-run first).
@@ -6423,6 +6596,7 @@ function App() {
                 <button type="button" onClick={onRunStorageMigration} disabled={busy || !token}>
                   Run migration
                 </button>
+                </div>
               </section>
 
               <section>
@@ -6777,6 +6951,8 @@ function App() {
                 <small>
                   Действия по рантайму, CRUD, настройкам и авторизации с экспортом/очисткой ({auditLogs.length} записей загружено).
                 </small>
+                <div className="action-block">
+                  <h4>Фильтры и пресеты</h4>
                 <div className="grid-inline">
                   <input
                     placeholder="Префикс действия (например: runtime)"
@@ -6893,12 +7069,18 @@ function App() {
                     <button type="button" onClick={() => onSetAuditActionPreset('')}>all</button>
                   </small>
                 </div>
+                </div>
+                <div className="action-block">
+                  <h4>Действия ленты</h4>
                 <button type="button" onClick={onRefreshAuditLogs} disabled={busy || !token}>
                   Обновить логи
                 </button>
                 <button type="button" onClick={onLoadMoreAuditLogs} disabled={busy || !token || !auditLogsHasMore}>
                   Загрузить ещё
                 </button>
+                </div>
+                <div className="action-block">
+                  <h4>Экспорт</h4>
                 <div className="grid-inline">
                   <input
                     type="number"
@@ -6918,6 +7100,9 @@ function App() {
                   </button>
                   <small>Экспорт использует текущие фильтры и сортировку.</small>
                 </div>
+                </div>
+                <div className="action-block">
+                  <h4>Очистка</h4>
                 <div className="grid-inline">
                   <input
                     type="number"
@@ -6946,6 +7131,7 @@ function App() {
                 <small>
                   Загружено: {auditLogs.length} | следующий offset: {auditLogsOffset} | есть ещё: {String(auditLogsHasMore)} | сорт: {auditLogSortOrder}
                 </small>
+                </div>
               </section>
 
               <section>
