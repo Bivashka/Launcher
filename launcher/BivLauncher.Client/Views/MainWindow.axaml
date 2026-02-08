@@ -23,243 +23,393 @@
             IsVisible="{Binding HasBrandingBackgroundImage}" />
 
     <Grid RowDefinitions="Auto,*" Margin="18">
-    <Border Classes="heroPanel"
-            Background="{Binding HeroBackgroundBrush}"
-            BorderBrush="{Binding HeroBorderBrush}">
-      <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto">
-        <TextBlock Classes="heroTitle" Text="{Binding ProductName}" />
-        <TextBlock Grid.Row="1" Classes="subtle" Text="{Binding Tagline}" Margin="0,6,0,0" />
-        <TextBlock Grid.Row="2"
-                   Classes="heroMeta"
-                   Margin="0,8,0,0"
-                   Text="{Binding AuthStatusText}"
-                   TextWrapping="Wrap" />
-        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Top">
-          <Button Classes="ghostButton"
-                  Content="{Binding RefreshButtonText}"
-                  Command="{Binding RefreshCommand}"
-                  IsVisible="{Binding IsLauncherReady}" />
-          <Button Classes="iconButton"
-                  Content="&#xE713;"
-                  Command="{Binding ToggleSettingsCommand}"
-                  IsVisible="{Binding IsLauncherReady}" />
-        </StackPanel>
-      </Grid>
-    </Border>
-
-    <Grid Grid.Row="1" Margin="0,14,0,0">
-      <Border Classes="loginCard"
-              Width="{Binding LoginCardWidth}"
-              HorizontalAlignment="{Binding LoginCardHorizontalAlignment}"
-              VerticalAlignment="Center"
-              Margin="24,0"
-              Background="{Binding LoginCardBackgroundBrush}"
-              BorderBrush="{Binding LoginCardBorderBrush}"
-              IsVisible="{Binding IsLoginRequired}">
-        <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="10">
-          <TextBlock Classes="sectionTitle" Text="{Binding AccountHeaderText}" />
-          <TextBlock Grid.Row="1" Classes="subtle" Text="{Binding StatusText}" TextWrapping="Wrap" />
-
-          <TextBlock Grid.Row="2" Text="{Binding UsernameLabelText}" />
-          <TextBox Grid.Row="3"
-                   Watermark="Player"
-                   Text="{Binding PlayerUsername}" />
-
-          <TextBlock Grid.Row="4" Text="{Binding PasswordLabelText}" />
-          <TextBox Grid.Row="5"
-                   Text="{Binding PlayerPassword}"
-                   PasswordChar="*" />
-          <Button Grid.Row="6"
-                  Classes="playButton"
-                  Content="{Binding LoginButtonText}"
-                  Command="{Binding LoginCommand}" />
-
-          <TextBlock Grid.Row="7"
-                     Text="{Binding TwoFactorCodeLabelText}"
-                     IsVisible="{Binding IsTwoFactorStepActive}" />
-          <TextBox Grid.Row="8"
-                   Watermark="123456"
-                   Text="{Binding PlayerTwoFactorCode}"
-                   IsVisible="{Binding IsTwoFactorStepActive}" />
-          <TextBlock Grid.Row="9"
+      <Border Classes="heroPanel"
+              Background="{Binding HeroBackgroundBrush}"
+              BorderBrush="{Binding HeroBorderBrush}">
+        <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto">
+          <TextBlock Classes="heroTitle"
+                     Foreground="{Binding PrimaryTextBrush}"
+                     Text="{Binding ProductName}" />
+          <TextBlock Grid.Row="1"
                      Classes="subtle"
-                     Text="{Binding TwoFactorHintText}"
-                     TextWrapping="Wrap"
-                     IsVisible="{Binding IsTwoFactorStepActive}" />
+                     Foreground="{Binding SecondaryTextBrush}"
+                     Text="{Binding Tagline}"
+                     Margin="0,6,0,0" />
+          <TextBlock Grid.Row="2"
+                     Classes="heroMeta"
+                     Foreground="{Binding SecondaryTextBrush}"
+                     Margin="0,8,0,0"
+                     Text="{Binding AuthStatusText}"
+                     TextWrapping="Wrap" />
+          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Top">
+            <Button Classes="ghostButton"
+                    Content="{Binding RefreshButtonText}"
+                    Background="{Binding PrimaryButtonBackgroundBrush}"
+                    BorderBrush="{Binding PrimaryButtonBorderBrush}"
+                    Foreground="{Binding PrimaryButtonForegroundBrush}"
+                    Command="{Binding RefreshCommand}"
+                    IsVisible="{Binding IsLauncherReady}" />
+            <Button Classes="iconButton"
+                    Content="&#xE713;"
+                    Background="{Binding PrimaryButtonBackgroundBrush}"
+                    BorderBrush="{Binding PrimaryButtonBorderBrush}"
+                    Foreground="{Binding PrimaryButtonForegroundBrush}"
+                    Command="{Binding ToggleSettingsCommand}"
+                    IsVisible="{Binding IsLauncherReady}" />
+          </StackPanel>
         </Grid>
       </Border>
 
-      <Grid IsVisible="{Binding IsLauncherReady}"
-            ColumnDefinitions="*,380"
-            ColumnSpacing="14">
-        <Border Classes="featurePanel">
-          <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,*" RowSpacing="12">
-            <TextBlock Classes="sectionTitle" Text="{Binding PlayButtonText}" />
+      <Grid Grid.Row="1" Margin="0,14,0,0">
+        <Border Classes="loginCard"
+                Width="{Binding LoginCardWidth}"
+                HorizontalAlignment="{Binding LoginCardHorizontalAlignment}"
+                VerticalAlignment="Center"
+                Margin="24,0"
+                Background="{Binding LoginCardBackgroundBrush}"
+                BorderBrush="{Binding LoginCardBorderBrush}"
+                IsVisible="{Binding IsLoginRequired}">
+          <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="10">
+            <TextBlock Classes="sectionTitle"
+                       Foreground="{Binding PrimaryTextBrush}"
+                       Text="{Binding AccountHeaderText}" />
             <TextBlock Grid.Row="1"
-                       FontSize="24"
-                       FontWeight="SemiBold"
-                       Text="{Binding SelectedServer.DisplayName, TargetNullValue='No server selected'}"
+                       Classes="subtle"
+                       Foreground="{Binding SecondaryTextBrush}"
+                       Text="{Binding StatusText}"
                        TextWrapping="Wrap" />
+
             <TextBlock Grid.Row="2"
-                       Classes="subtle"
-                       Text="{Binding SelectedServer.AddressDisplay, TargetNullValue='-'}" />
-            <Grid Grid.Row="3"
-                  ColumnDefinitions="Auto,*"
-                  ColumnSpacing="10">
-              <TextBlock VerticalAlignment="Center"
-                         Text="{Binding RouteLabelText}" />
-              <ComboBox Grid.Column="1"
-                        Width="180"
-                        ItemsSource="{Binding RouteOptions}"
-                        SelectedItem="{Binding SelectedRouteOption}" />
-            </Grid>
+                       Foreground="{Binding PrimaryTextBrush}"
+                       Text="{Binding UsernameLabelText}" />
+            <TextBox Grid.Row="3"
+                     Watermark="Player"
+                     Background="{Binding InputBackgroundBrush}"
+                     BorderBrush="{Binding InputBorderBrush}"
+                     Foreground="{Binding InputForegroundBrush}"
+                     Text="{Binding PlayerUsername}" />
+
             <TextBlock Grid.Row="4"
+                       Foreground="{Binding PrimaryTextBrush}"
+                       Text="{Binding PasswordLabelText}" />
+            <TextBox Grid.Row="5"
+                     Background="{Binding InputBackgroundBrush}"
+                     BorderBrush="{Binding InputBorderBrush}"
+                     Foreground="{Binding InputForegroundBrush}"
+                     Text="{Binding PlayerPassword}"
+                     PasswordChar="*" />
+            <Button Grid.Row="6"
+                    Classes="playButton"
+                    Content="{Binding LoginButtonText}"
+                    Background="{Binding PlayButtonBackgroundBrush}"
+                    BorderBrush="{Binding PlayButtonBorderBrush}"
+                    Foreground="{Binding PlayButtonForegroundBrush}"
+                    Command="{Binding LoginCommand}" />
+
+            <TextBlock Grid.Row="7"
+                       Foreground="{Binding PrimaryTextBrush}"
+                       Text="{Binding TwoFactorCodeLabelText}"
+                       IsVisible="{Binding IsTwoFactorStepActive}" />
+            <TextBox Grid.Row="8"
+                     Watermark="123456"
+                     Background="{Binding InputBackgroundBrush}"
+                     BorderBrush="{Binding InputBorderBrush}"
+                     Foreground="{Binding InputForegroundBrush}"
+                     Text="{Binding PlayerTwoFactorCode}"
+                     IsVisible="{Binding IsTwoFactorStepActive}" />
+            <TextBlock Grid.Row="9"
                        Classes="subtle"
-                       Text="{Binding AuthStatusText}"
-                       TextWrapping="Wrap" />
-            <StackPanel Grid.Row="5"
-                        Orientation="Horizontal"
-                        Spacing="10"
-                        VerticalAlignment="Bottom">
-              <Button Classes="playButton"
-                      Content="{Binding PlayButtonText}"
-                      Background="{Binding PlayButtonBackgroundBrush}"
-                      BorderBrush="{Binding PlayButtonBorderBrush}"
-                      Command="{Binding LaunchCommand}" />
-              <Button Content="{Binding OpenLogsFolderButtonText}"
-                      Command="{Binding OpenLogsFolderCommand}" />
-            </StackPanel>
+                       Foreground="{Binding SecondaryTextBrush}"
+                       Text="{Binding TwoFactorHintText}"
+                       TextWrapping="Wrap"
+                       IsVisible="{Binding IsTwoFactorStepActive}" />
           </Grid>
         </Border>
 
-        <Grid Grid.Column="1" RowDefinitions="Auto,*" RowSpacing="12">
-          <Border Classes="panel">
-            <Grid RowDefinitions="Auto,*" RowSpacing="10">
-              <TextBlock Classes="sectionTitle" Text="{Binding ServersHeaderText}" />
-              <ListBox Grid.Row="1"
-                       MaxHeight="290"
-                       ItemsSource="{Binding ManagedServers}"
-                       SelectedItem="{Binding SelectedServer}">
-                <ListBox.ItemTemplate>
-                  <DataTemplate>
-                    <Grid Margin="0,2" ColumnDefinitions="40,*" ColumnSpacing="8">
-                      <Border Width="34"
-                              Height="34"
-                              CornerRadius="8"
-                              BorderBrush="#3A4F70"
-                              BorderThickness="1"
-                              VerticalAlignment="Top">
-                        <Image Source="{Binding Icon}" Stretch="UniformToFill" />
-                      </Border>
-                      <Grid Grid.Column="1" RowDefinitions="Auto,Auto,Auto">
-                        <TextBlock Text="{Binding DisplayName}"
-                                   FontWeight="SemiBold"
-                                   TextWrapping="Wrap" />
-                        <TextBlock Grid.Row="1" Classes="subtle" Text="{Binding AddressDisplay}" />
-                        <TextBlock Grid.Row="2" Classes="subtle" Text="{Binding LoaderType}" />
-                      </Grid>
-                    </Grid>
-                  </DataTemplate>
-                </ListBox.ItemTemplate>
-              </ListBox>
-            </Grid>
-          </Border>
-
-          <Border Grid.Row="1" Classes="panel">
-            <Grid RowDefinitions="Auto,*" RowSpacing="10">
-              <TextBlock Classes="sectionTitle" Text="{Binding NewsHeaderText}" />
-              <ListBox Grid.Row="1"
-                       ItemsSource="{Binding NewsItems}"
-                       SelectedItem="{Binding SelectedNewsItem}">
-                <ListBox.ItemTemplate>
-                  <DataTemplate>
-                    <Grid Margin="0,2" RowDefinitions="Auto,Auto,Auto">
-                      <TextBlock Text="{Binding Title}"
-                                 FontWeight="SemiBold"
-                                 TextWrapping="Wrap" />
-                      <TextBlock Grid.Row="1"
-                                 Classes="subtle"
-                                 Text="{Binding Meta}" />
-                      <TextBlock Grid.Row="2"
-                                 Classes="subtle"
-                                 Text="{Binding Preview}"
-                                 TextWrapping="Wrap"
-                                 MaxHeight="44" />
-                    </Grid>
-                  </DataTemplate>
-                </ListBox.ItemTemplate>
-              </ListBox>
-            </Grid>
-          </Border>
-        </Grid>
-      </Grid>
-
-      <Border IsVisible="{Binding IsSettingsOpen}"
-              Background="#9A060A14">
-        <Grid>
-          <Border Classes="settingsDrawer"
-                  HorizontalAlignment="Right"
-                  Width="360">
-            <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,*" RowSpacing="10">
-              <Grid ColumnDefinitions="*,Auto">
-                <TextBlock Classes="sectionTitle" Text="{Binding SettingsHeaderText}" />
-                <Button Grid.Column="1"
-                        Classes="iconButton"
-                        Content="&#xE711;"
-                        Command="{Binding CloseSettingsCommand}" />
+        <Grid IsVisible="{Binding IsLauncherReady}"
+              ColumnDefinitions="*,380"
+              ColumnSpacing="14">
+          <Border Classes="featurePanel"
+                  Background="{Binding PanelBackgroundBrush}"
+                  BorderBrush="{Binding PanelBorderBrush}">
+            <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,*" RowSpacing="12">
+              <TextBlock Classes="sectionTitle"
+                         Foreground="{Binding PrimaryTextBrush}"
+                         Text="{Binding PlayButtonText}" />
+              <TextBlock Grid.Row="1"
+                         FontSize="24"
+                         FontWeight="SemiBold"
+                         Foreground="{Binding PrimaryTextBrush}"
+                         Text="{Binding SelectedServer.DisplayName, TargetNullValue='No server selected'}"
+                         TextWrapping="Wrap" />
+              <TextBlock Grid.Row="2"
+                         Classes="subtle"
+                         Foreground="{Binding SecondaryTextBrush}"
+                         Text="{Binding SelectedServer.AddressDisplay, TargetNullValue='-'}" />
+              <Grid Grid.Row="3"
+                    ColumnDefinitions="Auto,*"
+                    ColumnSpacing="10">
+                <TextBlock VerticalAlignment="Center"
+                           Foreground="{Binding PrimaryTextBrush}"
+                           Text="{Binding RouteLabelText}" />
+                <ComboBox Grid.Column="1"
+                          Width="180"
+                          Background="{Binding InputBackgroundBrush}"
+                          BorderBrush="{Binding InputBorderBrush}"
+                          Foreground="{Binding InputForegroundBrush}"
+                          ItemsSource="{Binding RouteOptions}"
+                          SelectedItem="{Binding SelectedRouteOption}" />
               </Grid>
-
-              <TextBlock Grid.Row="1" Text="{Binding LanguageLabelText}" />
-              <ComboBox Grid.Row="2"
-                        ItemsSource="{Binding LanguageOptions}"
-                        SelectedItem="{Binding SelectedLanguageOption}" />
-
-              <Button Grid.Row="3"
-                      Content="{Binding SaveSettingsButtonText}"
-                      Command="{Binding SaveSettingsCommand}" />
-
               <TextBlock Grid.Row="4"
-                         Classes="sectionTitle"
-                         Text="{Binding UpdateHeaderText}" />
-              <TextBlock Grid.Row="5"
                          Classes="subtle"
-                         Text="{Binding CurrentVersionText}" />
-              <TextBlock Grid.Row="6"
-                         Classes="subtle"
-                         Text="{Binding LatestVersionText}" />
-
-              <StackPanel Grid.Row="7" Spacing="8">
-                <TextBlock Classes="subtle"
-                           Text="{Binding UpdateAvailabilityText}" />
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                  <Button Content="{Binding DownloadUpdateButtonText}"
-                          Command="{Binding DownloadUpdateCommand}"
-                          IsVisible="{Binding IsUpdateAvailable}" />
-                  <Button Content="{Binding InstallUpdateButtonText}"
-                          Command="{Binding InstallUpdateCommand}"
-                          IsVisible="{Binding IsUpdateAvailable}" />
-                </StackPanel>
-                <Button Content="{Binding OpenUpdateButtonText}"
-                        Command="{Binding OpenUpdateUrlCommand}"
-                        IsVisible="{Binding IsUpdateAvailable}" />
-                <TextBlock Classes="subtle"
-                           Text="{Binding UpdateDownloadProgressText}"
-                           TextWrapping="Wrap" />
-                <TextBox Text="{Binding UpdateReleaseNotes}"
-                         IsReadOnly="True"
-                         AcceptsReturn="True"
-                         TextWrapping="Wrap"
-                         ScrollViewer.VerticalScrollBarVisibility="Auto"
-                         IsVisible="{Binding HasUpdateReleaseNotes}"
-                         Height="90" />
+                         Foreground="{Binding SecondaryTextBrush}"
+                         Text="{Binding AuthStatusText}"
+                         TextWrapping="Wrap" />
+              <StackPanel Grid.Row="5"
+                          Orientation="Horizontal"
+                          Spacing="10"
+                          VerticalAlignment="Bottom">
+                <Button Classes="playButton"
+                        Content="{Binding PlayButtonText}"
+                        Background="{Binding PlayButtonBackgroundBrush}"
+                        BorderBrush="{Binding PlayButtonBorderBrush}"
+                        Foreground="{Binding PlayButtonForegroundBrush}"
+                        Command="{Binding LaunchCommand}" />
                 <Button Content="{Binding OpenLogsFolderButtonText}"
+                        Background="{Binding PrimaryButtonBackgroundBrush}"
+                        BorderBrush="{Binding PrimaryButtonBorderBrush}"
+                        Foreground="{Binding PrimaryButtonForegroundBrush}"
                         Command="{Binding OpenLogsFolderCommand}" />
               </StackPanel>
             </Grid>
           </Border>
+
+          <Grid Grid.Column="1" RowDefinitions="Auto,*" RowSpacing="12">
+            <Border Classes="panel"
+                    Background="{Binding PanelBackgroundBrush}"
+                    BorderBrush="{Binding PanelBorderBrush}">
+              <Grid RowDefinitions="Auto,*" RowSpacing="10">
+                <TextBlock Classes="sectionTitle"
+                           Foreground="{Binding PrimaryTextBrush}"
+                           Text="{Binding ServersHeaderText}" />
+                <ListBox Grid.Row="1"
+                         MaxHeight="290"
+                         Background="{Binding ListBackgroundBrush}"
+                         BorderBrush="{Binding ListBorderBrush}"
+                         Foreground="{Binding InputForegroundBrush}"
+                         ItemsSource="{Binding ManagedServers}"
+                         SelectedItem="{Binding SelectedServer}">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate>
+                      <Grid Margin="0,2" ColumnDefinitions="40,*" ColumnSpacing="8">
+                        <Border Width="34"
+                                Height="34"
+                                CornerRadius="8"
+                                BorderBrush="#3A4F70"
+                                BorderThickness="1"
+                                VerticalAlignment="Top">
+                          <Image Source="{Binding Icon}" Stretch="UniformToFill" />
+                        </Border>
+                        <Grid Grid.Column="1" RowDefinitions="Auto,Auto,Auto">
+                          <TextBlock Text="{Binding DisplayName}"
+                                     FontWeight="SemiBold"
+                                     TextWrapping="Wrap" />
+                          <TextBlock Grid.Row="1"
+                                     Opacity="0.82"
+                                     Text="{Binding AddressDisplay}" />
+                          <TextBlock Grid.Row="2"
+                                     Opacity="0.82"
+                                     Text="{Binding LoaderType}" />
+                        </Grid>
+                      </Grid>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+              </Grid>
+            </Border>
+
+            <Border Grid.Row="1"
+                    Classes="panel"
+                    Background="{Binding PanelBackgroundBrush}"
+                    BorderBrush="{Binding PanelBorderBrush}">
+              <Grid RowDefinitions="Auto,*" RowSpacing="10">
+                <TextBlock Classes="sectionTitle"
+                           Foreground="{Binding PrimaryTextBrush}"
+                           Text="{Binding NewsHeaderText}" />
+                <ListBox Grid.Row="1"
+                         Background="{Binding ListBackgroundBrush}"
+                         BorderBrush="{Binding ListBorderBrush}"
+                         Foreground="{Binding InputForegroundBrush}"
+                         ItemsSource="{Binding NewsItems}"
+                         SelectedItem="{Binding SelectedNewsItem}">
+                  <ListBox.ItemTemplate>
+                  <DataTemplate>
+                    <Grid Margin="0,2" RowDefinitions="Auto,Auto,Auto">
+                        <TextBlock Text="{Binding Title}"
+                                   FontWeight="SemiBold"
+                                   TextWrapping="Wrap" />
+                        <TextBlock Grid.Row="1"
+                                   Opacity="0.82"
+                                   Text="{Binding Meta}" />
+                        <TextBlock Grid.Row="2"
+                                   Opacity="0.82"
+                                   Text="{Binding Preview}"
+                                   TextWrapping="Wrap"
+                                   MaxHeight="44" />
+                    </Grid>
+                  </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+              </Grid>
+            </Border>
+          </Grid>
         </Grid>
-      </Border>
+
+        <Border IsVisible="{Binding IsSettingsOpen}"
+                Background="#C0050811">
+          <Grid>
+            <Border HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Width="640"
+                    MaxWidth="880"
+                    MaxHeight="700"
+                    Padding="18"
+                    CornerRadius="18"
+                    BorderThickness="1"
+                    Background="{Binding PanelBackgroundBrush}"
+                    BorderBrush="{Binding PanelBorderBrush}">
+              <Grid RowDefinitions="Auto,*" RowSpacing="10">
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBlock Classes="sectionTitle"
+                             Foreground="{Binding PrimaryTextBrush}"
+                             Text="{Binding SettingsHeaderText}" />
+                  <Button Grid.Column="1"
+                          Classes="iconButton"
+                          Content="&#xE711;"
+                          Background="{Binding PrimaryButtonBackgroundBrush}"
+                          BorderBrush="{Binding PrimaryButtonBorderBrush}"
+                          Foreground="{Binding PrimaryButtonForegroundBrush}"
+                          Command="{Binding CloseSettingsCommand}" />
+                </Grid>
+
+                <ScrollViewer Grid.Row="1"
+                              VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled">
+                  <StackPanel Spacing="12" Margin="0,0,4,0">
+                    <Border Classes="panel"
+                            Background="{Binding PanelBackgroundBrush}"
+                            BorderBrush="{Binding PanelBorderBrush}">
+                      <StackPanel Spacing="10">
+                        <TextBlock Classes="sectionTitle"
+                                   Foreground="{Binding PrimaryTextBrush}"
+                                   Text="{Binding SettingsHeaderText}" />
+                        <TextBlock Foreground="{Binding PrimaryTextBrush}" Text="{Binding LanguageLabelText}" />
+                        <ComboBox Background="{Binding InputBackgroundBrush}"
+                                  BorderBrush="{Binding InputBorderBrush}"
+                                  Foreground="{Binding InputForegroundBrush}"
+                                  ItemsSource="{Binding LanguageOptions}"
+                                  SelectedItem="{Binding SelectedLanguageOption}" />
+                        <TextBlock Foreground="{Binding PrimaryTextBrush}" Text="{Binding JavaModeLabelText}" />
+                        <ComboBox Background="{Binding InputBackgroundBrush}"
+                                  BorderBrush="{Binding InputBorderBrush}"
+                                  Foreground="{Binding InputForegroundBrush}"
+                                  ItemsSource="{Binding JavaModeOptions}"
+                                  SelectedItem="{Binding SelectedJavaModeOption}" />
+                        <TextBlock Foreground="{Binding PrimaryTextBrush}" Text="{Binding RamLabelText}" />
+                        <Grid ColumnDefinitions="*,120" ColumnSpacing="10">
+                          <Slider Minimum="{Binding RamMinMb}"
+                                  Maximum="{Binding RamMaxMb}"
+                                  TickFrequency="256"
+                                  IsSnapToTickEnabled="True"
+                                  Value="{Binding RamMb}" />
+                          <TextBox Grid.Column="1"
+                                   Text="{Binding RamMb}"
+                                   Background="{Binding InputBackgroundBrush}"
+                                   BorderBrush="{Binding InputBorderBrush}"
+                                   Foreground="{Binding InputForegroundBrush}" />
+                        </Grid>
+                        <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+                          <TextBlock Classes="subtle"
+                                     Foreground="{Binding SecondaryTextBrush}"
+                                     Text="{Binding RamMinText}" />
+                          <TextBlock Grid.Column="1"
+                                     HorizontalAlignment="Right"
+                                     Classes="subtle"
+                                     Foreground="{Binding SecondaryTextBrush}"
+                                     Text="{Binding RamMaxText}" />
+                        </Grid>
+                        <Button Content="{Binding SaveSettingsButtonText}"
+                                Background="{Binding PrimaryButtonBackgroundBrush}"
+                                BorderBrush="{Binding PrimaryButtonBorderBrush}"
+                                Foreground="{Binding PrimaryButtonForegroundBrush}"
+                                Command="{Binding SaveSettingsCommand}" />
+                      </StackPanel>
+                    </Border>
+
+                    <Border Classes="panel"
+                            Background="{Binding PanelBackgroundBrush}"
+                            BorderBrush="{Binding PanelBorderBrush}">
+                      <StackPanel Spacing="8">
+                        <TextBlock Classes="sectionTitle"
+                                   Foreground="{Binding PrimaryTextBrush}"
+                                   Text="{Binding UpdateHeaderText}" />
+                        <TextBlock Classes="subtle"
+                                   Foreground="{Binding SecondaryTextBrush}"
+                                   Text="{Binding CurrentVersionText}" />
+                        <TextBlock Classes="subtle"
+                                   Foreground="{Binding SecondaryTextBrush}"
+                                   Text="{Binding LatestVersionText}" />
+                        <TextBlock Classes="subtle"
+                                   Foreground="{Binding SecondaryTextBrush}"
+                                   Text="{Binding UpdateAvailabilityText}" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                          <Button Content="{Binding DownloadUpdateButtonText}"
+                                  Background="{Binding PrimaryButtonBackgroundBrush}"
+                                  BorderBrush="{Binding PrimaryButtonBorderBrush}"
+                                  Foreground="{Binding PrimaryButtonForegroundBrush}"
+                                  Command="{Binding DownloadUpdateCommand}"
+                                  IsVisible="{Binding IsUpdateAvailable}" />
+                          <Button Content="{Binding InstallUpdateButtonText}"
+                                  Background="{Binding PlayButtonBackgroundBrush}"
+                                  BorderBrush="{Binding PlayButtonBorderBrush}"
+                                  Foreground="{Binding PlayButtonForegroundBrush}"
+                                  Command="{Binding InstallUpdateCommand}"
+                                  IsVisible="{Binding IsUpdateAvailable}" />
+                        </StackPanel>
+                        <Button Content="{Binding OpenUpdateButtonText}"
+                                Background="{Binding PrimaryButtonBackgroundBrush}"
+                                BorderBrush="{Binding PrimaryButtonBorderBrush}"
+                                Foreground="{Binding PrimaryButtonForegroundBrush}"
+                                Command="{Binding OpenUpdateUrlCommand}"
+                                IsVisible="{Binding IsUpdateAvailable}" />
+                        <TextBlock Classes="subtle"
+                                   Foreground="{Binding SecondaryTextBrush}"
+                                   Text="{Binding UpdateDownloadProgressText}"
+                                   TextWrapping="Wrap" />
+                        <TextBox Text="{Binding UpdateReleaseNotes}"
+                                 IsReadOnly="True"
+                                 AcceptsReturn="True"
+                                 Background="{Binding InputBackgroundBrush}"
+                                 BorderBrush="{Binding InputBorderBrush}"
+                                 Foreground="{Binding InputForegroundBrush}"
+                                 TextWrapping="Wrap"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                 IsVisible="{Binding HasUpdateReleaseNotes}"
+                                 Height="90" />
+                        <Button Content="{Binding OpenLogsFolderButtonText}"
+                                Background="{Binding PrimaryButtonBackgroundBrush}"
+                                BorderBrush="{Binding PrimaryButtonBorderBrush}"
+                                Foreground="{Binding PrimaryButtonForegroundBrush}"
+                                Command="{Binding OpenLogsFolderCommand}" />
+                      </StackPanel>
+                    </Border>
+                  </StackPanel>
+                </ScrollViewer>
+              </Grid>
+            </Border>
+          </Grid>
+        </Border>
+      </Grid>
     </Grid>
-  </Grid>
   </Grid>
 </Window>

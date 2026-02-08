@@ -28,6 +28,51 @@ public sealed class BrandingSettingsUpsertRequest
     [MaxLength(64)]
     public string AccentColor { get; set; } = string.Empty;
 
+    [MaxLength(64)]
+    public string SurfaceColor { get; set; } = string.Empty;
+
+    [MaxLength(64)]
+    public string SurfaceBorderColor { get; set; } = string.Empty;
+
+    [MaxLength(64)]
+    public string TextPrimaryColor { get; set; } = string.Empty;
+
+    [MaxLength(64)]
+    public string TextSecondaryColor { get; set; } = string.Empty;
+
+    [MaxLength(64)]
+    public string PrimaryButtonColor { get; set; } = string.Empty;
+
+    [MaxLength(64)]
+    public string PrimaryButtonBorderColor { get; set; } = string.Empty;
+
+    [MaxLength(64)]
+    public string PrimaryButtonTextColor { get; set; } = string.Empty;
+
+    [MaxLength(64)]
+    public string PlayButtonColor { get; set; } = string.Empty;
+
+    [MaxLength(64)]
+    public string PlayButtonBorderColor { get; set; } = string.Empty;
+
+    [MaxLength(64)]
+    public string PlayButtonTextColor { get; set; } = string.Empty;
+
+    [MaxLength(64)]
+    public string InputBackgroundColor { get; set; } = string.Empty;
+
+    [MaxLength(64)]
+    public string InputBorderColor { get; set; } = string.Empty;
+
+    [MaxLength(64)]
+    public string InputTextColor { get; set; } = string.Empty;
+
+    [MaxLength(64)]
+    public string ListBackgroundColor { get; set; } = string.Empty;
+
+    [MaxLength(64)]
+    public string ListBorderColor { get; set; } = string.Empty;
+
     [MaxLength(32)]
     public string LogoText { get; set; } = string.Empty;
 

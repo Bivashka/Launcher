@@ -100,6 +100,16 @@ builder.Services.PostConfigure<JwtOptions>(options =>
     options.Issuer = string.IsNullOrWhiteSpace(options.Issuer) ? jwtOptions.Issuer : options.Issuer;
     options.Audience = string.IsNullOrWhiteSpace(options.Audience) ? jwtOptions.Audience : options.Audience;
     options.ExpireMinutes = options.ExpireMinutes <= 0 ? jwtOptions.ExpireMinutes : options.ExpireMinutes;
+
+    var playerExpireDaysRaw = builder.Configuration["JWT_PLAYER_EXPIRE_DAYS"];
+    if (int.TryParse(playerExpireDaysRaw, out var playerExpireDays))
+    {
+        options.PlayerExpireDays = Math.Clamp(playerExpireDays, 1, 36500);
+    }
+
+    options.PlayerExpireDays = options.PlayerExpireDays <= 0
+        ? Math.Clamp(jwtOptions.PlayerExpireDays, 1, 36500)
+        : Math.Clamp(options.PlayerExpireDays, 1, 36500);
 });
 
 builder.Services.PostConfigure<S3Options>(options =>

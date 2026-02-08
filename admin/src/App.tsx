@@ -128,6 +128,21 @@ type BrandingSettings = {
   supportUrl: string
   primaryColor: string
   accentColor: string
+  surfaceColor: string
+  surfaceBorderColor: string
+  textPrimaryColor: string
+  textSecondaryColor: string
+  primaryButtonColor: string
+  primaryButtonBorderColor: string
+  primaryButtonTextColor: string
+  playButtonColor: string
+  playButtonBorderColor: string
+  playButtonTextColor: string
+  inputBackgroundColor: string
+  inputBorderColor: string
+  inputTextColor: string
+  listBackgroundColor: string
+  listBorderColor: string
   logoText: string
   backgroundImageUrl: string
   backgroundOverlayOpacity: number
@@ -687,6 +702,21 @@ const defaultBrandingSettings: BrandingSettings = {
   supportUrl: 'https://example.com/support',
   primaryColor: '#3575F6',
   accentColor: '#10A48E',
+  surfaceColor: '#1A2944CC',
+  surfaceBorderColor: '#3F6BA4',
+  textPrimaryColor: '#EEF5FF',
+  textSecondaryColor: '#A7BEDC',
+  primaryButtonColor: '#2C76F0',
+  primaryButtonBorderColor: '#5FA0FF',
+  primaryButtonTextColor: '#F7FBFF',
+  playButtonColor: '#10A879',
+  playButtonBorderColor: '#67D9B1',
+  playButtonTextColor: '#F7FBFF',
+  inputBackgroundColor: '#0B182BD9',
+  inputBorderColor: '#436A9F',
+  inputTextColor: '#EFF6FF',
+  listBackgroundColor: '#0D1B2FD9',
+  listBorderColor: '#3E669A',
   logoText: 'BLP',
   backgroundImageUrl: '',
   backgroundOverlayOpacity: 0.55,
@@ -1348,6 +1378,7 @@ function App() {
   const [runtimeCleanupKeepLast, setRuntimeCleanupKeepLast] = useState(3)
   const [runtimeCleanupDryRun, setRuntimeCleanupDryRun] = useState(true)
   const [runtimeCleanupResult, setRuntimeCleanupResult] = useState<RuntimeCleanupResponse | null>(null)
+  const [brandingBackgroundFile, setBrandingBackgroundFile] = useState<File | null>(null)
   const [cosmeticsUser, setCosmeticsUser] = useState('')
   const [skinFile, setSkinFile] = useState<File | null>(null)
   const [capeFile, setCapeFile] = useState<File | null>(null)
@@ -3489,6 +3520,21 @@ function App() {
           supportUrl: brandingSettings.supportUrl.trim(),
           primaryColor: brandingSettings.primaryColor.trim(),
           accentColor: brandingSettings.accentColor.trim(),
+          surfaceColor: brandingSettings.surfaceColor.trim(),
+          surfaceBorderColor: brandingSettings.surfaceBorderColor.trim(),
+          textPrimaryColor: brandingSettings.textPrimaryColor.trim(),
+          textSecondaryColor: brandingSettings.textSecondaryColor.trim(),
+          primaryButtonColor: brandingSettings.primaryButtonColor.trim(),
+          primaryButtonBorderColor: brandingSettings.primaryButtonBorderColor.trim(),
+          primaryButtonTextColor: brandingSettings.primaryButtonTextColor.trim(),
+          playButtonColor: brandingSettings.playButtonColor.trim(),
+          playButtonBorderColor: brandingSettings.playButtonBorderColor.trim(),
+          playButtonTextColor: brandingSettings.playButtonTextColor.trim(),
+          inputBackgroundColor: brandingSettings.inputBackgroundColor.trim(),
+          inputBorderColor: brandingSettings.inputBorderColor.trim(),
+          inputTextColor: brandingSettings.inputTextColor.trim(),
+          listBackgroundColor: brandingSettings.listBackgroundColor.trim(),
+          listBorderColor: brandingSettings.listBorderColor.trim(),
           logoText: brandingSettings.logoText.trim(),
           backgroundImageUrl: brandingSettings.backgroundImageUrl.trim(),
           backgroundOverlayOpacity: Math.min(0.95, Math.max(0, Number(brandingSettings.backgroundOverlayOpacity) || 0.55)),
@@ -3697,6 +3743,58 @@ function App() {
       setNotice(`Launcher build ready: ${fileName}`)
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : 'Launcher build failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function onUploadBrandingBackgroundImage() {
+    if (!token) {
+      setError('Missing admin token')
+      return
+    }
+
+    if (!brandingBackgroundFile) {
+      setError('Select a background image file first.')
+      return
+    }
+
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      const formData = new FormData()
+      formData.append('file', brandingBackgroundFile)
+
+      const response = await fetch(`${apiBaseUrl}/api/admin/settings/branding/background`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: formData,
+      })
+
+      if (!response.ok) {
+        const text = await response.text()
+        let parsedError = ''
+        if (text) {
+          try {
+            const parsed = JSON.parse(text) as ApiError
+            parsedError = parsed.error ?? parsed.title ?? ''
+          } catch {
+            parsedError = text
+          }
+        }
+
+        throw new Error(parsedError || 'Background upload failed.')
+      }
+
+      const saved = (await response.json()) as BrandingSettings
+      setBrandingSettings(saved)
+      setBrandingBackgroundFile(null)
+      setNotice('Branding background uploaded and applied.')
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : 'Background upload failed')
     } finally {
       setBusy(false)
     }
@@ -6713,16 +6811,131 @@ function App() {
                     onChange={(event) => setBrandingSettings((prev) => ({ ...prev, accentColor: event.target.value }))}
                   />
                 </div>
-                <input
-                  placeholder="Logo text"
-                  value={brandingSettings.logoText}
-                  onChange={(event) => setBrandingSettings((prev) => ({ ...prev, logoText: event.target.value }))}
-                />
-                <input
-                  placeholder="Background image URL (optional)"
-                  value={brandingSettings.backgroundImageUrl}
-                  onChange={(event) => setBrandingSettings((prev) => ({ ...prev, backgroundImageUrl: event.target.value }))}
-                />
+                <div className="grid-inline">
+                  <input
+                    placeholder="Surface color"
+                    value={brandingSettings.surfaceColor}
+                    onChange={(event) => setBrandingSettings((prev) => ({ ...prev, surfaceColor: event.target.value }))}
+                  />
+                  <input
+                    placeholder="Surface border color"
+                    value={brandingSettings.surfaceBorderColor}
+                    onChange={(event) => setBrandingSettings((prev) => ({ ...prev, surfaceBorderColor: event.target.value }))}
+                  />
+                </div>
+                <div className="grid-inline">
+                  <input
+                    placeholder="Primary text color"
+                    value={brandingSettings.textPrimaryColor}
+                    onChange={(event) => setBrandingSettings((prev) => ({ ...prev, textPrimaryColor: event.target.value }))}
+                  />
+                  <input
+                    placeholder="Secondary text color"
+                    value={brandingSettings.textSecondaryColor}
+                    onChange={(event) => setBrandingSettings((prev) => ({ ...prev, textSecondaryColor: event.target.value }))}
+                  />
+                </div>
+                <div className="grid-inline">
+                  <input
+                    placeholder="Primary button color"
+                    value={brandingSettings.primaryButtonColor}
+                    onChange={(event) => setBrandingSettings((prev) => ({ ...prev, primaryButtonColor: event.target.value }))}
+                  />
+                  <input
+                    placeholder="Primary button border color"
+                    value={brandingSettings.primaryButtonBorderColor}
+                    onChange={(event) =>
+                      setBrandingSettings((prev) => ({ ...prev, primaryButtonBorderColor: event.target.value }))
+                    }
+                  />
+                </div>
+                <div className="grid-inline">
+                  <input
+                    placeholder="Primary button text color"
+                    value={brandingSettings.primaryButtonTextColor}
+                    onChange={(event) =>
+                      setBrandingSettings((prev) => ({ ...prev, primaryButtonTextColor: event.target.value }))
+                    }
+                  />
+                  <input
+                    placeholder="Play button color"
+                    value={brandingSettings.playButtonColor}
+                    onChange={(event) => setBrandingSettings((prev) => ({ ...prev, playButtonColor: event.target.value }))}
+                  />
+                </div>
+                <div className="grid-inline">
+                  <input
+                    placeholder="Play button border color"
+                    value={brandingSettings.playButtonBorderColor}
+                    onChange={(event) =>
+                      setBrandingSettings((prev) => ({ ...prev, playButtonBorderColor: event.target.value }))
+                    }
+                  />
+                  <input
+                    placeholder="Play button text color"
+                    value={brandingSettings.playButtonTextColor}
+                    onChange={(event) => setBrandingSettings((prev) => ({ ...prev, playButtonTextColor: event.target.value }))}
+                  />
+                </div>
+                <div className="grid-inline">
+                  <input
+                    placeholder="Input background color"
+                    value={brandingSettings.inputBackgroundColor}
+                    onChange={(event) =>
+                      setBrandingSettings((prev) => ({ ...prev, inputBackgroundColor: event.target.value }))
+                    }
+                  />
+                  <input
+                    placeholder="Input border color"
+                    value={brandingSettings.inputBorderColor}
+                    onChange={(event) => setBrandingSettings((prev) => ({ ...prev, inputBorderColor: event.target.value }))}
+                  />
+                </div>
+                <div className="grid-inline">
+                  <input
+                    placeholder="Input text color"
+                    value={brandingSettings.inputTextColor}
+                    onChange={(event) => setBrandingSettings((prev) => ({ ...prev, inputTextColor: event.target.value }))}
+                  />
+                  <input
+                    placeholder="List background color"
+                    value={brandingSettings.listBackgroundColor}
+                    onChange={(event) => setBrandingSettings((prev) => ({ ...prev, listBackgroundColor: event.target.value }))}
+                  />
+                </div>
+                <div className="grid-inline">
+                  <input
+                    placeholder="List border color"
+                    value={brandingSettings.listBorderColor}
+                    onChange={(event) => setBrandingSettings((prev) => ({ ...prev, listBorderColor: event.target.value }))}
+                  />
+                  <input
+                    placeholder="Logo text"
+                    value={brandingSettings.logoText}
+                    onChange={(event) => setBrandingSettings((prev) => ({ ...prev, logoText: event.target.value }))}
+                  />
+                </div>
+                <small>Current background image: {brandingSettings.backgroundImageUrl || '(none)'}</small>
+                <div className="grid-inline">
+                  <input
+                    type="file"
+                    accept=".png,.jpg,.jpeg,.webp,.gif"
+                    onChange={(event) => setBrandingBackgroundFile(event.target.files?.[0] ?? null)}
+                  />
+                  <button type="button" onClick={onUploadBrandingBackgroundImage} disabled={busy || !token || !brandingBackgroundFile}>
+                    Upload background image
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setBrandingBackgroundFile(null)
+                    setBrandingSettings((prev) => ({ ...prev, backgroundImageUrl: '' }))
+                  }}
+                  disabled={busy || !token}
+                >
+                  Clear background image
+                </button>
                 <label>
                   Background overlay opacity
                   <input
@@ -6782,16 +6995,52 @@ function App() {
                 <div
                   className="branding-preview"
                   style={{
-                    borderColor: brandingSettings.accentColor || '#10A48E',
+                    borderColor: brandingSettings.surfaceBorderColor || brandingSettings.accentColor || '#10A48E',
                     backgroundImage: brandingSettings.backgroundImageUrl
                       ? `linear-gradient(rgba(6,10,18,${Math.min(0.95, Math.max(0, Number(brandingSettings.backgroundOverlayOpacity) || 0.55))}), rgba(6,10,18,${Math.min(0.95, Math.max(0, Number(brandingSettings.backgroundOverlayOpacity) || 0.55))})), url(${brandingSettings.backgroundImageUrl})`
                       : `linear-gradient(140deg, ${brandingSettings.primaryColor || '#3575F6'}, ${brandingSettings.accentColor || '#10A48E'})`,
                   }}
                 >
                   <div className={`branding-preview-login branding-preview-login-${brandingSettings.loginCardPosition}`}>
-                    <div style={{ width: `${brandingSettings.loginCardWidth}px`, maxWidth: '100%' }}>
-                      <strong>{brandingSettings.productName || 'BivLauncher'}</strong>
-                      <small>{brandingSettings.tagline || 'Managed launcher platform'}</small>
+                    <div
+                      style={{
+                        width: `${brandingSettings.loginCardWidth}px`,
+                        maxWidth: '100%',
+                        background: brandingSettings.surfaceColor || '#1A2944CC',
+                        border: `1px solid ${brandingSettings.surfaceBorderColor || '#3F6BA4'}`,
+                        borderRadius: '12px',
+                        padding: '12px',
+                        color: brandingSettings.textPrimaryColor || '#EEF5FF',
+                      }}
+                    >
+                      <strong style={{ color: brandingSettings.textPrimaryColor || '#EEF5FF' }}>
+                        {brandingSettings.productName || 'BivLauncher'}
+                      </strong>
+                      <small style={{ color: brandingSettings.textSecondaryColor || '#A7BEDC' }}>
+                        {brandingSettings.tagline || 'Managed launcher platform'}
+                      </small>
+                      <div className="button-row">
+                        <button
+                          type="button"
+                          style={{
+                            background: brandingSettings.primaryButtonColor || '#2C76F0',
+                            borderColor: brandingSettings.primaryButtonBorderColor || '#5FA0FF',
+                            color: brandingSettings.primaryButtonTextColor || '#F7FBFF',
+                          }}
+                        >
+                          Settings
+                        </button>
+                        <button
+                          type="button"
+                          style={{
+                            background: brandingSettings.playButtonColor || '#10A879',
+                            borderColor: brandingSettings.playButtonBorderColor || '#67D9B1',
+                            color: brandingSettings.playButtonTextColor || '#F7FBFF',
+                          }}
+                        >
+                          Play
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>

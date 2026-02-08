@@ -59,7 +59,8 @@ public sealed class JwtTokenService(IOptions<JwtOptions> options) : IJwtTokenSer
 
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtOptions.Secret));
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-        var expiresAtUtc = DateTime.UtcNow.AddMinutes(_jwtOptions.ExpireMinutes);
+        var playerExpireDays = _jwtOptions.PlayerExpireDays <= 0 ? 36500 : _jwtOptions.PlayerExpireDays;
+        var expiresAtUtc = DateTime.UtcNow.AddDays(Math.Clamp(playerExpireDays, 1, 36500));
 
         var token = new JwtSecurityToken(
             issuer: _jwtOptions.Issuer,

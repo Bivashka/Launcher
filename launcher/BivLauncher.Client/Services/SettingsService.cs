@@ -5,6 +5,8 @@ namespace BivLauncher.Client.Services;
 
 public sealed class SettingsService : ISettingsService
 {
+    private static readonly string ApplicationDirectory = ResolveApplicationDirectory();
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = true
@@ -15,6 +17,7 @@ public sealed class SettingsService : ISettingsService
         var path = GetSettingsFilePath();
         var directory = Path.GetDirectoryName(path)!;
         Directory.CreateDirectory(directory);
+        TryMigrateLegacySettings(path);
 
         if (!File.Exists(path))
         {
@@ -77,7 +80,58 @@ public sealed class SettingsService : ISettingsService
 
     private static string GetApplicationDirectory()
     {
+        return ApplicationDirectory;
+    }
+
+    private static string ResolveApplicationDirectory()
+    {
+        var portableDirectory = Path.Combine(AppContext.BaseDirectory, "launcher-data");
+        if (TryEnsureDirectory(portableDirectory))
+        {
+            return portableDirectory;
+        }
+
         var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        return Path.Combine(appData, "BivLauncher");
+        var fallbackDirectory = Path.Combine(appData, "BivLauncher");
+        Directory.CreateDirectory(fallbackDirectory);
+        return fallbackDirectory;
+    }
+
+    private static bool TryEnsureDirectory(string path)
+    {
+        try
+        {
+            Directory.CreateDirectory(path);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void TryMigrateLegacySettings(string targetSettingsPath)
+    {
+        if (File.Exists(targetSettingsPath))
+        {
+            return;
+        }
+
+        var legacyDirectory = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "BivLauncher");
+        var legacySettingsPath = Path.Combine(legacyDirectory, "settings.json");
+        if (!File.Exists(legacySettingsPath))
+        {
+            return;
+        }
+
+        try
+        {
+            File.Copy(legacySettingsPath, targetSettingsPath, overwrite: false);
+        }
+        catch
+        {
+        }
     }
 }

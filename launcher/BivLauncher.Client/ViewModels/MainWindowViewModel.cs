@@ -45,6 +45,7 @@ public partial class MainWindowViewModel : ViewModelBase
     private bool _isSyncingJavaModeOption;
     private bool _isSyncingRouteOption;
     private bool _installTelemetrySent;
+    private bool _isAutomaticUpdateInProgress;
     private string _playerAuthToken = string.Empty;
     private string _playerAuthTokenType = "Bearer";
     private string _playerAuthExternalId = string.Empty;
@@ -160,6 +161,45 @@ public partial class MainWindowViewModel : ViewModelBase
 
     [ObservableProperty]
     private IBrush _playButtonBorderBrush = new SolidColorBrush(Color.Parse("#7CE1B5"));
+
+    [ObservableProperty]
+    private IBrush _playButtonForegroundBrush = new SolidColorBrush(Color.Parse("#F7FBFF"));
+
+    [ObservableProperty]
+    private IBrush _primaryButtonBackgroundBrush = new SolidColorBrush(Color.Parse("#2C76F0"));
+
+    [ObservableProperty]
+    private IBrush _primaryButtonBorderBrush = new SolidColorBrush(Color.Parse("#5FA0FF"));
+
+    [ObservableProperty]
+    private IBrush _primaryButtonForegroundBrush = new SolidColorBrush(Color.Parse("#F7FBFF"));
+
+    [ObservableProperty]
+    private IBrush _panelBackgroundBrush = new SolidColorBrush(Color.Parse("#1A2944CC"));
+
+    [ObservableProperty]
+    private IBrush _panelBorderBrush = new SolidColorBrush(Color.Parse("#3F6BA4"));
+
+    [ObservableProperty]
+    private IBrush _inputBackgroundBrush = new SolidColorBrush(Color.Parse("#0B182BD9"));
+
+    [ObservableProperty]
+    private IBrush _inputBorderBrush = new SolidColorBrush(Color.Parse("#436A9F"));
+
+    [ObservableProperty]
+    private IBrush _inputForegroundBrush = new SolidColorBrush(Color.Parse("#EFF6FF"));
+
+    [ObservableProperty]
+    private IBrush _listBackgroundBrush = new SolidColorBrush(Color.Parse("#0D1B2FD9"));
+
+    [ObservableProperty]
+    private IBrush _listBorderBrush = new SolidColorBrush(Color.Parse("#3E669A"));
+
+    [ObservableProperty]
+    private IBrush _primaryTextBrush = new SolidColorBrush(Color.Parse("#EEF5FF"));
+
+    [ObservableProperty]
+    private IBrush _secondaryTextBrush = new SolidColorBrush(Color.Parse("#A7BEDC"));
 
     [ObservableProperty]
     private IImage? _brandingBackgroundImage;
@@ -381,6 +421,7 @@ public partial class MainWindowViewModel : ViewModelBase
         await TryRestorePlayerSessionAsync();
 
         await RefreshAsync();
+        await TryApplyAutomaticUpdateAsync();
         StatusText = T("status.ready");
     }
 
@@ -1495,6 +1536,16 @@ public partial class MainWindowViewModel : ViewModelBase
             return;
         }
 
+        await DownloadUpdatePackageCoreAsync(automatic: false);
+    }
+
+    private async Task<bool> DownloadUpdatePackageCoreAsync(bool automatic)
+    {
+        if (IsUpdateDownloading || !IsUpdateAvailable || string.IsNullOrWhiteSpace(UpdateDownloadUrl))
+        {
+            return false;
+        }
+
         try
         {
             IsUpdateDownloading = true;
@@ -1532,13 +1583,19 @@ public partial class MainWindowViewModel : ViewModelBase
             DownloadedUpdateVersion = LatestLauncherVersion;
             UpdateDownloadProgressPercent = 100;
             UpdateDownloadStatusText = "Update package downloaded. Ready to install.";
-            StatusText = "Update package downloaded.";
+            if (!automatic)
+            {
+                StatusText = "Update package downloaded.";
+            }
+
+            return true;
         }
         catch (Exception ex)
         {
             UpdateDownloadStatusText = $"Download failed: {ex.Message}";
             StatusText = BuildStatusErrorText(ex);
             _logService.LogError(ex.ToString());
+            return false;
         }
         finally
         {
@@ -1553,9 +1610,21 @@ public partial class MainWindowViewModel : ViewModelBase
             return;
         }
 
+        await ScheduleUpdateInstallAndShutdownAsync(automatic: false);
+    }
+
+    private async Task ScheduleUpdateInstallAndShutdownAsync(bool automatic)
+    {
         try
         {
-            await SaveSettingsAsync();
+            if (!automatic)
+            {
+                await SaveSettingsAsync();
+            }
+            else
+            {
+                await PersistSettingsSnapshotAsync();
+            }
 
             var executablePath = ResolveLauncherExecutablePath();
             _launcherUpdateService.ScheduleInstallAndRestart(DownloadedUpdatePackagePath, executablePath);
@@ -1573,6 +1642,37 @@ public partial class MainWindowViewModel : ViewModelBase
             StatusText = BuildStatusErrorText(ex);
             UpdateDownloadStatusText = $"Install failed: {ex.Message}";
             _logService.LogError(ex.ToString());
+        }
+    }
+
+    private async Task TryApplyAutomaticUpdateAsync()
+    {
+        if (_isAutomaticUpdateInProgress || !IsUpdateAvailable || string.IsNullOrWhiteSpace(UpdateDownloadUrl))
+        {
+            return;
+        }
+
+        _isAutomaticUpdateInProgress = true;
+        try
+        {
+            var readyPackage = IsUpdatePackageReady &&
+                               string.Equals(DownloadedUpdateVersion, LatestLauncherVersion, StringComparison.OrdinalIgnoreCase);
+
+            if (!readyPackage)
+            {
+                readyPackage = await DownloadUpdatePackageCoreAsync(automatic: true);
+            }
+
+            if (!readyPackage)
+            {
+                return;
+            }
+
+            await ScheduleUpdateInstallAndShutdownAsync(automatic: true);
+        }
+        finally
+        {
+            _isAutomaticUpdateInProgress = false;
         }
     }
 
@@ -1629,11 +1729,24 @@ public partial class MainWindowViewModel : ViewModelBase
             ? T("tagline.default")
             : branding.Tagline.Trim();
 
-        var primary = ParseColorOrFallback(branding.PrimaryColor, "#FF8B38");
-        var accent = ParseColorOrFallback(branding.AccentColor, "#45D39C");
-        var deep = ParseColorOrFallback("#120D0B", "#120D0B");
-        var panelBase = ParseColorOrFallback("#2B1E16", "#2B1E16");
-        var cardBorderBase = ParseColorOrFallback("#7C583D", "#7C583D");
+        var primary = ParseColorOrFallback(branding.PrimaryColor, "#2F6FED");
+        var accent = ParseColorOrFallback(branding.AccentColor, "#20C997");
+        var deep = ParseColorOrFallback("#0B111B", "#0B111B");
+        var surface = ParseColorOrFallback(branding.SurfaceColor, "#1A2944CC");
+        var surfaceBorder = ParseColorOrFallback(branding.SurfaceBorderColor, "#3F6BA4");
+        var textPrimary = ParseColorOrFallback(branding.TextPrimaryColor, "#EEF5FF");
+        var textSecondary = ParseColorOrFallback(branding.TextSecondaryColor, "#A7BEDC");
+        var primaryButton = ParseColorOrFallback(branding.PrimaryButtonColor, "#2C76F0");
+        var primaryButtonBorder = ParseColorOrFallback(branding.PrimaryButtonBorderColor, "#5FA0FF");
+        var primaryButtonText = ParseColorOrFallback(branding.PrimaryButtonTextColor, "#F7FBFF");
+        var playButton = ParseColorOrFallback(branding.PlayButtonColor, "#10A879");
+        var playButtonBorder = ParseColorOrFallback(branding.PlayButtonBorderColor, "#67D9B1");
+        var playButtonText = ParseColorOrFallback(branding.PlayButtonTextColor, "#F7FBFF");
+        var inputBackground = ParseColorOrFallback(branding.InputBackgroundColor, "#0B182BD9");
+        var inputBorder = ParseColorOrFallback(branding.InputBorderColor, "#436A9F");
+        var inputText = ParseColorOrFallback(branding.InputTextColor, "#EFF6FF");
+        var listBackground = ParseColorOrFallback(branding.ListBackgroundColor, "#0D1B2FD9");
+        var listBorder = ParseColorOrFallback(branding.ListBorderColor, "#3E669A");
 
         LauncherBackgroundBrush = new LinearGradientBrush
         {
@@ -1641,8 +1754,8 @@ public partial class MainWindowViewModel : ViewModelBase
             EndPoint = new RelativePoint(1, 1, RelativeUnit.Relative),
             GradientStops = new GradientStops
             {
-                new GradientStop(BlendColors(primary, deep, 0.78), 0),
-                new GradientStop(BlendColors(primary, deep, 0.88), 0.55),
+                new GradientStop(BlendColors(primary, deep, 0.82), 0),
+                new GradientStop(BlendColors(primary, deep, 0.9), 0.55),
                 new GradientStop(BlendColors(accent, deep, 0.9), 1)
             }
         };
@@ -1653,16 +1766,29 @@ public partial class MainWindowViewModel : ViewModelBase
             EndPoint = new RelativePoint(1, 0, RelativeUnit.Relative),
             GradientStops = new GradientStops
             {
-                new GradientStop(BlendColors(primary, Colors.White, 0.18), 0),
-                new GradientStop(BlendColors(primary, deep, 0.42), 1)
+                new GradientStop(BlendColors(primary, accent, 0.24), 0),
+                new GradientStop(BlendColors(primary, deep, 0.38), 1)
             }
         };
 
         HeroBorderBrush = new SolidColorBrush(BlendColors(primary, accent, 0.35));
-        LoginCardBackgroundBrush = new SolidColorBrush(BlendColors(panelBase, primary, 0.24));
-        LoginCardBorderBrush = new SolidColorBrush(BlendColors(cardBorderBase, primary, 0.35));
-        PlayButtonBackgroundBrush = new SolidColorBrush(BlendColors(accent, deep, 0.28));
-        PlayButtonBorderBrush = new SolidColorBrush(BlendColors(accent, Colors.White, 0.26));
+        LoginCardBackgroundBrush = new SolidColorBrush(surface);
+        LoginCardBorderBrush = new SolidColorBrush(surfaceBorder);
+        PanelBackgroundBrush = new SolidColorBrush(surface);
+        PanelBorderBrush = new SolidColorBrush(surfaceBorder);
+        PrimaryTextBrush = new SolidColorBrush(textPrimary);
+        SecondaryTextBrush = new SolidColorBrush(textSecondary);
+        PrimaryButtonBackgroundBrush = new SolidColorBrush(primaryButton);
+        PrimaryButtonBorderBrush = new SolidColorBrush(primaryButtonBorder);
+        PrimaryButtonForegroundBrush = new SolidColorBrush(primaryButtonText);
+        PlayButtonBackgroundBrush = new SolidColorBrush(playButton);
+        PlayButtonBorderBrush = new SolidColorBrush(playButtonBorder);
+        PlayButtonForegroundBrush = new SolidColorBrush(playButtonText);
+        InputBackgroundBrush = new SolidColorBrush(inputBackground);
+        InputBorderBrush = new SolidColorBrush(inputBorder);
+        InputForegroundBrush = new SolidColorBrush(inputText);
+        ListBackgroundBrush = new SolidColorBrush(listBackground);
+        ListBorderBrush = new SolidColorBrush(listBorder);
 
         BrandingBackgroundOverlayOpacity = Math.Clamp(branding.BackgroundOverlayOpacity, 0, 0.95);
         LoginCardHorizontalAlignment = ParseLoginCardAlignment(branding.LoginCardPosition);
