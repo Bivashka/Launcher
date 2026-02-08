@@ -1,4 +1,5 @@
 using BivLauncher.Api.Contracts.Public;
+using BivLauncher.Api.Contracts.Admin;
 using BivLauncher.Api.Data;
 using BivLauncher.Api.Data.Entities;
 using BivLauncher.Api.Options;
@@ -6,6 +7,7 @@ using BivLauncher.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using System.Collections.Concurrent;
 using System.Text.Json;
 
 namespace BivLauncher.Api.Controllers;
@@ -15,13 +17,17 @@ namespace BivLauncher.Api.Controllers;
 public sealed class PublicController(
     AppDbContext dbContext,
     IBrandingProvider brandingProvider,
+    IBuildPipelineService buildPipelineService,
     ILauncherUpdateConfigProvider launcherUpdateConfigProvider,
     IConfiguration configuration,
     IAssetUrlService assetUrlService,
     IObjectStorageService objectStorageService,
     IOptions<InstallTelemetryOptions> installTelemetryOptions,
-    IOptions<DiscordRpcOptions> discordRpcOptions) : ControllerBase
+    IOptions<DiscordRpcOptions> discordRpcOptions,
+    ILogger<PublicController> logger) : ControllerBase
 {
+    private static readonly ConcurrentDictionary<Guid, SemaphoreSlim> ManifestBuildLocks = new();
+
     [HttpGet("bootstrap")]
     public async Task<ActionResult<BootstrapResponse>> Bootstrap(CancellationToken cancellationToken)
     {
@@ -152,7 +158,7 @@ public sealed class PublicController(
         var profile = await dbContext.Profiles
             .AsNoTracking()
             .Where(x => x.Slug == normalizedSlug && x.Enabled)
-            .Select(x => new { x.Id, x.LatestManifestKey })
+            .Select(x => new { x.Id, x.Slug, x.LatestManifestKey })
             .FirstOrDefaultAsync(cancellationToken);
 
         if (profile is null)
@@ -160,20 +166,25 @@ public sealed class PublicController(
             return NotFound(new { error = "Profile not found." });
         }
 
-        var manifestKey = profile.LatestManifestKey;
+        var manifestKey = await ResolvePublishedManifestKeyAsync(
+            profile.Id,
+            profile.LatestManifestKey,
+            cancellationToken);
         if (string.IsNullOrWhiteSpace(manifestKey))
         {
-            manifestKey = await dbContext.Builds
-                .AsNoTracking()
-                .Where(x => x.ProfileId == profile.Id && x.Status == BuildStatus.Completed)
-                .OrderByDescending(x => x.CreatedAtUtc)
-                .Select(x => x.ManifestKey)
-                .FirstOrDefaultAsync(cancellationToken) ?? string.Empty;
+            await EnsureInitialManifestBuildIfMissingAsync(profile.Id, profile.Slug, cancellationToken);
+            manifestKey = await ResolvePublishedManifestKeyAsync(
+                profile.Id,
+                fallbackManifestKey: string.Empty,
+                cancellationToken);
         }
 
         if (string.IsNullOrWhiteSpace(manifestKey))
         {
-            return NotFound(new { error = "No manifest published for this profile." });
+            return NotFound(new
+            {
+                error = "No manifest published for this profile. Upload files and run profile rebuild in admin."
+            });
         }
 
         var storedObject = await objectStorageService.GetAsync(manifestKey, cancellationToken);
@@ -190,6 +201,75 @@ public sealed class PublicController(
         return manifest is null
             ? StatusCode(StatusCodes.Status500InternalServerError, new { error = "Manifest content is invalid." })
             : Ok(manifest);
+    }
+
+    private async Task<string> ResolvePublishedManifestKeyAsync(
+        Guid profileId,
+        string? fallbackManifestKey,
+        CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(fallbackManifestKey))
+        {
+            return fallbackManifestKey.Trim();
+        }
+
+        return await dbContext.Builds
+            .AsNoTracking()
+            .Where(x => x.ProfileId == profileId && x.Status == BuildStatus.Completed)
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .Select(x => x.ManifestKey)
+            .FirstOrDefaultAsync(cancellationToken) ?? string.Empty;
+    }
+
+    private async Task EnsureInitialManifestBuildIfMissingAsync(
+        Guid profileId,
+        string profileSlug,
+        CancellationToken cancellationToken)
+    {
+        var locker = ManifestBuildLocks.GetOrAdd(profileId, static _ => new SemaphoreSlim(1, 1));
+        await locker.WaitAsync(cancellationToken);
+        try
+        {
+            var alreadyPublished = await dbContext.Builds
+                .AsNoTracking()
+                .AnyAsync(x => x.ProfileId == profileId && x.Status == BuildStatus.Completed, cancellationToken);
+            if (alreadyPublished)
+            {
+                return;
+            }
+
+            var hasAnyBuild = await dbContext.Builds
+                .AsNoTracking()
+                .AnyAsync(x => x.ProfileId == profileId, cancellationToken);
+            if (hasAnyBuild)
+            {
+                return;
+            }
+
+            try
+            {
+                await buildPipelineService.RebuildProfileAsync(
+                    profileId,
+                    new ProfileRebuildRequest
+                    {
+                        PublishToServers = true
+                    },
+                    cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                // Keep public endpoint stable; admin can inspect detailed rebuild failure in logs/audit.
+                logger.LogWarning(
+                    ex,
+                    "Initial auto-build failed for profile '{ProfileSlug}' ({ProfileId}).",
+                    profileSlug,
+                    profileId);
+            }
+        }
+        finally
+        {
+            locker.Release();
+        }
     }
 
     [HttpGet("assets/{**key}")]
