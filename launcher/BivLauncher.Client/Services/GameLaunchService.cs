@@ -984,17 +984,18 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
             return;
         }
 
-        EnsureJvmProperty(jvmArgs, "java.library.path", nativesDirectory);
-        EnsureJvmProperty(jvmArgs, "org.lwjgl.librarypath", nativesDirectory);
-        EnsureJvmProperty(jvmArgs, "net.java.games.input.librarypath", nativesDirectory);
+        var insertionIndex = FindLaunchModeArgumentIndex(jvmArgs);
+        insertionIndex = EnsureJvmProperty(jvmArgs, "java.library.path", nativesDirectory, insertionIndex);
+        insertionIndex = EnsureJvmProperty(jvmArgs, "org.lwjgl.librarypath", nativesDirectory, insertionIndex);
+        _ = EnsureJvmProperty(jvmArgs, "net.java.games.input.librarypath", nativesDirectory, insertionIndex);
         logService.LogInfo($"Legacy JVM native paths configured: {nativesDirectory}");
     }
 
-    private static void EnsureJvmProperty(IList<string> args, string propertyName, string value)
+    private static int EnsureJvmProperty(IList<string> args, string propertyName, string value, int insertionIndex)
     {
         if (string.IsNullOrWhiteSpace(propertyName))
         {
-            return;
+            return insertionIndex;
         }
 
         var prefix = $"-D{propertyName}=";
@@ -1002,16 +1003,38 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
         {
             if (args[i].StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
             {
+                if (i < insertionIndex)
+                {
+                    insertionIndex--;
+                }
+
                 args.RemoveAt(i);
             }
         }
 
         if (string.IsNullOrWhiteSpace(value))
         {
-            return;
+            return insertionIndex;
         }
 
-        args.Add($"{prefix}{value}");
+        insertionIndex = Math.Clamp(insertionIndex, 0, args.Count);
+        args.Insert(insertionIndex, $"{prefix}{value}");
+        return insertionIndex + 1;
+    }
+
+    private static int FindLaunchModeArgumentIndex(IList<string> args)
+    {
+        for (var i = 0; i < args.Count; i++)
+        {
+            if (args[i].Equals("-cp", StringComparison.OrdinalIgnoreCase) ||
+                args[i].Equals("-classpath", StringComparison.OrdinalIgnoreCase) ||
+                args[i].Equals("-jar", StringComparison.OrdinalIgnoreCase))
+            {
+                return i;
+            }
+        }
+
+        return args.Count;
     }
 
     private void EnsureLegacyLaunchwrapperDefaults(
