@@ -75,6 +75,7 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
 
         var launchMode = NormalizeLaunchMode(manifest.LaunchMode);
         var resolvedMainClassForCompatibility = string.Empty;
+        var resolvedClasspathForCompatibility = string.Empty;
         var legacyCompatibilityHome = string.Empty;
         if (launchMode == "mainclass")
         {
@@ -89,6 +90,7 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
             startInfo.ArgumentList.Add(classpath);
             startInfo.ArgumentList.Add(launchMainClass);
             resolvedMainClassForCompatibility = launchMainClass;
+            resolvedClasspathForCompatibility = classpath;
         }
         else
         {
@@ -107,6 +109,7 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
                 startInfo.ArgumentList.Add(implicitClasspath);
                 startInfo.ArgumentList.Add(implicitMainClass);
                 resolvedMainClassForCompatibility = implicitMainClass;
+                resolvedClasspathForCompatibility = implicitClasspath;
             }
             else
             {
@@ -120,6 +123,10 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
         {
             EnsureArgumentWithValue(gameArgs, "--gameDir", instanceDirectory);
             EnsureArgumentWithValue(gameArgs, "--assetsDir", Path.Combine(instanceDirectory, "assets"));
+            if (string.Equals(resolvedMainClassForCompatibility, "net.minecraft.launchwrapper.Launch", StringComparison.OrdinalIgnoreCase))
+            {
+                EnsureLegacyLaunchwrapperDefaults(gameArgs, manifest, instanceDirectory, resolvedClasspathForCompatibility);
+            }
             legacyCompatibilityHome = PrepareLegacyCompatibilityHome(instanceDirectory);
             // Some legacy launchers still resolve minecraft home via APPDATA/HOME.
             startInfo.Environment["APPDATA"] = legacyCompatibilityHome;
@@ -138,6 +145,7 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
         process.Start();
 
         logService.LogInfo($"Process started: {startInfo.FileName} {BuildArgsPreview(startInfo.ArgumentList)}");
+        logService.LogInfo($"Process id: {process.Id}");
 
         using var cancellationRegistration = cancellationToken.Register(() =>
         {
@@ -156,7 +164,20 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
         var stdOutTask = PumpOutputAsync(process.StandardOutput, onProcessLine, cancellationToken);
         var stdErrTask = PumpOutputAsync(process.StandardError, onProcessLine, cancellationToken);
 
-        await Task.WhenAll(stdOutTask, stdErrTask, process.WaitForExitAsync(cancellationToken));
+        await process.WaitForExitAsync(cancellationToken);
+        var pumpTask = Task.WhenAll(stdOutTask, stdErrTask);
+        var drainCompleted = await Task.WhenAny(
+            pumpTask,
+            Task.Delay(TimeSpan.FromSeconds(2), cancellationToken));
+        if (drainCompleted == pumpTask)
+        {
+            await pumpTask;
+        }
+        else
+        {
+            logService.LogInfo("Process exited, but output streams stayed open. Continuing without waiting for stream close.");
+        }
+
         logService.LogInfo($"Process exited with code {process.ExitCode}");
 
         return new LaunchResult
@@ -896,6 +917,58 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
 
         args.Add(key);
         args.Add(value);
+    }
+
+    private void EnsureLegacyLaunchwrapperDefaults(
+        List<string> gameArgs,
+        LauncherManifest manifest,
+        string instanceDirectory,
+        string resolvedClasspath)
+    {
+        EnsureArgumentWithValue(gameArgs, "--version", string.IsNullOrWhiteSpace(manifest.McVersion) ? "legacy" : manifest.McVersion.Trim());
+
+        if (HasArgument(gameArgs, "--tweakClass"))
+        {
+            return;
+        }
+
+        var hasForgeTweaker =
+            ContainsClasspathClass(resolvedClasspath, "cpw.mods.fml.common.launcher.FMLTweaker") ||
+            Directory.Exists(Path.Combine(instanceDirectory, "libraries", "forge")) ||
+            Directory.Exists(Path.Combine(instanceDirectory, "coremods"));
+
+        if (!hasForgeTweaker)
+        {
+            return;
+        }
+
+        gameArgs.Add("--tweakClass");
+        gameArgs.Add("cpw.mods.fml.common.launcher.FMLTweaker");
+        logService.LogInfo("Legacy launchwrapper args: added --tweakClass cpw.mods.fml.common.launcher.FMLTweaker.");
+    }
+
+    private static bool ContainsClasspathClass(string classpath, string className)
+    {
+        if (string.IsNullOrWhiteSpace(classpath))
+        {
+            return false;
+        }
+
+        var entries = classpath
+            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+            .Where(File.Exists)
+            .ToList();
+        if (entries.Count == 0)
+        {
+            return false;
+        }
+
+        return ContainsClass(entries, className);
+    }
+
+    private static bool HasArgument(IEnumerable<string> args, string key)
+    {
+        return args.Any(x => x.Equals(key, StringComparison.OrdinalIgnoreCase));
     }
 
     private string PrepareLegacyCompatibilityHome(string instanceDirectory)
