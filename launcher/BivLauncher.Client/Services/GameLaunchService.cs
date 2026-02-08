@@ -119,6 +119,11 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
             EnsureArgumentWithValue(gameArgs, "--gameDir", instanceDirectory);
             EnsureArgumentWithValue(gameArgs, "--assetsDir", Path.Combine(instanceDirectory, "assets"));
             EnsureLegacyForgeDeobfMap(instanceDirectory);
+            // Some legacy launchers still resolve minecraft home via APPDATA/HOME.
+            startInfo.Environment["APPDATA"] = instanceDirectory;
+            startInfo.Environment["HOME"] = instanceDirectory;
+            startInfo.Environment["USERPROFILE"] = instanceDirectory;
+            logService.LogInfo($"Legacy compatibility mode enabled: APPDATA/HOME redirected to {instanceDirectory}.");
         }
 
         foreach (var arg in gameArgs)
@@ -892,21 +897,27 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
 
     private void EnsureLegacyForgeDeobfMap(string instanceDirectory)
     {
-        var libDirectory = Path.Combine(instanceDirectory, "lib");
-        Directory.CreateDirectory(libDirectory);
+        var primaryLibDirectory = Path.Combine(instanceDirectory, "lib");
+        var secondaryLibDirectory = Path.Combine(instanceDirectory, ".minecraft", "lib");
+        Directory.CreateDirectory(primaryLibDirectory);
+        Directory.CreateDirectory(secondaryLibDirectory);
 
-        if (Directory.EnumerateFiles(libDirectory, "deobfuscation_data_*.zip", SearchOption.TopDirectoryOnly).Any())
+        var hasAnyExisting = Directory.EnumerateFiles(primaryLibDirectory, "deobfuscation_data_*.zip", SearchOption.TopDirectoryOnly).Any() ||
+                             Directory.EnumerateFiles(secondaryLibDirectory, "deobfuscation_data_*.zip", SearchOption.TopDirectoryOnly).Any();
+        if (hasAnyExisting)
         {
             return;
         }
 
-        var normalizedLibDirectory = Path.GetFullPath(libDirectory);
+        var normalizedPrimaryLibDirectory = Path.GetFullPath(primaryLibDirectory);
+        var normalizedSecondaryLibDirectory = Path.GetFullPath(secondaryLibDirectory);
         var source = Directory
             .EnumerateFiles(instanceDirectory, "deobfuscation_data_*.zip", SearchOption.AllDirectories)
             .Where(path =>
             {
                 var fullPath = Path.GetFullPath(path);
-                return !fullPath.StartsWith(normalizedLibDirectory, StringComparison.OrdinalIgnoreCase);
+                return !fullPath.StartsWith(normalizedPrimaryLibDirectory, StringComparison.OrdinalIgnoreCase) &&
+                       !fullPath.StartsWith(normalizedSecondaryLibDirectory, StringComparison.OrdinalIgnoreCase);
             })
             .OrderBy(path => path.Contains("forge", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
             .ThenBy(path => path.Length)
@@ -920,10 +931,15 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
             return;
         }
 
-        var target = Path.Combine(libDirectory, Path.GetFileName(source));
-        File.Copy(source, target, overwrite: true);
-        var relativeTarget = NormalizePath(Path.GetRelativePath(instanceDirectory, target));
-        logService.LogInfo($"Legacy Forge support: prepared {relativeTarget}.");
+        var fileName = Path.GetFileName(source);
+        var primaryTarget = Path.Combine(primaryLibDirectory, fileName);
+        var secondaryTarget = Path.Combine(secondaryLibDirectory, fileName);
+        File.Copy(source, primaryTarget, overwrite: true);
+        File.Copy(source, secondaryTarget, overwrite: true);
+
+        var primaryRelative = NormalizePath(Path.GetRelativePath(instanceDirectory, primaryTarget));
+        var secondaryRelative = NormalizePath(Path.GetRelativePath(instanceDirectory, secondaryTarget));
+        logService.LogInfo($"Legacy Forge support: prepared {primaryRelative} and {secondaryRelative}.");
     }
 
     private static void AppendRouteArgs(ICollection<string> gameArgs, string address, int port)
