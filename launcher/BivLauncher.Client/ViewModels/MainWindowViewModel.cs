@@ -35,6 +35,9 @@ public partial class MainWindowViewModel : ViewModelBase
     private readonly Dictionary<string, IImage?> _brandingImageCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly Queue<string> _liveLogLines = new();
     private const int MaxLiveLogLines = 500;
+    private const string LocalFallbackApiBaseUrl = "http://localhost:8080";
+    private const string LauncherApiBaseUrlEnvVar = "BIVLAUNCHER_API_BASE_URL";
+    private const string LauncherApiBaseUrlAssemblyMetadataKey = "BivLauncher.ApiBaseUrl";
     private readonly string _currentLauncherVersion = GetCurrentLauncherVersion();
     private string _languageCode = "ru";
     private readonly Dictionary<string, string> _profileRouteSelections = new(StringComparer.OrdinalIgnoreCase);
@@ -172,7 +175,7 @@ public partial class MainWindowViewModel : ViewModelBase
     private bool _isBusy;
 
     [ObservableProperty]
-    private string _apiBaseUrl = "http://localhost:8080";
+    private string _apiBaseUrl = string.Empty;
 
     [ObservableProperty]
     private string _installDirectory = string.Empty;
@@ -341,7 +344,16 @@ public partial class MainWindowViewModel : ViewModelBase
         RefreshLocalizedBindings();
         LoadRouteSelections(_settings.ProfileRouteSelections ?? []);
 
-        ApiBaseUrl = NormalizeBaseUrl(_settings.ApiBaseUrl);
+        var persistedApiBaseUrl = NormalizeBaseUrl(_settings.ApiBaseUrl);
+        var resolvedDefaultApiBaseUrl = ResolveDefaultApiBaseUrl();
+        if (IsLoopbackBaseUrl(persistedApiBaseUrl) && !IsLoopbackBaseUrl(resolvedDefaultApiBaseUrl))
+        {
+            persistedApiBaseUrl = resolvedDefaultApiBaseUrl;
+            _settings.ApiBaseUrl = persistedApiBaseUrl;
+            await _settingsService.SaveAsync(_settings);
+        }
+
+        ApiBaseUrl = persistedApiBaseUrl;
         InstallDirectory = string.IsNullOrWhiteSpace(_settings.InstallDirectory)
             ? _settingsService.GetDefaultInstallDirectory()
             : _settings.InstallDirectory;
@@ -1601,14 +1613,60 @@ public partial class MainWindowViewModel : ViewModelBase
         return assemblyVersion?.ToString(3) ?? "0.0.0";
     }
 
-    private static string NormalizeBaseUrl(string value)
+    private static string NormalizeBaseUrl(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
         {
-            return "http://localhost:8080";
+            return ResolveDefaultApiBaseUrl();
         }
 
         return value.Trim().TrimEnd('/');
+    }
+
+    private static string ResolveDefaultApiBaseUrl()
+    {
+        var environmentBaseUrl = NormalizeBaseUrlOrEmpty(Environment.GetEnvironmentVariable(LauncherApiBaseUrlEnvVar));
+        if (!string.IsNullOrWhiteSpace(environmentBaseUrl))
+        {
+            return environmentBaseUrl;
+        }
+
+        var assembly = Assembly.GetEntryAssembly() ?? typeof(MainWindowViewModel).Assembly;
+        var bundledBaseUrl = assembly
+            .GetCustomAttributes<AssemblyMetadataAttribute>()
+            .FirstOrDefault(attribute => string.Equals(
+                attribute.Key,
+                LauncherApiBaseUrlAssemblyMetadataKey,
+                StringComparison.OrdinalIgnoreCase))?
+            .Value;
+        var normalizedBundledBaseUrl = NormalizeBaseUrlOrEmpty(bundledBaseUrl);
+        if (!string.IsNullOrWhiteSpace(normalizedBundledBaseUrl))
+        {
+            return normalizedBundledBaseUrl;
+        }
+
+        return LocalFallbackApiBaseUrl;
+    }
+
+    private static string NormalizeBaseUrlOrEmpty(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        return value.Trim().TrimEnd('/');
+    }
+
+    private static bool IsLoopbackBaseUrl(string? value)
+    {
+        var normalized = NormalizeBaseUrlOrEmpty(value);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return false;
+        }
+
+        return Uri.TryCreate(normalized, UriKind.Absolute, out var uri) && uri.IsLoopback;
     }
 
     private static string NormalizeJavaMode(string? javaMode)

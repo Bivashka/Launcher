@@ -231,6 +231,12 @@ public sealed class AdminLauncherController(
             startInfo.ArgumentList.Add($"/p:Version={request.Version}");
         }
 
+        var launcherApiBaseUrl = ResolveLauncherDefaultApiBaseUrl();
+        if (!string.IsNullOrWhiteSpace(launcherApiBaseUrl))
+        {
+            startInfo.ArgumentList.Add($"/p:BivLauncherApiBaseUrl={launcherApiBaseUrl}");
+        }
+
         return new Process
         {
             StartInfo = startInfo
@@ -338,6 +344,14 @@ public sealed class AdminLauncherController(
     {
         var configuredPath = configuration["LAUNCHER_BUILD_OUTPUT_ROOT"] ?? Path.Combine(Path.GetTempPath(), "bivlauncher-launcher-builds");
         return ToAbsolutePath(configuredPath);
+    }
+
+    private string ResolveLauncherDefaultApiBaseUrl()
+    {
+        var configuredUrl = configuration["PUBLIC_BASE_URL"] ?? configuration["PublicBaseUrl"];
+        return string.IsNullOrWhiteSpace(configuredUrl)
+            ? string.Empty
+            : configuredUrl.Trim().TrimEnd('/');
     }
 
     private int ResolveTimeoutSeconds()

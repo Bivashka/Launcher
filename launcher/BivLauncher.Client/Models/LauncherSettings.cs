@@ -2,7 +2,7 @@ namespace BivLauncher.Client.Models;
 
 public sealed class LauncherSettings
 {
-    public string ApiBaseUrl { get; set; } = "http://localhost:8080";
+    public string ApiBaseUrl { get; set; } = string.Empty;
     public string InstallDirectory { get; set; } = string.Empty;
     public bool DebugMode { get; set; }
     public int RamMb { get; set; } = 2048;
