@@ -13,6 +13,7 @@ namespace BivLauncher.Api.Controllers;
 [Route("api/admin/servers")]
 public sealed class AdminServersController(
     AppDbContext dbContext,
+    IBuildSourcesLayoutService buildSourcesLayoutService,
     IAdminAuditService auditService) : ControllerBase
 {
     [HttpGet]
@@ -78,8 +79,12 @@ public sealed class AdminServersController(
     [HttpPost]
     public async Task<ActionResult<ServerDto>> Create([FromBody] ServerUpsertRequest request, CancellationToken cancellationToken)
     {
-        var profileExists = await dbContext.Profiles.AnyAsync(x => x.Id == request.ProfileId, cancellationToken);
-        if (!profileExists)
+        var profile = await dbContext.Profiles
+            .AsNoTracking()
+            .Where(x => x.Id == request.ProfileId)
+            .Select(x => new { x.Id, x.Slug })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (profile is null)
         {
             return BadRequest(new { error = "Profile does not exist." });
         }
@@ -107,6 +112,18 @@ public sealed class AdminServersController(
             Enabled = request.Enabled,
             Order = request.Order
         };
+
+        try
+        {
+            buildSourcesLayoutService.EnsureServerLayout(profile.Slug, server.Id, server.Name);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                error = $"Failed to initialize server build-sources layout: {ex.Message}"
+            });
+        }
 
         dbContext.Servers.Add(server);
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -139,8 +156,12 @@ public sealed class AdminServersController(
             return NotFound();
         }
 
-        var profileExists = await dbContext.Profiles.AnyAsync(x => x.Id == request.ProfileId, cancellationToken);
-        if (!profileExists)
+        var profile = await dbContext.Profiles
+            .AsNoTracking()
+            .Where(x => x.Id == request.ProfileId)
+            .Select(x => new { x.Id, x.Slug })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (profile is null)
         {
             return BadRequest(new { error = "Profile does not exist." });
         }
@@ -151,8 +172,21 @@ public sealed class AdminServersController(
             return BadRequest(new { error = $"Unsupported loader type '{request.LoaderType}'. Allowed: {string.Join(", ", LoaderCatalog.SupportedLoaders)}." });
         }
 
+        var normalizedServerName = request.Name.Trim();
+        try
+        {
+            buildSourcesLayoutService.EnsureServerLayout(profile.Slug, server.Id, normalizedServerName);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                error = $"Failed to initialize server build-sources layout: {ex.Message}"
+            });
+        }
+
         server.ProfileId = request.ProfileId;
-        server.Name = request.Name.Trim();
+        server.Name = normalizedServerName;
         server.Address = request.Address.Trim();
         server.Port = request.Port;
         server.MainJarPath = request.MainJarPath.Trim();

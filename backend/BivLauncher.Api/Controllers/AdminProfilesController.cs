@@ -15,6 +15,7 @@ namespace BivLauncher.Api.Controllers;
 public sealed class AdminProfilesController(
     AppDbContext dbContext,
     IBuildPipelineService buildPipelineService,
+    IBuildSourcesLayoutService buildSourcesLayoutService,
     IAdminAuditService auditService) : ControllerBase
 {
     private static readonly Regex SlugPattern = new("^[a-z0-9-]+$", RegexOptions.Compiled);
@@ -106,6 +107,18 @@ public sealed class AdminProfilesController(
             return Conflict(new { error = "Slug is already in use." });
         }
 
+        try
+        {
+            buildSourcesLayoutService.EnsureProfileLayout(normalizedSlug);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                error = $"Failed to initialize profile build-sources layout: {ex.Message}"
+            });
+        }
+
         var profile = new Profile
         {
             Name = request.Name.Trim(),
@@ -169,6 +182,19 @@ public sealed class AdminProfilesController(
         if (slugInUse)
         {
             return Conflict(new { error = "Slug is already in use." });
+        }
+
+        var previousSlug = profile.Slug;
+        try
+        {
+            buildSourcesLayoutService.EnsureProfileLayout(normalizedSlug, previousSlug);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                error = $"Failed to initialize profile build-sources layout: {ex.Message}"
+            });
         }
 
         profile.Name = request.Name.Trim();

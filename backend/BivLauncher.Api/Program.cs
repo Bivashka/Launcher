@@ -39,6 +39,7 @@ builder.Services.AddScoped<PasswordHasher<AdminUser>>();
 builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 builder.Services.AddScoped<IAdminAuditService, AdminAuditService>();
 builder.Services.AddScoped<IBuildPipelineService, BuildPipelineService>();
+builder.Services.AddSingleton<IBuildSourcesLayoutService, BuildSourcesLayoutService>();
 builder.Services.AddScoped<IExternalAuthService, ExternalAuthService>();
 builder.Services.AddSingleton<ITwoFactorService, TwoFactorService>();
 builder.Services.AddSingleton<IStorageMigrationService, StorageMigrationService>();
