@@ -641,6 +641,21 @@ public sealed class S3ObjectStorageService(
             throw new InvalidOperationException("S3 endpoint is not configured. Check admin settings or S3_ENDPOINT.");
         }
 
+        if (Uri.TryCreate(settings.Endpoint, UriKind.Absolute, out var endpointUri))
+        {
+            var host = endpointUri.Host.Trim().ToLowerInvariant();
+            var runningInContainer = string.Equals(
+                Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER"),
+                "true",
+                StringComparison.OrdinalIgnoreCase);
+
+            if (runningInContainer && (host == "localhost" || host == "127.0.0.1"))
+            {
+                throw new InvalidOperationException(
+                    "S3 endpoint points to localhost inside container. Use service hostname (for docker-compose usually http://minio:9000) or disable S3.");
+            }
+        }
+
         if (string.IsNullOrWhiteSpace(settings.Bucket))
         {
             throw new InvalidOperationException("S3 bucket is not configured. Check admin settings or S3_BUCKET.");

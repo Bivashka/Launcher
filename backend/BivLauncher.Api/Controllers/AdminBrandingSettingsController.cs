@@ -14,7 +14,8 @@ public sealed class AdminBrandingSettingsController(
     IBrandingProvider brandingProvider,
     IObjectStorageService objectStorageService,
     IAssetUrlService assetUrlService,
-    IAdminAuditService auditService) : ControllerBase
+    IAdminAuditService auditService,
+    ILogger<AdminBrandingSettingsController> logger) : ControllerBase
 {
     private static readonly HashSet<string> AllowedImageExtensions = [".png", ".jpg", ".jpeg", ".webp", ".gif"];
 
@@ -107,9 +108,36 @@ public sealed class AdminBrandingSettingsController(
             ? "application/octet-stream"
             : file.ContentType.Trim();
 
-        await using (var stream = file.OpenReadStream())
+        try
         {
-            await objectStorageService.UploadAsync(key, stream, contentType, cancellationToken: cancellationToken);
+            await using (var stream = file.OpenReadStream())
+            {
+                await objectStorageService.UploadAsync(key, stream, contentType, cancellationToken: cancellationToken);
+            }
+        }
+        catch (InvalidOperationException ex)
+        {
+            logger.LogWarning(ex, "Branding background upload rejected due to storage configuration.");
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+            {
+                error = $"Storage backend is unavailable: {ex.Message}"
+            });
+        }
+        catch (HttpRequestException ex)
+        {
+            logger.LogWarning(ex, "Branding background upload failed due to storage connectivity issue.");
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+            {
+                error = "Storage backend is unreachable. Check S3/MinIO endpoint and connectivity."
+            });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Branding background upload failed unexpectedly.");
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                error = "Background image upload failed unexpectedly."
+            });
         }
 
         var current = await brandingProvider.GetBrandingAsync(cancellationToken);
