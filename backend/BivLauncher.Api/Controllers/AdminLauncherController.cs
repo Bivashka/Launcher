@@ -14,6 +14,9 @@ namespace BivLauncher.Api.Controllers;
 public sealed class AdminLauncherController(
     IWebHostEnvironment environment,
     IConfiguration configuration,
+    IObjectStorageService objectStorageService,
+    IAssetUrlService assetUrlService,
+    ILauncherUpdateConfigProvider launcherUpdateConfigProvider,
     IAdminAuditService auditService,
     ILogger<AdminLauncherController> logger) : ControllerBase
 {
@@ -158,6 +161,35 @@ public sealed class AdminLauncherController(
 
             ZipFile.CreateFromDirectory(publishDirectory, archivePath, CompressionLevel.Optimal, includeBaseDirectory: false);
             var fileBytes = await System.IO.File.ReadAllBytesAsync(archivePath, cancellationToken);
+            var autoPublishWarning = string.Empty;
+
+            if (normalized.AutoPublishUpdate)
+            {
+                try
+                {
+                    await AutoPublishLauncherUpdateAsync(
+                        normalized,
+                        archiveName,
+                        fileBytes,
+                        cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(
+                        ex,
+                        "Launcher auto-publish failed for archive {ArchiveName}. Build ZIP will still be returned.",
+                        archiveName);
+                    autoPublishWarning = $"Launcher auto-publish warning: {ex.Message}";
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(autoPublishWarning))
+            {
+                stderr = string.IsNullOrWhiteSpace(stderr)
+                    ? autoPublishWarning
+                    : $"{stderr}{Environment.NewLine}{autoPublishWarning}";
+                Response.Headers.Append("X-Launcher-Update-Publish-Warning", Truncate(autoPublishWarning, 300));
+            }
 
             await WriteAuditAsync(
                 action: "launcher.build",
@@ -270,6 +302,8 @@ public sealed class AdminLauncherController(
                 request.SelfContained,
                 request.PublishSingleFile,
                 request.Version,
+                request.AutoPublishUpdate,
+                request.ReleaseNotes,
                 archiveName,
                 sizeBytes,
                 startedAtUtc = startedAt,
@@ -310,7 +344,9 @@ public sealed class AdminLauncherController(
             Configuration = configuration,
             SelfContained = request.SelfContained,
             PublishSingleFile = request.PublishSingleFile,
-            Version = (request.Version ?? string.Empty).Trim()
+            Version = (request.Version ?? string.Empty).Trim(),
+            AutoPublishUpdate = request.AutoPublishUpdate,
+            ReleaseNotes = (request.ReleaseNotes ?? string.Empty).Trim()
         };
     }
 
@@ -380,6 +416,49 @@ public sealed class AdminLauncherController(
     {
         var version = string.IsNullOrWhiteSpace(request.Version) ? "dev" : request.Version;
         return $"launcher-{version}-{request.RuntimeIdentifier}.zip";
+    }
+
+    private async Task AutoPublishLauncherUpdateAsync(
+        LauncherBuildRequest request,
+        string archiveName,
+        byte[] archiveBytes,
+        CancellationToken cancellationToken)
+    {
+        if (archiveBytes.Length <= 0)
+        {
+            throw new InvalidOperationException("Launcher archive is empty and cannot be auto-published.");
+        }
+
+        var version = ResolveUpdateVersion(request.Version);
+        var storageKey = $"launcher-updates/{version}/{archiveName}";
+        await using var stream = new MemoryStream(archiveBytes, writable: false);
+        await objectStorageService.UploadAsync(
+            storageKey,
+            stream,
+            contentType: "application/zip",
+            cancellationToken: cancellationToken);
+
+        var publicUrl = assetUrlService.BuildPublicUrl(storageKey);
+        var releaseNotes = string.IsNullOrWhiteSpace(request.ReleaseNotes)
+            ? $"Automated launcher build {version}"
+            : request.ReleaseNotes.Trim();
+
+        await launcherUpdateConfigProvider.SaveAsync(
+            new LauncherUpdateConfig(
+                LatestVersion: version,
+                DownloadUrl: publicUrl,
+                ReleaseNotes: releaseNotes),
+            cancellationToken);
+    }
+
+    private static string ResolveUpdateVersion(string requestVersion)
+    {
+        if (!string.IsNullOrWhiteSpace(requestVersion))
+        {
+            return requestVersion.Trim();
+        }
+
+        return DateTime.UtcNow.ToString("yyyy.MM.dd.HHmmss");
     }
 
     private static string Truncate(string value, int maxLength)

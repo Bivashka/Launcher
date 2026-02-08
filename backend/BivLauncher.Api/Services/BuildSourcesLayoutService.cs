@@ -79,16 +79,25 @@ public sealed class BuildSourcesLayoutService(
 
         var sourceRoot = ResolveSourceRoot();
         var profileRoot = ResolveChildPath(sourceRoot, NormalizeSlug(profileSlug));
-        var serverRoot = ResolveChildPath(profileRoot, $"servers/{serverId:N}");
-
-        foreach (var relativePath in ServerTemplateDirectories)
+        var roots = new[]
         {
-            Directory.CreateDirectory(Path.Combine(serverRoot, relativePath));
+            ResolveChildPath(profileRoot, $"servers/{serverId:N}"),
+            ResolveChildPath(profileRoot, $"servers/{NormalizeServerName(serverName)}")
         }
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToList();
 
-        EnsureFile(
-            Path.Combine(serverRoot, "README.md"),
-            BuildServerReadme(serverId, serverName));
+        foreach (var serverRoot in roots)
+        {
+            foreach (var relativePath in ServerTemplateDirectories)
+            {
+                Directory.CreateDirectory(Path.Combine(serverRoot, relativePath));
+            }
+
+            EnsureFile(
+                Path.Combine(serverRoot, "README.md"),
+                BuildServerReadme(serverId, serverName));
+        }
     }
 
     private string ResolveSourceRoot()
@@ -173,8 +182,10 @@ public sealed class BuildSourcesLayoutService(
                 string.Empty,
                 "Per-server folders are created under:",
                 "- servers/<serverId>/",
+                "- servers/<server-name>/",
                 string.Empty,
-                "Use Profile Rebuild in admin panel after uploading mods/config/jars."
+                "If exactly one server folder has files, rebuild auto-merges it.",
+                "If several server folders have files, set SourceSubPath manually."
             ]);
     }
 
@@ -190,8 +201,30 @@ public sealed class BuildSourcesLayoutService(
                 $"Server scaffold for '{normalizedName}' ({serverId}).",
                 string.Empty,
                 "Place optional per-server content here.",
-                "Current rebuild pipeline still uses profile-level paths by default.",
-                "You can point rebuild SourceSubPath to this directory when needed."
+                "Auto-rebuild can merge this folder when it is the only populated server folder.",
+                "For exact control use SourceSubPath in profile rebuild."
             ]);
+    }
+
+    private static string NormalizeServerName(string rawName)
+    {
+        if (string.IsNullOrWhiteSpace(rawName))
+        {
+            return "server";
+        }
+
+        var chars = rawName
+            .Trim()
+            .ToLowerInvariant()
+            .Select(ch => char.IsLetterOrDigit(ch) ? ch : '-')
+            .ToArray();
+        var normalized = new string(chars);
+        while (normalized.Contains("--", StringComparison.Ordinal))
+        {
+            normalized = normalized.Replace("--", "-", StringComparison.Ordinal);
+        }
+
+        normalized = normalized.Trim('-');
+        return string.IsNullOrWhiteSpace(normalized) ? "server" : normalized;
     }
 }

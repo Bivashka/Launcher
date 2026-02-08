@@ -40,7 +40,7 @@ public sealed class BuildPipelineService(
         }
 
         var mcVersion = ResolveValue(request.McVersion, profile.Servers.FirstOrDefault()?.McVersion, "1.21.1");
-        var sourceDirectories = ResolveSourceDirectories(profile.Slug, request.SourceSubPath, loaderType, mcVersion);
+        var sourceDirectories = ResolveSourceDirectories(profile.Slug, request.SourceSubPath, loaderType, mcVersion, profile.Servers);
         if (sourceDirectories.Count == 0)
         {
             throw new DirectoryNotFoundException($"Source directory for profile '{profile.Slug}' does not exist.");
@@ -169,7 +169,12 @@ public sealed class BuildPipelineService(
         }
     }
 
-    private IReadOnlyList<string> ResolveSourceDirectories(string profileSlug, string sourceSubPath, string loaderType, string mcVersion)
+    private IReadOnlyList<string> ResolveSourceDirectories(
+        string profileSlug,
+        string sourceSubPath,
+        string loaderType,
+        string mcVersion,
+        ICollection<Server> servers)
     {
         var sourceRoot = Path.IsPathRooted(options.Value.SourceRoot)
             ? options.Value.SourceRoot
@@ -197,7 +202,38 @@ public sealed class BuildPipelineService(
             return [targetPath];
         }
 
+        var selected = ResolveProfileLayerDirectories(profileRoot, loaderType, mcVersion).ToList();
+        var autoResolvedServerLayers = TryResolveAutomaticServerLayerDirectories(
+            profileRoot,
+            loaderType,
+            mcVersion,
+            servers,
+            out var serverLayers,
+            out var hasMultiplePopulatedServerSources);
+        if (autoResolvedServerLayers)
+        {
+            selected.AddRange(serverLayers);
+        }
+
+        if (selected.Count > 0)
+        {
+            return selected;
+        }
+
+        if (hasMultiplePopulatedServerSources)
+        {
+            throw new InvalidOperationException(
+                $"Multiple populated server source directories detected for profile '{profileSlug}'. " +
+                "Specify SourceSubPath to select one server folder.");
+        }
+
+        return [profileRoot];
+    }
+
+    private static IReadOnlyList<string> ResolveProfileLayerDirectories(string profileRoot, string loaderType, string mcVersion)
+    {
         var selected = new List<string>();
+
         var commonDirectory = Path.Combine(profileRoot, "common");
         if (Directory.Exists(commonDirectory))
         {
@@ -216,12 +252,124 @@ public sealed class BuildPipelineService(
             selected.Add(loaderVersionDirectory);
         }
 
-        if (selected.Count > 0)
+        return selected;
+    }
+
+    private bool TryResolveAutomaticServerLayerDirectories(
+        string profileRoot,
+        string loaderType,
+        string mcVersion,
+        ICollection<Server> servers,
+        out IReadOnlyList<string> resolvedServerLayers,
+        out bool hasMultiplePopulatedServerSources)
+    {
+        var serverLayerGroups = servers
+            .OrderBy(x => x.Order)
+            .ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(server => new
+            {
+                ServerId = server.Id,
+                ServerName = server.Name,
+                Layers = ResolveServerLayerDirectories(profileRoot, loaderType, mcVersion, server).ToList()
+            })
+            .Where(x => x.Layers.Count > 0 && x.Layers.Any(DirectoryContainsFiles))
+            .ToList();
+
+        if (serverLayerGroups.Count == 0)
         {
-            return selected;
+            resolvedServerLayers = [];
+            hasMultiplePopulatedServerSources = false;
+            return false;
         }
 
-        return [profileRoot];
+        if (serverLayerGroups.Count > 1)
+        {
+            logger.LogInformation(
+                "Multiple server-specific source directories detected for profile root {ProfileRoot}. " +
+                "Using profile-level directories only. Set SourceSubPath manually to target one server.",
+                profileRoot);
+            resolvedServerLayers = [];
+            hasMultiplePopulatedServerSources = true;
+            return false;
+        }
+
+        var selectedServer = serverLayerGroups[0];
+        logger.LogInformation(
+            "Auto-selected server-specific source directories for server {ServerId} ({ServerName}).",
+            selectedServer.ServerId,
+            selectedServer.ServerName);
+        resolvedServerLayers = selectedServer.Layers;
+        hasMultiplePopulatedServerSources = false;
+        return true;
+    }
+
+    private static IReadOnlyList<string> ResolveServerLayerDirectories(
+        string profileRoot,
+        string loaderType,
+        string mcVersion,
+        Server server)
+    {
+        var byIdRoot = Path.Combine(profileRoot, "servers", server.Id.ToString("N"));
+        var byNameRoot = Path.Combine(profileRoot, "servers", NormalizeServerName(server.Name));
+
+        var candidates = new List<string>();
+        foreach (var root in new[] { byIdRoot, byNameRoot })
+        {
+            if (!Directory.Exists(root))
+            {
+                continue;
+            }
+
+            var commonDirectory = Path.Combine(root, "common");
+            if (Directory.Exists(commonDirectory))
+            {
+                candidates.Add(commonDirectory);
+            }
+
+            var loaderCommonDirectory = Path.Combine(root, "loaders", loaderType, "common");
+            if (Directory.Exists(loaderCommonDirectory))
+            {
+                candidates.Add(loaderCommonDirectory);
+            }
+
+            var loaderVersionDirectory = Path.Combine(root, "loaders", loaderType, mcVersion);
+            if (Directory.Exists(loaderVersionDirectory))
+            {
+                candidates.Add(loaderVersionDirectory);
+            }
+        }
+
+        return candidates
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static bool DirectoryContainsFiles(string path)
+    {
+        return Directory.Exists(path) &&
+               Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories).Any();
+    }
+
+    private static string NormalizeServerName(string rawName)
+    {
+        if (string.IsNullOrWhiteSpace(rawName))
+        {
+            return "server";
+        }
+
+        var chars = rawName
+            .Trim()
+            .ToLowerInvariant()
+            .Select(ch => char.IsLetterOrDigit(ch) ? ch : '-')
+            .ToArray();
+        var normalized = new string(chars);
+        while (normalized.Contains("--", StringComparison.Ordinal))
+        {
+            normalized = normalized.Replace("--", "-", StringComparison.Ordinal);
+        }
+
+        normalized = normalized.Trim('-');
+        return string.IsNullOrWhiteSpace(normalized) ? "server" : normalized;
     }
 
     private static string ResolveValue(string? preferred, string? fallback, string nextFallback, string hardFallback)

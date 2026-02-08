@@ -15,6 +15,7 @@ namespace BivLauncher.Api.Controllers;
 public sealed class PublicController(
     AppDbContext dbContext,
     IBrandingProvider brandingProvider,
+    ILauncherUpdateConfigProvider launcherUpdateConfigProvider,
     IConfiguration configuration,
     IAssetUrlService assetUrlService,
     IObjectStorageService objectStorageService,
@@ -117,7 +118,7 @@ public sealed class PublicController(
                     Pinned: item.Pinned,
                     CreatedAtUtc: item.CreatedAtUtc))
                 .ToList(),
-            LauncherUpdate: ResolveLauncherUpdate(configuration));
+            LauncherUpdate: await ResolveLauncherUpdateAsync(cancellationToken));
 
         return Ok(response);
     }
@@ -260,26 +261,17 @@ public sealed class PublicController(
             smallText);
     }
 
-    private static LauncherUpdateInfo? ResolveLauncherUpdate(IConfiguration configuration)
+    private async Task<LauncherUpdateInfo?> ResolveLauncherUpdateAsync(CancellationToken cancellationToken)
     {
-        var latestVersion = (configuration["LAUNCHER_LATEST_VERSION"]
-                             ?? configuration["LauncherUpdate:LatestVersion"]
-                             ?? string.Empty).Trim();
-        var downloadUrl = (configuration["LAUNCHER_UPDATE_URL"]
-                           ?? configuration["LauncherUpdate:DownloadUrl"]
-                           ?? string.Empty).Trim();
-        var releaseNotes = (configuration["LAUNCHER_RELEASE_NOTES"]
-                            ?? configuration["LauncherUpdate:ReleaseNotes"]
-                            ?? string.Empty).Trim();
-
-        if (string.IsNullOrWhiteSpace(latestVersion) || string.IsNullOrWhiteSpace(downloadUrl))
+        var updateConfig = await launcherUpdateConfigProvider.GetAsync(cancellationToken);
+        if (updateConfig is null)
         {
             return null;
         }
 
         return new LauncherUpdateInfo(
-            LatestVersion: latestVersion,
-            DownloadUrl: downloadUrl,
-            ReleaseNotes: releaseNotes);
+            LatestVersion: updateConfig.LatestVersion,
+            DownloadUrl: updateConfig.DownloadUrl,
+            ReleaseNotes: updateConfig.ReleaseNotes);
     }
 }

@@ -64,6 +64,8 @@ type LauncherBuildRequest = {
   selfContained: boolean
   publishSingleFile: boolean
   version: string
+  autoPublishUpdate: boolean
+  releaseNotes: string
 }
 type CosmeticUploadResponse = { account: string; key: string; url: string }
 type DiscordRpcConfig = {
@@ -3748,6 +3750,8 @@ function App() {
         selfContained: launcherBuildSelfContained,
         publishSingleFile: launcherBuildSingleFile,
         version,
+        autoPublishUpdate: true,
+        releaseNotes: '',
       }
 
       const response = await fetch(`${apiBaseUrl}/api/admin/launcher/build`, {

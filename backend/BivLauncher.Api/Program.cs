@@ -23,6 +23,7 @@ builder.Services.Configure<NewsSyncOptions>(builder.Configuration.GetSection(New
 builder.Services.Configure<NewsRetentionOptions>(builder.Configuration.GetSection(NewsRetentionOptions.SectionName));
 builder.Services.Configure<RuntimeRetentionOptions>(builder.Configuration.GetSection(RuntimeRetentionOptions.SectionName));
 builder.Services.Configure<BuildPipelineOptions>(builder.Configuration.GetSection(BuildPipelineOptions.SectionName));
+builder.Services.Configure<LauncherUpdateOptions>(builder.Configuration.GetSection(LauncherUpdateOptions.SectionName));
 builder.Services.Configure<AuthProviderOptions>(builder.Configuration.GetSection(AuthProviderOptions.SectionName));
 builder.Services.Configure<DeveloperSupportOptions>(builder.Configuration.GetSection(DeveloperSupportOptions.SectionName));
 builder.Services.Configure<InstallTelemetryOptions>(builder.Configuration.GetSection(InstallTelemetryOptions.SectionName));
@@ -40,6 +41,7 @@ builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 builder.Services.AddScoped<IAdminAuditService, AdminAuditService>();
 builder.Services.AddScoped<IBuildPipelineService, BuildPipelineService>();
 builder.Services.AddSingleton<IBuildSourcesLayoutService, BuildSourcesLayoutService>();
+builder.Services.AddSingleton<ILauncherUpdateConfigProvider, LauncherUpdateConfigProvider>();
 builder.Services.AddScoped<IExternalAuthService, ExternalAuthService>();
 builder.Services.AddSingleton<ITwoFactorService, TwoFactorService>();
 builder.Services.AddSingleton<IStorageMigrationService, StorageMigrationService>();
@@ -156,6 +158,15 @@ builder.Services.PostConfigure<BuildPipelineOptions>(options =>
     options.SourceRoot = builder.Configuration["BUILD_SOURCE_ROOT"] ?? options.SourceRoot;
     options.DefaultJvmArgs = builder.Configuration["BUILD_DEFAULT_JVM_ARGS"] ?? options.DefaultJvmArgs;
     options.DefaultGameArgs = builder.Configuration["BUILD_DEFAULT_GAME_ARGS"] ?? options.DefaultGameArgs;
+});
+
+builder.Services.PostConfigure<LauncherUpdateOptions>(options =>
+{
+    options.LatestVersion = (builder.Configuration["LAUNCHER_LATEST_VERSION"] ?? options.LatestVersion ?? string.Empty).Trim();
+    options.DownloadUrl = (builder.Configuration["LAUNCHER_UPDATE_URL"] ?? options.DownloadUrl ?? string.Empty).Trim();
+    options.ReleaseNotes = (builder.Configuration["LAUNCHER_RELEASE_NOTES"] ?? options.ReleaseNotes ?? string.Empty).Trim();
+    options.FilePath = (builder.Configuration["LAUNCHER_UPDATE_FILE_PATH"] ?? options.FilePath ?? string.Empty).Trim();
+    options.FilePath = string.IsNullOrWhiteSpace(options.FilePath) ? "launcher-update.json" : options.FilePath;
 });
 
 builder.Services.PostConfigure<NewsSyncOptions>(options =>
