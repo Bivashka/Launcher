@@ -448,6 +448,12 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
             .ThenBy(x => x.RelativePath.Length)
             .ThenBy(x => x.RelativePath, StringComparer.OrdinalIgnoreCase))
         {
+            if (requireMainClass &&
+                !IsJarEligibleForJarMode(candidate.RelativePath, normalizedPreferredFileName, candidate.AbsolutePath))
+            {
+                continue;
+            }
+
             if (TryValidateJarArchive(candidate.AbsolutePath, requireMainClass, out var validationReason))
             {
                 diagnostic = string.Empty;
@@ -464,6 +470,58 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
             ? "No .jar candidates found."
             : string.Join(" | ", invalidDiagnostics);
         return string.Empty;
+    }
+
+    private static bool IsJarEligibleForJarMode(string relativePath, string preferredFileName, string absolutePath)
+    {
+        var normalizedRelativePath = NormalizePath(relativePath).TrimStart('/');
+        var fileName = Path.GetFileName(normalizedRelativePath);
+        var isPreferredNameMatch = !string.IsNullOrWhiteSpace(preferredFileName) &&
+                                   string.Equals(fileName, preferredFileName, StringComparison.OrdinalIgnoreCase);
+        if (isPreferredNameMatch)
+        {
+            return true;
+        }
+
+        if (IsInfrastructureJarPath(normalizedRelativePath))
+        {
+            return false;
+        }
+
+        if (LooksLikeGameJarName(fileName))
+        {
+            return true;
+        }
+
+        try
+        {
+            var fileInfo = new FileInfo(absolutePath);
+            return !normalizedRelativePath.Contains('/', StringComparison.Ordinal) &&
+                   fileInfo.Exists &&
+                   fileInfo.Length >= 5L * 1024L * 1024L;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool IsInfrastructureJarPath(string normalizedRelativePath)
+    {
+        return normalizedRelativePath.StartsWith("libraries/", StringComparison.OrdinalIgnoreCase) ||
+               normalizedRelativePath.Contains("/libraries/", StringComparison.OrdinalIgnoreCase) ||
+               normalizedRelativePath.StartsWith("lib/", StringComparison.OrdinalIgnoreCase) ||
+               normalizedRelativePath.Contains("/lib/", StringComparison.OrdinalIgnoreCase) ||
+               normalizedRelativePath.StartsWith("natives/", StringComparison.OrdinalIgnoreCase) ||
+               normalizedRelativePath.Contains("/natives/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool LooksLikeGameJarName(string fileName)
+    {
+        return fileName.Contains("minecraft", StringComparison.OrdinalIgnoreCase) ||
+               fileName.Contains("client", StringComparison.OrdinalIgnoreCase) ||
+               fileName.Contains("game", StringComparison.OrdinalIgnoreCase) ||
+               fileName.Contains("launcher", StringComparison.OrdinalIgnoreCase);
     }
 
     private static int ScoreJarCandidate(string relativePath, string preferredFileName, bool fromManifest)
