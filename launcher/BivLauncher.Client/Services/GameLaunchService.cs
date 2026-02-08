@@ -35,7 +35,15 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
         jvmArgs.Insert(0, "-Xms1024M");
 
         var gameArgs = SplitArgs(manifest.GameArgsDefault).ToList();
-        AppendRouteArgs(gameArgs, route.Address, route.Port);
+        var disableAutoRouteArgs = StripControlFlag(gameArgs, "--bl-no-route");
+        if (!disableAutoRouteArgs)
+        {
+            AppendRouteArgs(gameArgs, route.Address, route.Port);
+        }
+        else
+        {
+            logService.LogInfo("Auto route args are disabled by --bl-no-route manifest flag.");
+        }
 
         var startInfo = new ProcessStartInfo
         {
@@ -153,17 +161,43 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
             var preferredAbsolutePath = ResolveSafePath(instanceDirectory, normalizedPreferred);
             if (File.Exists(preferredAbsolutePath))
             {
-                return preferredAbsolutePath;
+                if (IsLikelyJarArchive(preferredAbsolutePath))
+                {
+                    return preferredAbsolutePath;
+                }
+
+                logService.LogInfo(
+                    $"Selected route jar '{normalizedPreferred}' exists but is not a valid JAR archive. Trying fallback jar.");
+
+                var fallbackByPreferred = ResolveBestJarCandidate(
+                    manifest,
+                    instanceDirectory,
+                    preferredFileName: Path.GetFileName(normalizedPreferred),
+                    excludedAbsolutePath: preferredAbsolutePath);
+                if (!string.IsNullOrWhiteSpace(fallbackByPreferred))
+                {
+                    var resolvedRelative = NormalizePath(Path.GetRelativePath(instanceDirectory, fallbackByPreferred));
+                    logService.LogInfo($"Fallback jar selected: {resolvedRelative}");
+                    return fallbackByPreferred;
+                }
+
+                throw new InvalidDataException(
+                    $"Selected route jar '{normalizedPreferred}' is not a valid JAR archive. " +
+                    "Upload a real .jar file or fix MainJarPath/RuJarPath.");
             }
 
             var preferredFileName = Path.GetFileName(normalizedPreferred);
-            var fallbackByPreferred = ResolveBestJarCandidate(manifest, instanceDirectory, preferredFileName);
-            if (!string.IsNullOrWhiteSpace(fallbackByPreferred))
+            var fallbackByMissingPreferred = ResolveBestJarCandidate(
+                manifest,
+                instanceDirectory,
+                preferredFileName,
+                excludedAbsolutePath: string.Empty);
+            if (!string.IsNullOrWhiteSpace(fallbackByMissingPreferred))
             {
-                var resolvedRelative = NormalizePath(Path.GetRelativePath(instanceDirectory, fallbackByPreferred));
+                var resolvedRelative = NormalizePath(Path.GetRelativePath(instanceDirectory, fallbackByMissingPreferred));
                 logService.LogInfo(
                     $"Selected route jar '{normalizedPreferred}' was not found. Fallback jar: {resolvedRelative}");
-                return fallbackByPreferred;
+                return fallbackByMissingPreferred;
             }
 
             throw new FileNotFoundException(
@@ -171,7 +205,11 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
                 preferredAbsolutePath);
         }
 
-        var autoResolved = ResolveBestJarCandidate(manifest, instanceDirectory, preferredFileName: string.Empty);
+        var autoResolved = ResolveBestJarCandidate(
+            manifest,
+            instanceDirectory,
+            preferredFileName: string.Empty,
+            excludedAbsolutePath: string.Empty);
         if (!string.IsNullOrWhiteSpace(autoResolved))
         {
             return autoResolved;
@@ -314,25 +352,33 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
         }
 
         var path = ResolveSafePath(instanceDirectory, normalized);
-        if (File.Exists(path))
+        if (File.Exists(path) && IsLikelyJarArchive(path))
         {
             return path;
         }
 
         var preferredFileName = Path.GetFileName(normalized);
-        return ResolveBestJarCandidate(manifest, instanceDirectory, preferredFileName);
+        return ResolveBestJarCandidate(
+            manifest,
+            instanceDirectory,
+            preferredFileName,
+            excludedAbsolutePath: path);
     }
 
     private static string ResolveBestJarCandidate(
         LauncherManifest manifest,
         string instanceDirectory,
-        string preferredFileName)
+        string preferredFileName,
+        string excludedAbsolutePath)
     {
         var normalizedPreferredFileName = string.IsNullOrWhiteSpace(preferredFileName)
             ? string.Empty
             : preferredFileName.Trim();
+        var normalizedExcludedAbsolutePath = string.IsNullOrWhiteSpace(excludedAbsolutePath)
+            ? string.Empty
+            : Path.GetFullPath(excludedAbsolutePath);
 
-        var candidates = new List<(string RelativePath, string AbsolutePath, int Score)>();
+        var candidates = new List<(string RelativePath, string AbsolutePath, int Score, bool IsValidJar)>();
         var seenAbsolutePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var manifestPath in manifest.Files.Select(x => x.Path))
@@ -353,8 +399,19 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
                 continue;
             }
 
+            if (!string.IsNullOrWhiteSpace(normalizedExcludedAbsolutePath) &&
+                string.Equals(Path.GetFullPath(absolutePath), normalizedExcludedAbsolutePath, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
             var normalizedRelativePath = NormalizePath(manifestPath);
-            candidates.Add((normalizedRelativePath, absolutePath, ScoreJarCandidate(normalizedRelativePath, normalizedPreferredFileName, fromManifest: true)));
+            var isValidJar = IsLikelyJarArchive(absolutePath);
+            candidates.Add((
+                normalizedRelativePath,
+                absolutePath,
+                ScoreJarCandidate(normalizedRelativePath, normalizedPreferredFileName, fromManifest: true, isValidJar),
+                isValidJar));
         }
 
         if (Directory.Exists(instanceDirectory))
@@ -366,8 +423,19 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
                     continue;
                 }
 
+                if (!string.IsNullOrWhiteSpace(normalizedExcludedAbsolutePath) &&
+                    string.Equals(Path.GetFullPath(absolutePath), normalizedExcludedAbsolutePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
                 var normalizedRelativePath = NormalizePath(Path.GetRelativePath(instanceDirectory, absolutePath));
-                candidates.Add((normalizedRelativePath, absolutePath, ScoreJarCandidate(normalizedRelativePath, normalizedPreferredFileName, fromManifest: false)));
+                var isValidJar = IsLikelyJarArchive(absolutePath);
+                candidates.Add((
+                    normalizedRelativePath,
+                    absolutePath,
+                    ScoreJarCandidate(normalizedRelativePath, normalizedPreferredFileName, fromManifest: false, isValidJar),
+                    isValidJar));
             }
         }
 
@@ -375,15 +443,21 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
             .OrderByDescending(x => x.Score)
             .ThenBy(x => x.RelativePath.Length)
             .ThenBy(x => x.RelativePath, StringComparer.OrdinalIgnoreCase)
+            .Where(x => x.IsValidJar)
             .Select(x => x.AbsolutePath)
             .FirstOrDefault() ?? string.Empty;
     }
 
-    private static int ScoreJarCandidate(string relativePath, string preferredFileName, bool fromManifest)
+    private static int ScoreJarCandidate(string relativePath, string preferredFileName, bool fromManifest, bool isValidJar)
     {
         var normalizedRelativePath = NormalizePath(relativePath).TrimStart('/');
         var fileName = Path.GetFileName(normalizedRelativePath);
         var score = fromManifest ? 250 : 0;
+
+        if (!isValidJar)
+        {
+            score -= 5000;
+        }
 
         if (!string.IsNullOrWhiteSpace(preferredFileName) &&
             string.Equals(fileName, preferredFileName, StringComparison.OrdinalIgnoreCase))
@@ -424,6 +498,35 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
         }
 
         return score;
+    }
+
+    private static bool IsLikelyJarArchive(string filePath)
+    {
+        try
+        {
+            var fileInfo = new FileInfo(filePath);
+            if (!fileInfo.Exists || fileInfo.Length < 4)
+            {
+                return false;
+            }
+
+            using var stream = File.OpenRead(filePath);
+            Span<byte> header = stackalloc byte[4];
+            var read = stream.Read(header);
+            if (read < 4)
+            {
+                return false;
+            }
+
+            return header[0] == 0x50 &&
+                   header[1] == 0x4B &&
+                   (header[2] == 0x03 || header[2] == 0x05 || header[2] == 0x07) &&
+                   (header[3] == 0x04 || header[3] == 0x06 || header[3] == 0x08);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static string NormalizeRelativeJarPath(string rawPath)
@@ -483,6 +586,20 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
         }
 
         return result;
+    }
+
+    private static bool StripControlFlag(List<string> args, string flag)
+    {
+        var removedAny = false;
+        var index = args.FindIndex(x => x.Equals(flag, StringComparison.OrdinalIgnoreCase));
+        while (index >= 0)
+        {
+            args.RemoveAt(index);
+            removedAny = true;
+            index = args.FindIndex(x => x.Equals(flag, StringComparison.OrdinalIgnoreCase));
+        }
+
+        return removedAny;
     }
 
     private static string BuildArgsPreview(IEnumerable<string> args)
