@@ -1083,10 +1083,6 @@ function translateUiText(input: string): string {
 const translatableDomAttributes = ['placeholder', 'title', 'aria-label'] as const
 type TranslatableDomAttribute = typeof translatableDomAttributes[number]
 
-function isTranslatableDomAttribute(value: string | null): value is TranslatableDomAttribute {
-  return value === 'placeholder' || value === 'title' || value === 'aria-label'
-}
-
 function translateTextNode(node: Node): void {
   const value = node.nodeValue ?? ''
   if (!/[A-Za-z]/.test(value)) {
@@ -1137,17 +1133,6 @@ function translateDomTree(root: ParentNode): void {
   const elements = root.querySelectorAll<HTMLElement>('[placeholder],[title],[aria-label]')
   for (const element of elements) {
     translateElementAttributes(element)
-  }
-}
-
-function translateMutationNode(node: Node): void {
-  if (node.nodeType === Node.TEXT_NODE) {
-    translateTextNode(node)
-    return
-  }
-
-  if (node instanceof Element) {
-    translateDomTree(node)
   }
 }
 
@@ -1626,85 +1611,14 @@ function App() {
   }, [wizardPreflightHistory])
 
   useEffect(() => {
-    translateDomTree(document.body)
-
-    const pendingNodes = new Set<Node>()
-    const pendingAttributes = new Map<Element, Set<TranslatableDomAttribute>>()
-    let rafId: number | null = null
-
-    const flushTranslations = () => {
-      rafId = null
-
-      for (const node of pendingNodes) {
-        translateMutationNode(node)
-      }
-      pendingNodes.clear()
-
-      for (const [element, attributes] of pendingAttributes) {
-        for (const attribute of attributes) {
-          translateElementAttribute(element, attribute)
-        }
-      }
-      pendingAttributes.clear()
-    }
-
-    const scheduleFlush = () => {
-      if (rafId !== null) {
-        return
-      }
-
-      rafId = window.requestAnimationFrame(flushTranslations)
-    }
-
-    const queueNode = (node: Node) => {
-      pendingNodes.add(node)
-      scheduleFlush()
-    }
-
-    const queueAttribute = (element: Element, attribute: TranslatableDomAttribute) => {
-      const queue = pendingAttributes.get(element) ?? new Set<TranslatableDomAttribute>()
-      queue.add(attribute)
-      pendingAttributes.set(element, queue)
-      scheduleFlush()
-    }
-
-    const observer = new MutationObserver((mutations) => {
-      for (const mutation of mutations) {
-        if (mutation.type === 'childList') {
-          for (const node of mutation.addedNodes) {
-            queueNode(node)
-          }
-          continue
-        }
-
-        if (mutation.type === 'characterData') {
-          queueNode(mutation.target)
-          continue
-        }
-
-        if (mutation.type === 'attributes' && mutation.target instanceof Element && isTranslatableDomAttribute(mutation.attributeName)) {
-          queueAttribute(mutation.target, mutation.attributeName)
-        }
-      }
-    })
-
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true,
-      characterData: true,
-      attributes: true,
-      attributeFilter: ['placeholder', 'title', 'aria-label'],
-    })
+    const timerId = window.setTimeout(() => {
+      translateDomTree(document.body)
+    }, 0)
 
     return () => {
-      observer.disconnect()
-      pendingNodes.clear()
-      pendingAttributes.clear()
-      if (rafId !== null) {
-        window.cancelAnimationFrame(rafId)
-      }
+      window.clearTimeout(timerId)
     }
-  }, [])
+  }, [phase, activePage])
 
   async function determineStartPhase() {
     setError('')
