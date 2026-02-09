@@ -5162,6 +5162,7 @@ function App() {
                 <div className="action-block">
                   <h4>Сборка лаунчера</h4>
                   <small>Собирает `launcher/BivLauncher.Client` и сразу скачивает ZIP-артефакт.</small>
+                  <small>Project folder on player PC: {brandingSettings.launcherDirectoryName || 'BivLauncher'} (change in Settings -&gt; Branding).</small>
                   <div className="grid-inline">
                     <div>
                       <small>Runtime targets (one or many):</small>
