@@ -7,7 +7,7 @@ type DashboardPage = 'overview' | 'wizard' | 'servers' | 'build' | 'news' | 'int
 
 type SetupStatusResponse = { needsSetup: boolean }
 type LoginResponse = { token: string; tokenType: string; username: string }
-type ApiError = { error?: string; title?: string; retryAfterSeconds?: number }
+type ApiError = { error?: string; title?: string; detail?: string; retryAfterSeconds?: number }
 
 class ApiRequestError extends Error {
   status: number
@@ -751,9 +751,9 @@ const defaultInstallTelemetrySettings: InstallTelemetrySettings = {
 }
 
 const defaultS3Settings: S3Settings = {
-  useS3: true,
+  useS3: false,
   localRootPath: '/app/storage',
-  endpoint: 'http://localhost:9000',
+  endpoint: 'http://minio:9000',
   bucket: 'launcher-files',
   accessKey: 'minioadmin',
   secretKey: 'minioadmin',
@@ -3829,7 +3829,7 @@ function App() {
         if (text) {
           try {
             const parsed = JSON.parse(text) as ApiError
-            parsedError = parsed.error ?? parsed.title ?? ''
+            parsedError = parsed.error ?? parsed.detail ?? parsed.title ?? ''
           } catch {
             parsedError = text
           }
@@ -6875,7 +6875,7 @@ function App() {
                   disabled={s3Settings.useS3}
                 />
                 <input
-                  placeholder="Endpoint (http://localhost:9000)"
+                  placeholder="Endpoint (http://minio:9000)"
                   value={s3Settings.endpoint}
                   onChange={(event) => setS3Settings((prev) => ({ ...prev, endpoint: event.target.value }))}
                   disabled={!s3Settings.useS3}

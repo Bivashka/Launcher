@@ -60,7 +60,7 @@ public sealed class AdminLauncherController(
             {
                 exists = false,
                 key = ServerLauncherJarStorageKey,
-                publicUrl = assetUrlService.BuildPublicUrl(ServerLauncherJarStorageKey),
+                publicUrl = string.Empty,
                 sizeBytes = 0L,
                 contentType = string.Empty,
                 sha256 = string.Empty

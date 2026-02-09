@@ -1162,6 +1162,16 @@ write_env_value "ADMIN_ALLOWED_ORIGINS" "$ADMIN_PUBLIC_URL"
 write_env_value "INSTALL_PUBLIC_HOST" "$PUBLIC_HOST"
 write_env_value "INSTALL_USE_SSL" "$SSL_NORMALIZED"
 
+if [ "$MINIO_NORMALIZED" = "true" ]; then
+  write_env_value "S3_USE_S3" "true"
+  CURRENT_S3_ENDPOINT="$(read_env_value "S3_ENDPOINT" "")"
+  if [ -z "$CURRENT_S3_ENDPOINT" ] || [ "$CURRENT_S3_ENDPOINT" = "http://localhost:9000" ] || [ "$CURRENT_S3_ENDPOINT" = "http://127.0.0.1:9000" ]; then
+    write_env_value "S3_ENDPOINT" "http://minio:9000"
+  fi
+else
+  write_env_value "S3_USE_S3" "false"
+fi
+
 POSTGRES_DB_VALUE="$(read_env_value "POSTGRES_DB" "bivlauncher")"
 POSTGRES_USER_VALUE="$(read_env_value "POSTGRES_USER" "postgres")"
 POSTGRES_PASSWORD_VALUE="$(read_env_value "POSTGRES_PASSWORD" "postgres")"

@@ -341,7 +341,8 @@ Content-Type: application/json
 Authorization: Bearer <admin_jwt>
 
 {
-  "endpoint": "http://localhost:9000",
+  "useS3": true,
+  "endpoint": "http://minio:9000",
   "bucket": "launcher-files",
   "accessKey": "minioadmin",
   "secretKey": "minioadmin",
