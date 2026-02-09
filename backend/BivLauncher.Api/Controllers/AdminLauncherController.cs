@@ -48,6 +48,35 @@ public sealed class AdminLauncherController(
 
     private static readonly Regex VersionPattern = new("^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$", RegexOptions.Compiled);
     private const int MaxLogLength = 4000;
+    private const string ServerLauncherJarStorageKey = "uploads/assets/launcher.jar";
+
+    [HttpGet("server-jar")]
+    public async Task<IActionResult> GetServerLauncherJarStatus(CancellationToken cancellationToken = default)
+    {
+        var metadata = await objectStorageService.GetMetadataAsync(ServerLauncherJarStorageKey, cancellationToken);
+        if (metadata is null)
+        {
+            return Ok(new
+            {
+                exists = false,
+                key = ServerLauncherJarStorageKey,
+                publicUrl = assetUrlService.BuildPublicUrl(ServerLauncherJarStorageKey),
+                sizeBytes = 0L,
+                contentType = string.Empty,
+                sha256 = string.Empty
+            });
+        }
+
+        return Ok(new
+        {
+            exists = true,
+            key = ServerLauncherJarStorageKey,
+            publicUrl = assetUrlService.BuildPublicUrl(ServerLauncherJarStorageKey),
+            sizeBytes = metadata.SizeBytes,
+            contentType = metadata.ContentType,
+            sha256 = metadata.Sha256
+        });
+    }
 
     [HttpPost("build")]
     public async Task<IActionResult> BuildAndDownload(

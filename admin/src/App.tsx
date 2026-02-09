@@ -31,6 +31,14 @@ type UploadResponse = {
   runtimeSizeBytes?: number
   runtimeContentType?: string
 }
+type ServerLauncherJarStatus = {
+  exists: boolean
+  key: string
+  publicUrl: string
+  sizeBytes: number
+  contentType: string
+  sha256: string
+}
 type RuntimeVerifyResponse = {
   key: string
   resolvedFromProfile: boolean
@@ -755,6 +763,15 @@ const defaultS3Settings: S3Settings = {
   updatedAtUtc: null,
 }
 
+const defaultServerLauncherJarStatus: ServerLauncherJarStatus = {
+  exists: false,
+  key: 'uploads/assets/launcher.jar',
+  publicUrl: '',
+  sizeBytes: 0,
+  contentType: '',
+  sha256: '',
+}
+
 const supportedLoaders = ['vanilla', 'forge', 'fabric', 'quilt', 'neoforge', 'liteloader'] as const
 const launcherRuntimeOptions = ['win-x64', 'win-arm64', 'linux-x64', 'osx-x64', 'osx-arm64'] as const
 const jvmArgPresets: Array<{ id: string; label: string; value: string }> = [
@@ -1386,6 +1403,8 @@ function App() {
   const [serverIconFile, setServerIconFile] = useState<File | null>(null)
   const [runtimeProfileSlug, setRuntimeProfileSlug] = useState('')
   const [runtimeFile, setRuntimeFile] = useState<File | null>(null)
+  const [serverLauncherJarFile, setServerLauncherJarFile] = useState<File | null>(null)
+  const [serverLauncherJarStatus, setServerLauncherJarStatus] = useState<ServerLauncherJarStatus>(defaultServerLauncherJarStatus)
   const [runtimeVerifyKey, setRuntimeVerifyKey] = useState('')
   const [runtimeVerifyResult, setRuntimeVerifyResult] = useState<RuntimeVerifyResponse | null>(null)
   const [runtimeCleanupKeepLast, setRuntimeCleanupKeepLast] = useState(3)
@@ -1924,6 +1943,22 @@ function App() {
     setTwoFactorAccounts(loaded)
   }
 
+  async function fetchServerLauncherJarStatus(activeToken: string) {
+    const response = await fetch(`${apiBaseUrl}/api/admin/launcher/server-jar`, {
+      headers: { Authorization: `Bearer ${activeToken}` },
+    })
+
+    if (!response.ok) {
+      throw new Error('Unable to load launcher.jar status.')
+    }
+
+    const loaded = (await response.json()) as ServerLauncherJarStatus
+    setServerLauncherJarStatus({
+      ...defaultServerLauncherJarStatus,
+      ...loaded,
+    })
+  }
+
   async function loadAdminData(activeToken: string) {
     setError('')
     try {
@@ -1957,7 +1992,7 @@ function App() {
         }
       }
 
-      const [profileData, serverData, newsData, newsSourcesData, newsSyncData, newsRetentionData, runtimeRetentionData, bansData, crashData, docsData, authProviderData, discordRpcSettingsData, twoFactorData, twoFactorAccountsData, brandingData, developerSupportData, installTelemetrySettingsData, projectInstallStatsData, s3Data] = await Promise.all([
+      const [profileData, serverData, newsData, newsSourcesData, newsSyncData, newsRetentionData, runtimeRetentionData, bansData, crashData, docsData, authProviderData, discordRpcSettingsData, twoFactorData, twoFactorAccountsData, brandingData, developerSupportData, installTelemetrySettingsData, projectInstallStatsData, s3Data, serverLauncherJarData] = await Promise.all([
         fetch(`${apiBaseUrl}/api/admin/profiles`, {
           headers: { Authorization: `Bearer ${activeToken}` },
         }),
@@ -2015,6 +2050,9 @@ function App() {
         fetch(`${apiBaseUrl}/api/admin/settings/s3`, {
           headers: { Authorization: `Bearer ${activeToken}` },
         }),
+        fetch(`${apiBaseUrl}/api/admin/launcher/server-jar`, {
+          headers: { Authorization: `Bearer ${activeToken}` },
+        }),
       ])
 
       if (profileData.status === 401 || serverData.status === 401) {
@@ -2044,6 +2082,7 @@ function App() {
         { name: 'install-telemetry/settings', response: installTelemetrySettingsData },
         { name: 'install-telemetry/projects', response: projectInstallStatsData },
         { name: 'settings/s3', response: s3Data },
+        { name: 'launcher/server-jar', response: serverLauncherJarData },
       ]
       const failedEndpoints = endpointStatuses.filter((item) => !item.response.ok)
       if (failedEndpoints.length > 0) {
@@ -2075,6 +2114,7 @@ function App() {
       const loadedInstallTelemetrySettings = await readJsonOrDefault<InstallTelemetrySettings>(installTelemetrySettingsData, defaultInstallTelemetrySettings)
       const loadedProjectInstallStats = await readJsonOrDefault<ProjectInstallStat[]>(projectInstallStatsData, [])
       const loadedS3Settings = await readJsonOrDefault<S3Settings>(s3Data, defaultS3Settings)
+      const loadedServerLauncherJar = await readJsonOrDefault<ServerLauncherJarStatus>(serverLauncherJarData, defaultServerLauncherJarStatus)
 
       if (loadedProfiles.length === 0 && loadedServers.length === 0) {
         throw new Error('Unable to load core admin data (profiles/servers). Check API logs.')
@@ -2109,6 +2149,10 @@ function App() {
       setInstallTelemetrySettings(loadedInstallTelemetrySettings)
       setProjectInstallStats(loadedProjectInstallStats)
       setS3Settings(loadedS3Settings)
+      setServerLauncherJarStatus({
+        ...defaultServerLauncherJarStatus,
+        ...loadedServerLauncherJar,
+      })
       setStorageTestResult(null)
       setStorageMigrationResult(null)
 
@@ -3729,6 +3773,90 @@ function App() {
     return parsed.toISOString()
   }
 
+  async function onRefreshServerLauncherJarStatus() {
+    if (!token) {
+      setError('Missing admin token')
+      return
+    }
+
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      await fetchServerLauncherJarStatus(token)
+      setNotice('launcher.jar status refreshed.')
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : 'Unable to refresh launcher.jar status.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function onUploadServerLauncherJar() {
+    if (!token) {
+      setError('Missing admin token')
+      return
+    }
+
+    if (!serverLauncherJarFile) {
+      setError('Select launcher.jar first.')
+      return
+    }
+
+    if (!serverLauncherJarFile.name.toLowerCase().endsWith('.jar')) {
+      setError('Only .jar file is allowed for server launcher agent.')
+      return
+    }
+
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      const formData = new FormData()
+      formData.append('file', serverLauncherJarFile)
+
+      const response = await fetch(`${apiBaseUrl}/api/admin/upload?category=assets&entityId=launcher`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: formData,
+      })
+
+      if (!response.ok) {
+        const text = await response.text()
+        let parsedError = ''
+        if (text) {
+          try {
+            const parsed = JSON.parse(text) as ApiError
+            parsedError = parsed.error ?? parsed.title ?? ''
+          } catch {
+            parsedError = text
+          }
+        }
+
+        throw new Error(parsedError || 'launcher.jar upload failed.')
+      }
+
+      const uploaded = (await response.json()) as UploadResponse
+      setServerLauncherJarFile(null)
+      setServerLauncherJarStatus({
+        exists: true,
+        key: uploaded.key || defaultServerLauncherJarStatus.key,
+        publicUrl: uploaded.publicUrl || '',
+        sizeBytes: uploaded.size || 0,
+        contentType: uploaded.contentType || '',
+        sha256: '',
+      })
+      await fetchServerLauncherJarStatus(token)
+      setNotice('launcher.jar uploaded. Use URL below on your game server.')
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : 'launcher.jar upload failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function onBuildLauncherAndDownload() {
     if (!token) {
       setError('Missing admin token')
@@ -4584,6 +4712,8 @@ function App() {
     setStorageMigrationResult(null)
     setProfileIconFile(null)
     setServerIconFile(null)
+    setServerLauncherJarFile(null)
+    setServerLauncherJarStatus(defaultServerLauncherJarStatus)
     setCosmeticsUser('')
     setSkinFile(null)
     setCapeFile(null)
@@ -5227,6 +5357,48 @@ function App() {
                       Собрать и скачать лаунчер
                     </button>
                   </div>
+                </div>
+                )}
+                {activePage === 'build' && (
+                <div className="action-block">
+                  <h4>Server launcher.jar</h4>
+                  <small>
+                    Upload your Java `launcher.jar` (Sashok-style server agent) for online-mode servers.
+                    This project does not build that JAR automatically.
+                  </small>
+                  <div className="upload-row">
+                    <input
+                      type="file"
+                      accept=".jar,application/java-archive"
+                      onChange={(event) => setServerLauncherJarFile(event.target.files?.[0] ?? null)}
+                    />
+                    <button type="button" onClick={onUploadServerLauncherJar} disabled={busy || !token || !serverLauncherJarFile}>
+                      Upload launcher.jar
+                    </button>
+                  </div>
+                  <div className="button-row">
+                    <button type="button" onClick={onRefreshServerLauncherJarStatus} disabled={busy || !token}>
+                      Refresh launcher.jar status
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onCopyToClipboard(`curl -fsSL "${serverLauncherJarStatus.publicUrl}" -o launcher.jar`, 'launcher.jar curl command')}
+                      disabled={busy || !serverLauncherJarStatus.exists || !serverLauncherJarStatus.publicUrl}
+                    >
+                      Copy curl command
+                    </button>
+                  </div>
+                  <small>
+                    Status: {serverLauncherJarStatus.exists ? 'uploaded' : 'not uploaded'}
+                    {serverLauncherJarStatus.sizeBytes > 0 ? ` | ${formatBytes(serverLauncherJarStatus.sizeBytes)}` : ''}
+                    {serverLauncherJarStatus.contentType ? ` | ${serverLauncherJarStatus.contentType}` : ''}
+                    {serverLauncherJarStatus.sha256 ? ` | sha256 ${serverLauncherJarStatus.sha256.slice(0, 12)}...` : ''}
+                  </small>
+                  <input
+                    readOnly
+                    value={serverLauncherJarStatus.publicUrl || ''}
+                    placeholder="Public URL for launcher.jar"
+                  />
                 </div>
                 )}
                 <div className="action-block">

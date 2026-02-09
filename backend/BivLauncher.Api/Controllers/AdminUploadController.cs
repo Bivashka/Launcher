@@ -371,6 +371,11 @@ public sealed class AdminUploadController(
             return $"runtimes/{runtimeOwner}/{DateTime.UtcNow:yyyyMMddHHmmss}_{Guid.NewGuid():N}{extension}";
         }
 
+        if (category == "assets" && !string.IsNullOrWhiteSpace(normalizedEntity))
+        {
+            return $"uploads/{category}/{normalizedEntity}{extension}";
+        }
+
         return $"uploads/{category}/{DateTime.UtcNow:yyyyMMddHHmmss}_{Guid.NewGuid():N}{extension}";
     }
 

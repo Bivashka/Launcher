@@ -78,6 +78,8 @@ Note: API now reads Postgres connection from `DB_CONN` (in `.env`) as the primar
 - `POST /api/admin/runtimes/cleanup`
 - `POST /api/admin/profiles/{id}/rebuild`
 - `GET /api/admin/profiles/{id}/builds`
+- `POST /api/admin/launcher/build`
+- `GET /api/admin/launcher/server-jar`
 - `GET /api/public/manifest/{profileSlug}`
 - `POST /api/public/auth/login`
 - `GET /api/public/skins/{user}`
