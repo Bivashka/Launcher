@@ -4716,7 +4716,8 @@ function App() {
                 </div>
               </div>
 
-            <section className={`overview-hero ${activePage === 'overview' ? '' : 'is-hidden'}`}>
+            {activePage === 'overview' && (
+            <section className="overview-hero">
               <h3>Центр управления</h3>
               <p>
                 Используйте левую навигацию для управления каждым блоком отдельно:
@@ -4734,8 +4735,10 @@ function App() {
                 </button>
               </div>
             </section>
+            )}
 
-            <section className={`wizard-board ${activePage === 'wizard' ? '' : 'is-hidden'}`}>
+            {activePage === 'wizard' && (
+            <section className="wizard-board">
               <div className="wizard-head">
                 <div>
                   <h3>Мастер запуска</h3>
@@ -4904,8 +4907,10 @@ function App() {
                 ))}
               </ul>
             </section>
+            )}
 
-            <div className={`grid-2 ${activePage === 'servers' ? '' : 'is-hidden'}`}>
+            {activePage === 'servers' && (
+            <div className="grid-2">
               <form className="form form-small" onSubmit={onProfileSubmit}>
                 <p className="step-badge">Шаг 1</p>
                 <h3>{editingProfileId ? 'Редактировать профиль' : 'Создать профиль'}</h3>
@@ -5120,8 +5125,10 @@ function App() {
                 </button>
               </form>
             </div>
+            )}
 
-            <div className={`grid-2 split-build-servers ${(activePage === 'build' || activePage === 'servers') ? '' : 'is-hidden'} ${activePage === 'build' ? 'show-build' : 'show-servers'}`}>
+            {(activePage === 'build' || activePage === 'servers') && (
+            <div className={`grid-2 split-build-servers ${activePage === 'build' ? 'show-build' : 'show-servers'}`}>
               <section className="form form-small form-actions">
                 <h3>Скины / Плащи</h3>
                 <div className="action-block">
@@ -5440,8 +5447,10 @@ function App() {
                 </ul>
               </section>
             </div>
+            )}
 
-            <div className={`grid-2 split-integrations-profiles ${(activePage === 'integrations' || activePage === 'servers') ? '' : 'is-hidden'} ${activePage === 'integrations' ? 'show-integrations' : 'show-servers'}`}>
+            {(activePage === 'integrations' || activePage === 'servers') && (
+            <div className={`grid-2 split-integrations-profiles ${activePage === 'integrations' ? 'show-integrations' : 'show-servers'}`}>
               <section className="form form-small form-actions">
                 <h3>Discord RPC</h3>
                 <div className="action-block">
@@ -5706,8 +5715,10 @@ function App() {
                 </ul>
               </section>
             </div>
+            )}
 
-            <div className={`grid-2 ${activePage === 'news' ? '' : 'is-hidden'}`}>
+            {activePage === 'news' && (
+            <div className="grid-2">
               <form className="form form-small" onSubmit={onNewsSubmit}>
                 <h3>{editingNewsId ? 'Edit news' : 'Create news'}</h3>
                 <input
@@ -5774,8 +5785,10 @@ function App() {
                 </ul>
               </section>
             </div>
+            )}
 
-            <div className={`grid-2 ${activePage === 'news' ? '' : 'is-hidden'}`}>
+            {activePage === 'news' && (
+            <div className="grid-2">
               <section className="form form-small">
                 <h3>News Sources</h3>
                 <input
@@ -5890,8 +5903,10 @@ function App() {
                 </ul>
               </section>
             </div>
+            )}
 
-            <div className={`grid-2 ${activePage === 'news' ? '' : 'is-hidden'}`}>
+            {activePage === 'news' && (
+            <div className="grid-2">
               <section className="form form-small">
                 <h3>News Auto-sync</h3>
                 <label className="checkbox">
@@ -5964,8 +5979,10 @@ function App() {
                 </ul>
               </section>
             </div>
+            )}
 
-            <div className={`grid-2 ${activePage === 'news' ? '' : 'is-hidden'}`}>
+            {activePage === 'news' && (
+            <div className="grid-2">
               <section className="form form-small">
                 <h3>News Retention</h3>
                 <label className="checkbox">
@@ -6066,8 +6083,10 @@ function App() {
                 </ul>
               </section>
             </div>
+            )}
 
-            <div className={`grid-2 ${activePage === 'security' ? '' : 'is-hidden'}`}>
+            {activePage === 'security' && (
+            <div className="grid-2">
               <section className="form form-small form-actions">
                 <h3>Bans</h3>
                 <div className="action-block">
@@ -6147,8 +6166,10 @@ function App() {
                 </ul>
               </section>
             </div>
+            )}
 
-            <div className={`grid-2 ${activePage === 'security' ? '' : 'is-hidden'}`}>
+            {activePage === 'security' && (
+            <div className="grid-2">
               <section className="form form-small form-actions">
                 <h3>Two-factor authentication (2FA)</h3>
                 <div className="action-block">
@@ -6253,8 +6274,10 @@ function App() {
                 </ul>
               </section>
             </div>
+            )}
 
-            <div className={`grid-2 ${activePage === 'crashes' ? '' : 'is-hidden'}`}>
+            {activePage === 'crashes' && (
+            <div className="grid-2">
               <section className="form form-small">
                 <h3>Crash Reports</h3>
                 <select
@@ -6382,8 +6405,10 @@ function App() {
                 </ul>
               </section>
             </div>
+            )}
 
-            <div className={`grid-2 ${activePage === 'docs' ? '' : 'is-hidden'}`}>
+            {activePage === 'docs' && (
+            <div className="grid-2">
               <section className="form form-small">
                 <h3>{editingDocId ? 'Edit article' : 'Create article'}</h3>
                 <form className="form" onSubmit={onDocSubmit}>
@@ -6508,8 +6533,10 @@ function App() {
                 </ul>
               </section>
             </div>
+            )}
 
-            <div className={`grid-2 ${activePage === 'integrations' ? '' : 'is-hidden'}`}>
+            {activePage === 'integrations' && (
+            <div className="grid-2">
               <section className="form form-small">
                 <h3>Auth Provider</h3>
                 <select
@@ -6650,8 +6677,10 @@ function App() {
                 </ul>
               </section>
             </div>
+            )}
 
-            <div className={`grid-2 ${activePage === 'integrations' ? '' : 'is-hidden'}`}>
+            {activePage === 'integrations' && (
+            <div className="grid-2">
               <section className="form form-small form-actions">
                 <h3>Storage Backend</h3>
                 <div className="action-block">
@@ -6865,8 +6894,10 @@ function App() {
                 </ul>
               </section>
             </div>
+            )}
 
-            <div className={`grid-2 ${activePage === 'settings' ? '' : 'is-hidden'}`}>
+            {activePage === 'settings' && (
+            <div className="grid-2">
               <section className="form form-small">
                 <h3>Branding</h3>
                 <input
@@ -7294,8 +7325,10 @@ function App() {
                 </ul>
               </section>
             </div>
+            )}
 
-            <div className={`grid-2 ${activePage === 'audit' ? '' : 'is-hidden'}`}>
+            {activePage === 'audit' && (
+            <div className="grid-2">
               <section className="form form-small form-actions">
                 <h3>Журнал аудита администратора</h3>
                 <small>
@@ -7512,6 +7545,7 @@ function App() {
                 </ul>
               </section>
             </div>
+            )}
             </div>
           </section>
         )}
