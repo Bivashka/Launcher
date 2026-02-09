@@ -157,5 +157,5 @@ public sealed class ManagedServerItem
     public required string RuJarPath { get; init; }
 
     public string DisplayName => $"{ProfileName} / {ServerName}";
-    public string AddressDisplay => $"{Address}:{Port}";
+    public string RuntimeDisplay => $"{LoaderType} {McVersion}".Trim();
 }

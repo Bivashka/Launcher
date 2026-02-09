@@ -145,7 +145,7 @@
               <TextBlock Grid.Row="2"
                          Classes="subtle"
                          Foreground="{Binding SecondaryTextBrush}"
-                         Text="{Binding SelectedServer.AddressDisplay, TargetNullValue='-'}" />
+                         Text="{Binding SelectedServer.RuntimeDisplay, TargetNullValue='-'}" />
               <Grid Grid.Row="3"
                     ColumnDefinitions="Auto,*"
                     ColumnSpacing="10">
@@ -242,16 +242,13 @@
                                 VerticalAlignment="Top">
                           <Image Source="{Binding Icon}" Stretch="UniformToFill" />
                         </Border>
-                        <Grid Grid.Column="1" RowDefinitions="Auto,Auto,Auto">
+                        <Grid Grid.Column="1" RowDefinitions="Auto,Auto">
                           <TextBlock Text="{Binding DisplayName}"
                                      FontWeight="SemiBold"
                                      TextWrapping="Wrap" />
                           <TextBlock Grid.Row="1"
                                      Opacity="0.82"
-                                     Text="{Binding AddressDisplay}" />
-                          <TextBlock Grid.Row="2"
-                                     Opacity="0.82"
-                                     Text="{Binding LoaderType}" />
+                                     Text="{Binding RuntimeDisplay}" />
                         </Grid>
                       </Grid>
                     </DataTemplate>

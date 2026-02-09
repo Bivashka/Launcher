@@ -1080,19 +1080,49 @@ function translateUiText(input: string): string {
   return translated
 }
 
+const translatableDomAttributes = ['placeholder', 'title', 'aria-label'] as const
+type TranslatableDomAttribute = typeof translatableDomAttributes[number]
+
+function isTranslatableDomAttribute(value: string | null): value is TranslatableDomAttribute {
+  return value === 'placeholder' || value === 'title' || value === 'aria-label'
+}
+
+function translateTextNode(node: Node): void {
+  const value = node.nodeValue ?? ''
+  if (!/[A-Za-z]/.test(value)) {
+    return
+  }
+
+  const nextValue = translateUiText(value)
+  if (nextValue !== value) {
+    node.nodeValue = nextValue
+  }
+}
+
+function translateElementAttribute(element: Element, attributeName: TranslatableDomAttribute): void {
+  const value = element.getAttribute(attributeName)
+  if (!value || !/[A-Za-z]/.test(value)) {
+    return
+  }
+
+  const nextValue = translateUiText(value)
+  if (nextValue !== value) {
+    element.setAttribute(attributeName, nextValue)
+  }
+}
+
+function translateElementAttributes(element: Element): void {
+  for (const attributeName of translatableDomAttributes) {
+    translateElementAttribute(element, attributeName)
+  }
+}
+
 function translateDomTree(root: ParentNode): void {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
   let node: Node | null = walker.nextNode()
 
   while (node) {
-    const value = node.nodeValue ?? ''
-    if (/[A-Za-z]/.test(value)) {
-      const nextValue = translateUiText(value)
-      if (nextValue !== value) {
-        node.nodeValue = nextValue
-      }
-    }
-
+    translateTextNode(node)
     node = walker.nextNode()
   }
 
@@ -1100,31 +1130,24 @@ function translateDomTree(root: ParentNode): void {
     return
   }
 
+  if (root instanceof Element) {
+    translateElementAttributes(root)
+  }
+
   const elements = root.querySelectorAll<HTMLElement>('[placeholder],[title],[aria-label]')
   for (const element of elements) {
-    const placeholder = element.getAttribute('placeholder')
-    if (placeholder && /[A-Za-z]/.test(placeholder)) {
-      const nextPlaceholder = translateUiText(placeholder)
-      if (nextPlaceholder !== placeholder) {
-        element.setAttribute('placeholder', nextPlaceholder)
-      }
-    }
+    translateElementAttributes(element)
+  }
+}
 
-    const title = element.getAttribute('title')
-    if (title && /[A-Za-z]/.test(title)) {
-      const nextTitle = translateUiText(title)
-      if (nextTitle !== title) {
-        element.setAttribute('title', nextTitle)
-      }
-    }
+function translateMutationNode(node: Node): void {
+  if (node.nodeType === Node.TEXT_NODE) {
+    translateTextNode(node)
+    return
+  }
 
-    const ariaLabel = element.getAttribute('aria-label')
-    if (ariaLabel && /[A-Za-z]/.test(ariaLabel)) {
-      const nextAriaLabel = translateUiText(ariaLabel)
-      if (nextAriaLabel !== ariaLabel) {
-        element.setAttribute('aria-label', nextAriaLabel)
-      }
-    }
+  if (node instanceof Element) {
+    translateDomTree(node)
   }
 }
 
@@ -1603,14 +1626,66 @@ function App() {
   }, [wizardPreflightHistory])
 
   useEffect(() => {
-    const applyTranslation = () => {
-      translateDomTree(document.body)
+    translateDomTree(document.body)
+
+    const pendingNodes = new Set<Node>()
+    const pendingAttributes = new Map<Element, Set<TranslatableDomAttribute>>()
+    let rafId: number | null = null
+
+    const flushTranslations = () => {
+      rafId = null
+
+      for (const node of pendingNodes) {
+        translateMutationNode(node)
+      }
+      pendingNodes.clear()
+
+      for (const [element, attributes] of pendingAttributes) {
+        for (const attribute of attributes) {
+          translateElementAttribute(element, attribute)
+        }
+      }
+      pendingAttributes.clear()
     }
 
-    applyTranslation()
+    const scheduleFlush = () => {
+      if (rafId !== null) {
+        return
+      }
 
-    const observer = new MutationObserver(() => {
-      applyTranslation()
+      rafId = window.requestAnimationFrame(flushTranslations)
+    }
+
+    const queueNode = (node: Node) => {
+      pendingNodes.add(node)
+      scheduleFlush()
+    }
+
+    const queueAttribute = (element: Element, attribute: TranslatableDomAttribute) => {
+      const queue = pendingAttributes.get(element) ?? new Set<TranslatableDomAttribute>()
+      queue.add(attribute)
+      pendingAttributes.set(element, queue)
+      scheduleFlush()
+    }
+
+    const observer = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        if (mutation.type === 'childList') {
+          for (const node of mutation.addedNodes) {
+            queueNode(node)
+          }
+          continue
+        }
+
+        if (mutation.type === 'characterData') {
+          queueNode(mutation.target)
+          continue
+        }
+
+        if (mutation.type === 'attributes' && mutation.target instanceof Element && isTranslatableDomAttribute(mutation.attributeName)) {
+          queueAttribute(mutation.target, mutation.attributeName)
+        }
+      }
     })
 
     observer.observe(document.body, {
@@ -1623,6 +1698,11 @@ function App() {
 
     return () => {
       observer.disconnect()
+      pendingNodes.clear()
+      pendingAttributes.clear()
+      if (rafId !== null) {
+        window.cancelAnimationFrame(rafId)
+      }
     }
   }, [])
 
