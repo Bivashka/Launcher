@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using System.Diagnostics;
 using System.IO.Compression;
 using System.Text.RegularExpressions;
+using System.Text;
 
 namespace BivLauncher.Api.Controllers;
 
@@ -20,6 +21,16 @@ public sealed class AdminLauncherController(
     IAdminAuditService auditService,
     ILogger<AdminLauncherController> logger) : ControllerBase
 {
+    private sealed record RuntimeBuildResult(
+        string RuntimeIdentifier,
+        string ArchiveName,
+        string ArchivePath,
+        string PublishDirectory,
+        int ExitCode,
+        string Stdout,
+        string Stderr,
+        long SizeBytes);
+
     private static readonly HashSet<string> AllowedRuntimeIdentifiers =
     [
         "win-x64",
@@ -44,12 +55,23 @@ public sealed class AdminLauncherController(
         CancellationToken cancellationToken = default)
     {
         var normalized = NormalizeRequest(request ?? new LauncherBuildRequest());
-
-        if (!AllowedRuntimeIdentifiers.Contains(normalized.RuntimeIdentifier))
+        var runtimeIdentifiers = ResolveRuntimeIdentifiers(normalized);
+        var unsupportedRuntimeIdentifiers = runtimeIdentifiers
+            .Where(runtimeIdentifier => !AllowedRuntimeIdentifiers.Contains(runtimeIdentifier))
+            .ToList();
+        if (unsupportedRuntimeIdentifiers.Count > 0)
         {
             return BadRequest(new
             {
-                error = $"Unsupported runtime identifier '{normalized.RuntimeIdentifier}'. Allowed: {string.Join(", ", AllowedRuntimeIdentifiers)}."
+                error = $"Unsupported runtime identifier(s): {string.Join(", ", unsupportedRuntimeIdentifiers)}. Allowed: {string.Join(", ", AllowedRuntimeIdentifiers)}."
+            });
+        }
+
+        if (normalized.AutoPublishUpdate && runtimeIdentifiers.Count != 1)
+        {
+            return BadRequest(new
+            {
+                error = "Auto publish is only supported for single-runtime launcher builds. Disable auto publish or choose one runtime."
             });
         }
 
@@ -86,123 +108,196 @@ public sealed class AdminLauncherController(
 
         var buildSession = $"{DateTime.UtcNow:yyyyMMddHHmmss}_{Guid.NewGuid():N}";
         var workingDirectory = Path.Combine(buildRoot, buildSession);
-        var publishDirectory = Path.Combine(workingDirectory, "publish");
-        Directory.CreateDirectory(publishDirectory);
+        var publishRootDirectory = Path.Combine(workingDirectory, "publish");
+        Directory.CreateDirectory(publishRootDirectory);
 
-        var archiveName = BuildArchiveName(normalized);
-        var archivePath = Path.Combine(workingDirectory, archiveName);
-
-        string stdout = string.Empty;
+        var defaultArchiveName = runtimeIdentifiers.Count == 1
+            ? BuildArchiveName(normalized, runtimeIdentifiers[0])
+            : BuildBundleArchiveName(normalized);
+        var runtimeBuildResults = new List<RuntimeBuildResult>();
         string stderr = string.Empty;
         var exitCode = -1;
 
         try
         {
-            using var process = CreatePublishProcess(projectPath, publishDirectory, normalized);
-
-            if (!process.Start())
+            foreach (var runtimeIdentifier in runtimeIdentifiers)
             {
-                return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to start dotnet publish process." });
-            }
+                var publishDirectory = Path.Combine(publishRootDirectory, runtimeIdentifier);
+                Directory.CreateDirectory(publishDirectory);
+                var runtimeArchiveName = BuildArchiveName(normalized, runtimeIdentifier);
+                var runtimeArchivePath = Path.Combine(workingDirectory, runtimeArchiveName);
+                var runtimeStdout = string.Empty;
+                var runtimeStderr = string.Empty;
 
-            var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-            var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeoutCts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
-
-            try
-            {
-                await process.WaitForExitAsync(timeoutCts.Token);
-            }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-            {
-                TryKillProcess(process);
-                stdout = await stdoutTask;
-                stderr = await stderrTask;
-                await WriteAuditAsync(
-                    action: "launcher.build.failed",
-                    normalized,
-                    archiveName,
-                    0,
-                    startedAt,
-                    exitCode,
-                    stdout,
-                    $"{stderr}\nTimed out after {timeoutSeconds} seconds.",
-                    cancellationToken);
-                return StatusCode(StatusCodes.Status504GatewayTimeout, new { error = $"Launcher build timed out after {timeoutSeconds} seconds." });
-            }
-
-            stdout = await stdoutTask;
-            stderr = await stderrTask;
-            exitCode = process.ExitCode;
-
-            if (exitCode != 0)
-            {
-                await WriteAuditAsync(
-                    action: "launcher.build.failed",
-                    normalized,
-                    archiveName,
-                    0,
-                    startedAt,
-                    exitCode,
-                    stdout,
-                    stderr,
-                    cancellationToken);
-
-                return BadRequest(new
+                using var process = CreatePublishProcess(projectPath, publishDirectory, normalized, runtimeIdentifier);
+                if (!process.Start())
                 {
-                    error = "Launcher build failed. Check output details.",
-                    exitCode,
-                    stdout = Truncate(stdout, MaxLogLength),
-                    stderr = Truncate(stderr, MaxLogLength)
-                });
-            }
+                    return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to start dotnet publish process." });
+                }
 
-            ZipFile.CreateFromDirectory(publishDirectory, archivePath, CompressionLevel.Optimal, includeBaseDirectory: false);
-            var fileBytes = await System.IO.File.ReadAllBytesAsync(archivePath, cancellationToken);
-            var autoPublishWarning = string.Empty;
+                var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+                var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
 
-            if (normalized.AutoPublishUpdate)
-            {
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeoutCts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+
                 try
                 {
-                    await AutoPublishLauncherUpdateAsync(
-                        normalized,
-                        archiveName,
-                        fileBytes,
-                        cancellationToken);
+                    await process.WaitForExitAsync(timeoutCts.Token);
                 }
-                catch (Exception ex)
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                 {
-                    logger.LogWarning(
-                        ex,
-                        "Launcher auto-publish failed for archive {ArchiveName}. Build ZIP will still be returned.",
-                        archiveName);
-                    autoPublishWarning = $"Launcher auto-publish warning: {ex.Message}";
+                    TryKillProcess(process);
+                    runtimeStdout = await stdoutTask;
+                    runtimeStderr = await stderrTask;
+                    runtimeStderr = string.IsNullOrWhiteSpace(runtimeStderr)
+                        ? $"Timed out after {timeoutSeconds} seconds."
+                        : $"{runtimeStderr}{Environment.NewLine}Timed out after {timeoutSeconds} seconds.";
+                    runtimeBuildResults.Add(new RuntimeBuildResult(
+                        RuntimeIdentifier: runtimeIdentifier,
+                        ArchiveName: runtimeArchiveName,
+                        ArchivePath: runtimeArchivePath,
+                        PublishDirectory: publishDirectory,
+                        ExitCode: exitCode,
+                        Stdout: runtimeStdout,
+                        Stderr: runtimeStderr,
+                        SizeBytes: 0));
+                    await WriteAuditAsync(
+                        action: "launcher.build.failed",
+                        normalized,
+                        runtimeArchiveName,
+                        0,
+                        startedAt,
+                        exitCode,
+                        BuildCombinedRuntimeLog(runtimeBuildResults, includeStdErr: false),
+                        BuildCombinedRuntimeLog(runtimeBuildResults, includeStdErr: true),
+                        runtimeBuildResults,
+                        cancellationToken);
+                    return StatusCode(StatusCodes.Status504GatewayTimeout, new
+                    {
+                        error = $"Launcher build timed out after {timeoutSeconds} seconds for runtime '{runtimeIdentifier}'.",
+                        runtimeIdentifier
+                    });
                 }
+
+                runtimeStdout = await stdoutTask;
+                runtimeStderr = await stderrTask;
+                exitCode = process.ExitCode;
+
+                if (exitCode != 0)
+                {
+                    runtimeBuildResults.Add(new RuntimeBuildResult(
+                        RuntimeIdentifier: runtimeIdentifier,
+                        ArchiveName: runtimeArchiveName,
+                        ArchivePath: runtimeArchivePath,
+                        PublishDirectory: publishDirectory,
+                        ExitCode: exitCode,
+                        Stdout: runtimeStdout,
+                        Stderr: runtimeStderr,
+                        SizeBytes: 0));
+                    await WriteAuditAsync(
+                        action: "launcher.build.failed",
+                        normalized,
+                        runtimeArchiveName,
+                        0,
+                        startedAt,
+                        exitCode,
+                        BuildCombinedRuntimeLog(runtimeBuildResults, includeStdErr: false),
+                        BuildCombinedRuntimeLog(runtimeBuildResults, includeStdErr: true),
+                        runtimeBuildResults,
+                        cancellationToken);
+                    return BadRequest(new
+                    {
+                        error = $"Launcher build failed for runtime '{runtimeIdentifier}'. Check output details.",
+                        runtimeIdentifier,
+                        exitCode,
+                        stdout = Truncate(runtimeStdout, MaxLogLength),
+                        stderr = Truncate(runtimeStderr, MaxLogLength)
+                    });
+                }
+
+                ZipFile.CreateFromDirectory(publishDirectory, runtimeArchivePath, CompressionLevel.Optimal, includeBaseDirectory: false);
+                var runtimeSizeBytes = new FileInfo(runtimeArchivePath).Length;
+                runtimeBuildResults.Add(new RuntimeBuildResult(
+                    RuntimeIdentifier: runtimeIdentifier,
+                    ArchiveName: runtimeArchiveName,
+                    ArchivePath: runtimeArchivePath,
+                    PublishDirectory: publishDirectory,
+                    ExitCode: exitCode,
+                    Stdout: runtimeStdout,
+                    Stderr: runtimeStderr,
+                    SizeBytes: runtimeSizeBytes));
             }
 
-            if (!string.IsNullOrWhiteSpace(autoPublishWarning))
+            if (runtimeBuildResults.Count == 1)
             {
-                stderr = string.IsNullOrWhiteSpace(stderr)
-                    ? autoPublishWarning
-                    : $"{stderr}{Environment.NewLine}{autoPublishWarning}";
-                Response.Headers.Append("X-Launcher-Update-Publish-Warning", Truncate(autoPublishWarning, 300));
+                var singleRuntimeResult = runtimeBuildResults[0];
+                var fileBytes = await System.IO.File.ReadAllBytesAsync(singleRuntimeResult.ArchivePath, cancellationToken);
+                var autoPublishWarning = string.Empty;
+
+                if (normalized.AutoPublishUpdate)
+                {
+                    try
+                    {
+                        await AutoPublishLauncherUpdateAsync(
+                            normalized,
+                            singleRuntimeResult.ArchiveName,
+                            fileBytes,
+                            cancellationToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogWarning(
+                            ex,
+                            "Launcher auto-publish failed for archive {ArchiveName}. Build ZIP will still be returned.",
+                            singleRuntimeResult.ArchiveName);
+                        autoPublishWarning = $"Launcher auto-publish warning: {ex.Message}";
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(autoPublishWarning))
+                {
+                    var nextStderr = string.IsNullOrWhiteSpace(singleRuntimeResult.Stderr)
+                        ? autoPublishWarning
+                        : $"{singleRuntimeResult.Stderr}{Environment.NewLine}{autoPublishWarning}";
+                    singleRuntimeResult = singleRuntimeResult with { Stderr = nextStderr };
+                    runtimeBuildResults[0] = singleRuntimeResult;
+                    Response.Headers.Append("X-Launcher-Update-Publish-Warning", Truncate(autoPublishWarning, 300));
+                }
+
+                await WriteAuditAsync(
+                    action: "launcher.build",
+                    normalized,
+                    singleRuntimeResult.ArchiveName,
+                    fileBytes.LongLength,
+                    startedAt,
+                    singleRuntimeResult.ExitCode,
+                    singleRuntimeResult.Stdout,
+                    singleRuntimeResult.Stderr,
+                    runtimeBuildResults,
+                    cancellationToken);
+
+                return File(fileBytes, "application/zip", singleRuntimeResult.ArchiveName);
             }
+
+            var bundleArchiveName = BuildBundleArchiveName(normalized);
+            var bundleArchivePath = Path.Combine(workingDirectory, bundleArchiveName);
+            CreateRuntimeBundleArchive(bundleArchivePath, runtimeBuildResults);
+            var bundleFileBytes = await System.IO.File.ReadAllBytesAsync(bundleArchivePath, cancellationToken);
 
             await WriteAuditAsync(
-                action: "launcher.build",
+                action: "launcher.build.multi",
                 normalized,
-                archiveName,
-                fileBytes.LongLength,
+                bundleArchiveName,
+                bundleFileBytes.LongLength,
                 startedAt,
                 exitCode,
-                stdout,
-                stderr,
+                BuildCombinedRuntimeLog(runtimeBuildResults, includeStdErr: false),
+                BuildCombinedRuntimeLog(runtimeBuildResults, includeStdErr: true),
+                runtimeBuildResults,
                 cancellationToken);
 
-            return File(fileBytes, "application/zip", archiveName);
+            return File(bundleFileBytes, "application/zip", bundleArchiveName);
         }
         catch (OperationCanceledException)
         {
@@ -211,15 +306,17 @@ public sealed class AdminLauncherController(
         catch (Exception ex)
         {
             logger.LogError(ex, "Launcher build failed unexpectedly.");
+            var errorDetails = string.IsNullOrWhiteSpace(stderr) ? ex.Message : $"{stderr}{Environment.NewLine}{ex.Message}";
             await WriteAuditAsync(
                 action: "launcher.build.failed",
                 normalized,
-                archiveName,
+                defaultArchiveName,
                 0,
                 startedAt,
                 exitCode,
-                stdout,
-                $"{stderr}\n{ex.Message}",
+                BuildCombinedRuntimeLog(runtimeBuildResults, includeStdErr: false),
+                errorDetails,
+                runtimeBuildResults,
                 cancellationToken);
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Unexpected launcher build failure.", details = ex.Message });
         }
@@ -229,7 +326,11 @@ public sealed class AdminLauncherController(
         }
     }
 
-    private Process CreatePublishProcess(string projectPath, string publishDirectory, LauncherBuildRequest request)
+    private Process CreatePublishProcess(
+        string projectPath,
+        string publishDirectory,
+        LauncherBuildRequest request,
+        string runtimeIdentifier)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -246,7 +347,7 @@ public sealed class AdminLauncherController(
         startInfo.ArgumentList.Add("--configuration");
         startInfo.ArgumentList.Add(request.Configuration);
         startInfo.ArgumentList.Add("--runtime");
-        startInfo.ArgumentList.Add(request.RuntimeIdentifier);
+        startInfo.ArgumentList.Add(runtimeIdentifier);
         startInfo.ArgumentList.Add("--self-contained");
         startInfo.ArgumentList.Add(request.SelfContained ? "true" : "false");
         startInfo.ArgumentList.Add("--output");
@@ -287,6 +388,7 @@ public sealed class AdminLauncherController(
         int exitCode,
         string stdout,
         string stderr,
+        IReadOnlyList<RuntimeBuildResult>? runtimeBuildResults,
         CancellationToken cancellationToken)
     {
         var actor = User.Identity?.Name ?? "admin";
@@ -298,6 +400,7 @@ public sealed class AdminLauncherController(
             details: new
             {
                 request.RuntimeIdentifier,
+                request.RuntimeIdentifiers,
                 request.Configuration,
                 request.SelfContained,
                 request.PublishSingleFile,
@@ -311,7 +414,16 @@ public sealed class AdminLauncherController(
                 durationMs = (long)(DateTime.UtcNow - startedAt).TotalMilliseconds,
                 exitCode,
                 stdout = Truncate(stdout, MaxLogLength),
-                stderr = Truncate(stderr, MaxLogLength)
+                stderr = Truncate(stderr, MaxLogLength),
+                runtimeResults = runtimeBuildResults?.Select(result => new
+                {
+                    result.RuntimeIdentifier,
+                    result.ArchiveName,
+                    result.SizeBytes,
+                    result.ExitCode,
+                    stdout = Truncate(result.Stdout, MaxLogLength),
+                    stderr = Truncate(result.Stderr, MaxLogLength)
+                }).ToList() ?? []
             },
             cancellationToken: cancellationToken);
     }
@@ -338,9 +450,21 @@ public sealed class AdminLauncherController(
             configuration = "Debug";
         }
 
+        var runtimeIdentifiers = request.RuntimeIdentifiers
+            .Select(value => (value ?? string.Empty).Trim().ToLowerInvariant())
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (runtimeIdentifiers.Count == 0)
+        {
+            runtimeIdentifiers.Add(runtime);
+        }
+        runtime = runtimeIdentifiers[0];
+
         return new LauncherBuildRequest
         {
             RuntimeIdentifier = runtime,
+            RuntimeIdentifiers = runtimeIdentifiers,
             Configuration = configuration,
             SelfContained = request.SelfContained,
             PublishSingleFile = request.PublishSingleFile,
@@ -348,6 +472,22 @@ public sealed class AdminLauncherController(
             AutoPublishUpdate = request.AutoPublishUpdate,
             ReleaseNotes = (request.ReleaseNotes ?? string.Empty).Trim()
         };
+    }
+
+    private static IReadOnlyList<string> ResolveRuntimeIdentifiers(LauncherBuildRequest request)
+    {
+        var runtimeIdentifiers = request.RuntimeIdentifiers
+            .Select(value => (value ?? string.Empty).Trim().ToLowerInvariant())
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (runtimeIdentifiers.Count == 0)
+        {
+            var fallback = (request.RuntimeIdentifier ?? string.Empty).Trim().ToLowerInvariant();
+            runtimeIdentifiers.Add(string.IsNullOrWhiteSpace(fallback) ? "win-x64" : fallback);
+        }
+
+        return runtimeIdentifiers;
     }
 
     private string ResolveProjectPath()
@@ -412,10 +552,60 @@ public sealed class AdminLauncherController(
         return Math.Clamp(seconds, 60, 3600);
     }
 
-    private static string BuildArchiveName(LauncherBuildRequest request)
+    private static string BuildArchiveName(LauncherBuildRequest request, string runtimeIdentifier)
     {
         var version = string.IsNullOrWhiteSpace(request.Version) ? "dev" : request.Version;
-        return $"launcher-{version}-{request.RuntimeIdentifier}.zip";
+        return $"launcher-{version}-{runtimeIdentifier}.zip";
+    }
+
+    private static string BuildBundleArchiveName(LauncherBuildRequest request)
+    {
+        var version = string.IsNullOrWhiteSpace(request.Version) ? "dev" : request.Version;
+        return $"launcher-{version}-multi.zip";
+    }
+
+    private static void CreateRuntimeBundleArchive(string bundleArchivePath, IReadOnlyList<RuntimeBuildResult> runtimeBuildResults)
+    {
+        using var stream = System.IO.File.Create(bundleArchivePath);
+        using var archive = new ZipArchive(stream, ZipArchiveMode.Create);
+        foreach (var runtimeBuildResult in runtimeBuildResults)
+        {
+            archive.CreateEntryFromFile(
+                sourceFileName: runtimeBuildResult.ArchivePath,
+                entryName: runtimeBuildResult.ArchiveName,
+                compressionLevel: CompressionLevel.Optimal);
+        }
+    }
+
+    private static string BuildCombinedRuntimeLog(IReadOnlyList<RuntimeBuildResult> runtimeBuildResults, bool includeStdErr)
+    {
+        if (runtimeBuildResults.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var builder = new StringBuilder();
+        foreach (var runtimeBuildResult in runtimeBuildResults)
+        {
+            var payload = includeStdErr ? runtimeBuildResult.Stderr : runtimeBuildResult.Stdout;
+            if (string.IsNullOrWhiteSpace(payload))
+            {
+                continue;
+            }
+
+            if (builder.Length > 0)
+            {
+                builder.AppendLine();
+                builder.AppendLine();
+            }
+
+            builder.Append('[');
+            builder.Append(runtimeBuildResult.RuntimeIdentifier);
+            builder.AppendLine("]");
+            builder.Append(payload.Trim());
+        }
+
+        return builder.ToString();
     }
 
     private async Task AutoPublishLauncherUpdateAsync(

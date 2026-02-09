@@ -10,6 +10,7 @@ public sealed record BootstrapResponse(
 
 public sealed record BrandingConfig(
     string ProductName,
+    string LauncherDirectoryName,
     string DeveloperName,
     string Tagline,
     string SupportUrl,

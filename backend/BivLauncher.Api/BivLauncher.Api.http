@@ -214,6 +214,7 @@ Authorization: Bearer <admin_jwt>
 
 {
   "productName": "BivLauncher",
+  "launcherDirectoryName": "BivLauncher",
   "developerName": "Bivashka",
   "tagline": "Managed launcher platform",
   "supportUrl": "https://example.com/support",

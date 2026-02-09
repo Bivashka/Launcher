@@ -1,5 +1,6 @@
 {
   "productName": "BivLauncher",
+  "launcherDirectoryName": "BivLauncher",
   "developerName": "Bivashka",
   "tagline": "Managed Minecraft launcher platform",
   "supportUrl": "https://example.com/support",

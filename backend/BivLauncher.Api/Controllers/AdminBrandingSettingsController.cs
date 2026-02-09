@@ -33,6 +33,7 @@ public sealed class AdminBrandingSettingsController(
     {
         var branding = new BrandingConfig(
             ProductName: request.ProductName.Trim(),
+            LauncherDirectoryName: request.LauncherDirectoryName.Trim(),
             DeveloperName: request.DeveloperName.Trim(),
             Tagline: request.Tagline.Trim(),
             SupportUrl: request.SupportUrl.Trim(),
@@ -69,6 +70,7 @@ public sealed class AdminBrandingSettingsController(
             details: new
             {
                 saved.ProductName,
+                saved.LauncherDirectoryName,
                 saved.DeveloperName,
                 saved.LogoText,
                 saved.LoginCardPosition,
@@ -176,6 +178,7 @@ public sealed class AdminBrandingSettingsController(
     {
         return new BrandingSettingsDto(
             branding.ProductName,
+            branding.LauncherDirectoryName,
             branding.DeveloperName,
             branding.Tagline,
             branding.SupportUrl,

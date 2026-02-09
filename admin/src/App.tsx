@@ -60,6 +60,7 @@ type RuntimeCleanupResponse = {
 type BuildResponse = { id: string; status: string; manifestKey: string; filesCount: number; totalSizeBytes: number }
 type LauncherBuildRequest = {
   runtimeIdentifier: string
+  runtimeIdentifiers?: string[]
   configuration: 'Release' | 'Debug'
   selfContained: boolean
   publishSingleFile: boolean
@@ -125,6 +126,7 @@ type TwoFactorAccount = {
 
 type BrandingSettings = {
   productName: string
+  launcherDirectoryName: string
   developerName: string
   tagline: string
   supportUrl: string
@@ -699,6 +701,7 @@ const defaultTwoFactorSettings: TwoFactorSettings = {
 
 const defaultBrandingSettings: BrandingSettings = {
   productName: 'BivLauncher',
+  launcherDirectoryName: 'BivLauncher',
   developerName: 'Bivashka',
   tagline: 'Managed launcher platform',
   supportUrl: 'https://example.com/support',
@@ -1398,7 +1401,7 @@ function App() {
   const [rebuildLaunchMainClass, setRebuildLaunchMainClass] = useState('')
   const [rebuildLaunchClasspath, setRebuildLaunchClasspath] = useState('')
   const [rebuildPublishToServers, setRebuildPublishToServers] = useState(true)
-  const [launcherBuildRuntimeIdentifier, setLauncherBuildRuntimeIdentifier] = useState<typeof launcherRuntimeOptions[number]>('win-x64')
+  const [launcherBuildRuntimeIdentifiers, setLauncherBuildRuntimeIdentifiers] = useState<Array<typeof launcherRuntimeOptions[number]>>(['win-x64'])
   const [launcherBuildConfiguration, setLauncherBuildConfiguration] = useState<'Release' | 'Debug'>('Release')
   const [launcherBuildSelfContained, setLauncherBuildSelfContained] = useState(true)
   const [launcherBuildSingleFile, setLauncherBuildSingleFile] = useState(true)
@@ -2104,7 +2107,10 @@ function App() {
       setDiscordRpcSettings(loadedDiscordRpcSettings)
       setTwoFactorSettings(loadedTwoFactorSettings)
       setTwoFactorAccounts(loadedTwoFactorAccounts)
-      setBrandingSettings(loadedBranding)
+      setBrandingSettings({
+        ...defaultBrandingSettings,
+        ...loadedBranding,
+      })
       setDeveloperSupportInfo(loadedDeveloperSupport)
       setInstallTelemetrySettings(loadedInstallTelemetrySettings)
       setProjectInstallStats(loadedProjectInstallStats)
@@ -3567,6 +3573,7 @@ function App() {
         method: 'PUT',
         body: JSON.stringify({
           productName: brandingSettings.productName.trim(),
+          launcherDirectoryName: (brandingSettings.launcherDirectoryName.trim() || defaultBrandingSettings.launcherDirectoryName),
           developerName: brandingSettings.developerName.trim(),
           tagline: brandingSettings.tagline.trim(),
           supportUrl: brandingSettings.supportUrl.trim(),
@@ -3744,13 +3751,27 @@ function App() {
     setError('')
     setNotice('')
     try {
+      const selectedRuntimeIdentifiers = Array.from(
+        new Set(
+          launcherBuildRuntimeIdentifiers
+            .map((runtime) => runtime.trim() as typeof launcherRuntimeOptions[number])
+            .filter((runtime): runtime is typeof launcherRuntimeOptions[number] => launcherRuntimeOptions.includes(runtime)),
+        ),
+      )
+      if (selectedRuntimeIdentifiers.length === 0) {
+        throw new Error('Select at least one runtime target.')
+      }
+
+      const primaryRuntimeIdentifier = selectedRuntimeIdentifiers[0]
+      const isMultiRuntimeBuild = selectedRuntimeIdentifiers.length > 1
       const payload: LauncherBuildRequest = {
-        runtimeIdentifier: launcherBuildRuntimeIdentifier,
+        runtimeIdentifier: primaryRuntimeIdentifier,
+        runtimeIdentifiers: selectedRuntimeIdentifiers,
         configuration: launcherBuildConfiguration,
         selfContained: launcherBuildSelfContained,
         publishSingleFile: launcherBuildSingleFile,
         version,
-        autoPublishUpdate: true,
+        autoPublishUpdate: !isMultiRuntimeBuild,
         releaseNotes: '',
       }
 
@@ -3784,7 +3805,9 @@ function App() {
       }
 
       const fallbackVersion = version || 'dev'
-      const fallbackName = `launcher-${fallbackVersion}-${launcherBuildRuntimeIdentifier}.zip`
+      const fallbackName = selectedRuntimeIdentifiers.length === 1
+        ? `launcher-${fallbackVersion}-${primaryRuntimeIdentifier}.zip`
+        : `launcher-${fallbackVersion}-multi.zip`
       const fileName = extractDownloadFileName(response.headers.get('content-disposition')) || fallbackName
       const url = URL.createObjectURL(blob)
       const anchor = document.createElement('a')
@@ -3794,7 +3817,7 @@ function App() {
       anchor.click()
       anchor.remove()
       URL.revokeObjectURL(url)
-      setNotice(`Launcher build ready: ${fileName}`)
+      setNotice(`Launcher build ready: ${fileName} (${selectedRuntimeIdentifiers.join(', ')})`)
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : 'Launcher build failed')
     } finally {
@@ -5140,16 +5163,31 @@ function App() {
                   <h4>Сборка лаунчера</h4>
                   <small>Собирает `launcher/BivLauncher.Client` и сразу скачивает ZIP-артефакт.</small>
                   <div className="grid-inline">
-                    <select
-                      value={launcherBuildRuntimeIdentifier}
-                      onChange={(event) => setLauncherBuildRuntimeIdentifier(event.target.value as typeof launcherRuntimeOptions[number])}
-                    >
+                    <div>
+                      <small>Runtime targets (one or many):</small>
                       {launcherRuntimeOptions.map((runtime) => (
-                        <option key={runtime} value={runtime}>
+                        <label key={runtime} className="checkbox">
+                          <input
+                            type="checkbox"
+                            checked={launcherBuildRuntimeIdentifiers.includes(runtime)}
+                            onChange={(event) => {
+                              setLauncherBuildRuntimeIdentifiers((prev) => {
+                                if (event.target.checked) {
+                                  return prev.includes(runtime) ? prev : [...prev, runtime]
+                                }
+
+                                if (prev.length <= 1) {
+                                  return prev
+                                }
+
+                                return prev.filter((item) => item !== runtime)
+                              })
+                            }}
+                          />
                           {runtime}
-                        </option>
+                        </label>
                       ))}
-                    </select>
+                    </div>
                     <select
                       value={launcherBuildConfiguration}
                       onChange={(event) => setLauncherBuildConfiguration(event.target.value as 'Release' | 'Debug')}
@@ -5158,6 +5196,9 @@ function App() {
                       <option value="Debug">Debug</option>
                     </select>
                   </div>
+                  {launcherBuildRuntimeIdentifiers.length > 1 && (
+                    <small>For multi-runtime build, auto-publish update is disabled automatically.</small>
+                  )}
                   <input
                     placeholder="Version (optional, e.g. 1.2.3)"
                     value={launcherBuildVersion}
@@ -6839,6 +6880,11 @@ function App() {
                   onChange={(event) => setBrandingSettings((prev) => ({ ...prev, productName: event.target.value }))}
                 />
                 <input
+                  placeholder="Project folder name on player PC"
+                  value={brandingSettings.launcherDirectoryName}
+                  onChange={(event) => setBrandingSettings((prev) => ({ ...prev, launcherDirectoryName: event.target.value }))}
+                />
+                <input
                   placeholder="Developer name"
                   value={brandingSettings.developerName}
                   onChange={(event) => setBrandingSettings((prev) => ({ ...prev, developerName: event.target.value }))}
@@ -7105,6 +7151,12 @@ function App() {
                       <small>
                         {brandingSettings.productName} / {brandingSettings.developerName}
                       </small>
+                    </span>
+                  </li>
+                  <li>
+                    <span className="list-text">
+                      Project folder name
+                      <small>{brandingSettings.launcherDirectoryName}</small>
                     </span>
                   </li>
                   <li>

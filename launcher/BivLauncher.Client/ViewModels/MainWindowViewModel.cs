@@ -743,6 +743,7 @@ public partial class MainWindowViewModel : ViewModelBase
             await FlushPendingSubmissionsAsync();
             await TrySubmitInstallTelemetryAsync(bootstrap);
 
+            await ApplyLauncherDirectoryNameAsync(bootstrap.Branding);
             await ApplyBrandingAsync(ApiBaseUrl, bootstrap.Branding);
             var discordRpcEnabled = bootstrap.Constraints.DiscordRpcEnabled;
             var discordRpcPrivacyMode = bootstrap.Constraints.DiscordRpcPrivacyMode;
@@ -1840,6 +1841,25 @@ public partial class MainWindowViewModel : ViewModelBase
         throw new InvalidOperationException("Cannot determine launcher executable path. Run published launcher build.");
     }
 
+    private async Task ApplyLauncherDirectoryNameAsync(BrandingConfig? branding)
+    {
+        var previousDefaultInstallDirectory = _settingsService.GetDefaultInstallDirectory();
+        _settingsService.ConfigureProjectDirectoryName(branding?.LauncherDirectoryName);
+        var nextDefaultInstallDirectory = _settingsService.GetDefaultInstallDirectory();
+
+        var shouldUseDefaultInstallDirectory = string.IsNullOrWhiteSpace(_settings.InstallDirectory) ||
+                                               ArePathsEqual(_settings.InstallDirectory, previousDefaultInstallDirectory);
+        if (!shouldUseDefaultInstallDirectory ||
+            ArePathsEqual(_settings.InstallDirectory, nextDefaultInstallDirectory))
+        {
+            return;
+        }
+
+        _settings.InstallDirectory = nextDefaultInstallDirectory;
+        InstallDirectory = nextDefaultInstallDirectory;
+        await _settingsService.SaveAsync(_settings);
+    }
+
     private async Task ApplyBrandingAsync(string apiBaseUrl, BrandingConfig? branding)
     {
         branding ??= new BrandingConfig();
@@ -1919,6 +1939,27 @@ public partial class MainWindowViewModel : ViewModelBase
         LoginCardWidth = Math.Clamp(requestedWidth, 340, 640);
 
         BrandingBackgroundImage = await ResolveBrandingImageAsync(apiBaseUrl, branding.BackgroundImageUrl);
+    }
+
+    private static bool ArePathsEqual(string? left, string? right)
+    {
+        if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right))
+        {
+            return false;
+        }
+
+        try
+        {
+            var normalizedLeft = Path.GetFullPath(left)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var normalizedRight = Path.GetFullPath(right)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            return string.Equals(normalizedLeft, normalizedRight, StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return string.Equals(left.Trim(), right.Trim(), StringComparison.OrdinalIgnoreCase);
+        }
     }
 
     private static HorizontalAlignment ParseLoginCardAlignment(string? raw)

@@ -11,6 +11,11 @@ public sealed class BrandingSettingsUpsertRequest
 
     [Required]
     [MinLength(1)]
+    [MaxLength(64)]
+    public string LauncherDirectoryName { get; set; } = string.Empty;
+
+    [Required]
+    [MinLength(1)]
     [MaxLength(128)]
     public string DeveloperName { get; set; } = string.Empty;
 

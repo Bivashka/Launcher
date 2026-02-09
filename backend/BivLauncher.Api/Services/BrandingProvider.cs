@@ -10,6 +10,8 @@ public sealed class BrandingProvider(
     IOptions<BrandingOptions> options,
     ILogger<BrandingProvider> logger) : IBrandingProvider
 {
+    private const int MaxLauncherDirectoryNameLength = 64;
+
     private static readonly JsonSerializerOptions ReadJsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
@@ -22,6 +24,7 @@ public sealed class BrandingProvider(
 
     private static readonly BrandingConfig DefaultBranding = new(
         ProductName: "BivLauncher",
+        LauncherDirectoryName: "BivLauncher",
         DeveloperName: "Bivashka",
         Tagline: "Managed launcher platform",
         SupportUrl: "https://example.com/support",
@@ -95,6 +98,7 @@ public sealed class BrandingProvider(
     {
         return new BrandingConfig(
             ProductName: NormalizeValue(branding.ProductName, DefaultBranding.ProductName),
+            LauncherDirectoryName: NormalizeLauncherDirectoryName(branding.LauncherDirectoryName, DefaultBranding.LauncherDirectoryName),
             DeveloperName: NormalizeValue(branding.DeveloperName, DefaultBranding.DeveloperName),
             Tagline: NormalizeValue(branding.Tagline, DefaultBranding.Tagline),
             SupportUrl: NormalizeValue(branding.SupportUrl, DefaultBranding.SupportUrl),
@@ -120,6 +124,28 @@ public sealed class BrandingProvider(
             BackgroundOverlayOpacity: ClampDouble(branding.BackgroundOverlayOpacity, 0, 0.95, DefaultBranding.BackgroundOverlayOpacity),
             LoginCardPosition: NormalizeLoginCardPosition(branding.LoginCardPosition),
             LoginCardWidth: ClampInt(branding.LoginCardWidth, 340, 640, DefaultBranding.LoginCardWidth));
+    }
+
+    private static string NormalizeLauncherDirectoryName(string? value, string fallback)
+    {
+        var trimmed = (value ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(trimmed))
+        {
+            return fallback;
+        }
+
+        var sanitizedChars = trimmed
+            .Select(ch => char.IsLetterOrDigit(ch) || ch is ' ' or '-' or '_' ? ch : '_')
+            .ToArray();
+        var sanitized = new string(sanitizedChars).Trim().Trim('.');
+        if (sanitized.Length > MaxLauncherDirectoryNameLength)
+        {
+            sanitized = sanitized[..MaxLauncherDirectoryNameLength].Trim();
+        }
+
+        return string.IsNullOrWhiteSpace(sanitized) || sanitized is "." or ".."
+            ? fallback
+            : sanitized;
     }
 
     private static string NormalizeValue(string? value, string fallback)

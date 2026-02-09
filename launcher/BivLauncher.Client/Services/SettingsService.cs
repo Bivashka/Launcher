@@ -1,16 +1,37 @@
 using BivLauncher.Client.Models;
+using System.Text;
 using System.Text.Json;
 
 namespace BivLauncher.Client.Services;
 
 public sealed class SettingsService : ISettingsService
 {
+    private const string DefaultProjectDirectoryName = "BivLauncher";
     private static readonly string ApplicationDirectory = ResolveApplicationDirectory();
+    private readonly object _syncRoot = new();
+    private string _projectDirectoryName = DefaultProjectDirectoryName;
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = true
     };
+
+    public void ConfigureProjectDirectoryName(string? projectDirectoryName)
+    {
+        var normalized = NormalizeProjectDirectoryName(projectDirectoryName);
+        lock (_syncRoot)
+        {
+            _projectDirectoryName = normalized;
+        }
+    }
+
+    public string GetProjectDirectoryName()
+    {
+        lock (_syncRoot)
+        {
+            return _projectDirectoryName;
+        }
+    }
 
     public async Task<LauncherSettings> LoadAsync(CancellationToken cancellationToken = default)
     {
@@ -64,7 +85,7 @@ public sealed class SettingsService : ISettingsService
     public string GetDefaultInstallDirectory()
     {
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        return Path.Combine(home, "BivLauncher", "instances");
+        return Path.Combine(home, GetProjectDirectoryName(), "instances");
     }
 
     private LauncherSettings CreateDefaultSettings()
@@ -92,13 +113,13 @@ public sealed class SettingsService : ISettingsService
         }
 
         var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        var fallbackDirectory = Path.Combine(appData, "BivLauncher");
+        var fallbackDirectory = Path.Combine(appData, DefaultProjectDirectoryName);
         if (TryEnsureWritableDirectory(fallbackDirectory))
         {
             return fallbackDirectory;
         }
 
-        var tempFallbackDirectory = Path.Combine(Path.GetTempPath(), "BivLauncher");
+        var tempFallbackDirectory = Path.Combine(Path.GetTempPath(), DefaultProjectDirectoryName);
         Directory.CreateDirectory(tempFallbackDirectory);
         return tempFallbackDirectory;
     }
@@ -128,7 +149,7 @@ public sealed class SettingsService : ISettingsService
 
         var legacyDirectory = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "BivLauncher");
+            DefaultProjectDirectoryName);
         var legacySettingsPath = Path.Combine(legacyDirectory, "settings.json");
         if (!File.Exists(legacySettingsPath))
         {
@@ -142,5 +163,30 @@ public sealed class SettingsService : ISettingsService
         catch
         {
         }
+    }
+
+    private static string NormalizeProjectDirectoryName(string? value)
+    {
+        var trimmed = (value ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(trimmed))
+        {
+            return DefaultProjectDirectoryName;
+        }
+
+        var builder = new StringBuilder(trimmed.Length);
+        foreach (var ch in trimmed)
+        {
+            builder.Append(char.IsLetterOrDigit(ch) || ch is ' ' or '-' or '_' ? ch : '_');
+        }
+
+        var sanitized = builder.ToString().Trim().Trim('.');
+        if (sanitized.Length > 64)
+        {
+            sanitized = sanitized[..64].Trim();
+        }
+
+        return string.IsNullOrWhiteSpace(sanitized) || sanitized is "." or ".."
+            ? DefaultProjectDirectoryName
+            : sanitized;
     }
 }

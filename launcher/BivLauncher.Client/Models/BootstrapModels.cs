@@ -15,6 +15,7 @@ public sealed class BootstrapResponse
 public sealed class BrandingConfig
 {
     public string ProductName { get; set; } = "BivLauncher";
+    public string LauncherDirectoryName { get; set; } = "BivLauncher";
     public string DeveloperName { get; set; } = "Bivashka";
     public string Tagline { get; set; } = string.Empty;
     public string SupportUrl { get; set; } = string.Empty;

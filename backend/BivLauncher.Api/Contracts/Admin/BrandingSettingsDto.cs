@@ -2,6 +2,7 @@ namespace BivLauncher.Api.Contracts.Admin;
 
 public sealed record BrandingSettingsDto(
     string ProductName,
+    string LauncherDirectoryName,
     string DeveloperName,
     string Tagline,
     string SupportUrl,

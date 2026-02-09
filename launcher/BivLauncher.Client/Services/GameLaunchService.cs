@@ -7,8 +7,10 @@ using System.Security.Cryptography;
 
 namespace BivLauncher.Client.Services;
 
-public sealed class GameLaunchService(ILogService logService) : IGameLaunchService
+public sealed class GameLaunchService(ILogService logService, ISettingsService settingsService) : IGameLaunchService
 {
+    private readonly ISettingsService _settingsService = settingsService;
+
     private static readonly string[] ImplicitMainClassCandidates =
     [
         "net.minecraft.client.main.Main",
@@ -1163,7 +1165,8 @@ public sealed class GameLaunchService(ILogService logService) : IGameLaunchServi
             localDataRoot = Path.GetTempPath();
         }
 
-        var legacyHome = Path.Combine(localDataRoot, "BivLauncher", "legacy-home", $"{profileName}-{shortHash}");
+        var projectDirectoryName = _settingsService.GetProjectDirectoryName();
+        var legacyHome = Path.Combine(localDataRoot, projectDirectoryName, "legacy-home", $"{profileName}-{shortHash}");
 
         var legacyRoot = Path.Combine(legacyHome, ".minecraft");
         Directory.CreateDirectory(legacyRoot);
