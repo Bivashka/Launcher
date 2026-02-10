@@ -22,6 +22,9 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
         "net.minecraft.client.Minecraft"
     ];
 
+    private static readonly string[] LaunchArchiveExtensions = [".jar", ".jar2"];
+    private static readonly string[] LaunchArchiveSearchPatterns = ["*.jar", "*.jar2"];
+
     public async Task<LaunchResult> LaunchAsync(
         LauncherManifest manifest,
         LauncherSettings settings,
@@ -128,6 +131,8 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
             EnsureLegacyJvmNativePaths(startInfo.ArgumentList, instanceDirectory);
             if (string.Equals(resolvedMainClassForCompatibility, "net.minecraft.launchwrapper.Launch", StringComparison.OrdinalIgnoreCase))
             {
+                EnsureLegacyAuthArguments(gameArgs, settings);
+                EnsureLegacyRouteArguments(gameArgs, route, disableAutoRouteArgs);
                 EnsureLegacyLaunchwrapperDefaults(gameArgs, route, manifest, instanceDirectory, resolvedClasspathForCompatibility);
             }
             legacyCompatibilityHome = PrepareLegacyCompatibilityHome(instanceDirectory);
@@ -351,7 +356,7 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
         }
 
         throw new InvalidOperationException(
-            $"No launchable .jar file found in manifest or instance directory. Details: {autoResolveReason}");
+            $"No launchable .jar/.jar2 file found in manifest or instance directory. Details: {autoResolveReason}");
     }
 
     private static bool TryResolveImplicitMainClassLaunch(
@@ -434,14 +439,14 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
         var librariesPath = Path.Combine(instanceDirectory, "libraries");
         if (Directory.Exists(librariesPath))
         {
-            foreach (var jar in Directory.EnumerateFiles(librariesPath, "*.jar", SearchOption.AllDirectories)
+            foreach (var jar in EnumerateLaunchArchives(librariesPath, SearchOption.AllDirectories)
                          .OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
             {
                 AddIfExists(jar);
             }
         }
 
-        foreach (var jar in Directory.EnumerateFiles(instanceDirectory, "*.jar", SearchOption.TopDirectoryOnly)
+        foreach (var jar in EnumerateLaunchArchives(instanceDirectory, SearchOption.TopDirectoryOnly)
                      .OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
         {
             AddIfExists(jar);
@@ -597,6 +602,24 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
         return rawPath.Replace('\\', '/');
     }
 
+    private static bool IsLaunchArchivePath(string path)
+    {
+        var extension = Path.GetExtension(path);
+        return LaunchArchiveExtensions.Any(candidate =>
+            string.Equals(extension, candidate, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static IEnumerable<string> EnumerateLaunchArchives(string directoryPath, SearchOption searchOption)
+    {
+        foreach (var pattern in LaunchArchiveSearchPatterns)
+        {
+            foreach (var filePath in Directory.EnumerateFiles(directoryPath, pattern, searchOption))
+            {
+                yield return filePath;
+            }
+        }
+    }
+
     private static string TryResolveRouteJar(LauncherManifest manifest, string instanceDirectory, string preferredJarPath)
     {
         var normalized = NormalizeRelativeJarPath(preferredJarPath);
@@ -641,7 +664,7 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
 
         foreach (var manifestPath in manifest.Files.Select(x => x.Path))
         {
-            if (!manifestPath.EndsWith(".jar", StringComparison.OrdinalIgnoreCase))
+            if (!IsLaunchArchivePath(manifestPath))
             {
                 continue;
             }
@@ -669,7 +692,7 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
 
         if (Directory.Exists(instanceDirectory))
         {
-            foreach (var absolutePath in Directory.EnumerateFiles(instanceDirectory, "*.jar", SearchOption.AllDirectories))
+            foreach (var absolutePath in EnumerateLaunchArchives(instanceDirectory, SearchOption.AllDirectories))
             {
                 if (!seenAbsolutePaths.Add(absolutePath))
                 {
@@ -711,7 +734,7 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
         }
 
         diagnostic = invalidDiagnostics.Count == 0
-            ? "No .jar candidates found."
+            ? "No .jar/.jar2 candidates found."
             : string.Join(" | ", invalidDiagnostics);
         return string.Empty;
     }
@@ -782,7 +805,8 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
             score += 1000;
         }
 
-        if (string.Equals(fileName, "minecraft.jar", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(fileName, "minecraft.jar", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(fileName, "minecraft.jar2", StringComparison.OrdinalIgnoreCase))
         {
             score += 900;
         }
@@ -1050,11 +1074,6 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
         EnsureArgumentWithValue(gameArgs, "--version", mcVersionArg);
         logService.LogInfo($"Legacy launchwrapper args: using --version {mcVersionArg}.");
 
-        if (HasArgument(gameArgs, "--tweakClass"))
-        {
-            return;
-        }
-
         var hasForgeTweaker =
             ContainsClasspathClass(resolvedClasspath, "cpw.mods.fml.common.launcher.FMLTweaker") ||
             Directory.Exists(Path.Combine(instanceDirectory, "libraries", "forge")) ||
@@ -1062,12 +1081,57 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
 
         if (!hasForgeTweaker)
         {
+            RemoveArgWithValue(gameArgs, "--tweakClass");
             return;
         }
 
-        gameArgs.Add("--tweakClass");
-        gameArgs.Add("cpw.mods.fml.common.launcher.FMLTweaker");
-        logService.LogInfo("Legacy launchwrapper args: added --tweakClass cpw.mods.fml.common.launcher.FMLTweaker.");
+        EnsureArgumentWithValue(gameArgs, "--tweakClass", "cpw.mods.fml.common.launcher.FMLTweaker");
+        logService.LogInfo("Legacy launchwrapper args: using --tweakClass cpw.mods.fml.common.launcher.FMLTweaker.");
+    }
+
+    private void EnsureLegacyAuthArguments(List<string> gameArgs, LauncherSettings settings)
+    {
+        var rawUsername = string.IsNullOrWhiteSpace(settings.PlayerAuthUsername)
+            ? settings.LastPlayerUsername.Trim()
+            : settings.PlayerAuthUsername.Trim();
+        var username = NormalizeLegacyUsername(rawUsername);
+
+        var sessionToken = settings.PlayerAuthToken.Trim();
+        if (string.IsNullOrWhiteSpace(sessionToken))
+        {
+            sessionToken = "0";
+        }
+
+        EnsureArgumentWithValue(gameArgs, "--username", username);
+        EnsureArgumentWithValue(gameArgs, "--session", sessionToken);
+
+        var externalId = settings.PlayerAuthExternalId.Trim();
+        if (!string.IsNullOrWhiteSpace(externalId))
+        {
+            EnsureArgumentWithValue(gameArgs, "--uuid", externalId);
+        }
+
+        logService.LogInfo(
+            $"Legacy auth args prepared: username={username}, sourceUsername={rawUsername}, sessionTokenLength={sessionToken.Length}, hasUuid={!string.IsNullOrWhiteSpace(externalId)}.");
+    }
+
+    private void EnsureLegacyRouteArguments(List<string> gameArgs, GameLaunchRoute route, bool routeArgsExplicitlyDisabled)
+    {
+        var hasServer = TryGetArgumentValue(gameArgs, "--server", out var currentServer);
+        var hasPort = TryGetArgumentValue(gameArgs, "--port", out var currentPort);
+        if (hasServer && hasPort && !string.IsNullOrWhiteSpace(currentServer) && !string.IsNullOrWhiteSpace(currentPort))
+        {
+            return;
+        }
+
+        if (routeArgsExplicitlyDisabled)
+        {
+            logService.LogInfo(
+                "Legacy launchwrapper args: --bl-no-route requested but route args were missing. Injecting --server/--port for compatibility.");
+        }
+
+        EnsureArgumentWithValue(gameArgs, "--server", route.Address.Trim());
+        EnsureArgumentWithValue(gameArgs, "--port", route.Port.ToString(CultureInfo.InvariantCulture));
     }
 
     private static string ResolveLegacyVersion(GameLaunchRoute route, LauncherManifest manifest, string instanceDirectory)
@@ -1150,7 +1214,90 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
 
     private static bool HasArgument(IEnumerable<string> args, string key)
     {
-        return args.Any(x => x.Equals(key, StringComparison.OrdinalIgnoreCase));
+        var prefix = key + "=";
+        return args.Any(x =>
+            x.Equals(key, StringComparison.OrdinalIgnoreCase) ||
+            x.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool TryGetArgumentValue(IReadOnlyList<string> args, string key, out string value)
+    {
+        var prefix = key + "=";
+
+        for (var i = 0; i < args.Count; i++)
+        {
+            if (args[i].StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                var inlineValue = args[i][prefix.Length..];
+                if (!string.IsNullOrWhiteSpace(inlineValue))
+                {
+                    value = inlineValue;
+                    return true;
+                }
+
+                break;
+            }
+
+            if (!args[i].Equals(key, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (i + 1 >= args.Count)
+            {
+                break;
+            }
+
+            var next = args[i + 1];
+            if (next.StartsWith("-", StringComparison.Ordinal))
+            {
+                break;
+            }
+
+            value = next;
+            return true;
+        }
+
+        value = string.Empty;
+        return false;
+    }
+
+    private string NormalizeLegacyUsername(string rawUsername)
+    {
+        var candidate = string.IsNullOrWhiteSpace(rawUsername) ? "Player" : rawUsername.Trim();
+        var sanitized = new StringBuilder(candidate.Length);
+
+        foreach (var ch in candidate)
+        {
+            var isAsciiLetter = (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z');
+            var isDigit = ch >= '0' && ch <= '9';
+            if (isAsciiLetter || isDigit || ch == '_')
+            {
+                sanitized.Append(ch);
+            }
+            else
+            {
+                sanitized.Append('_');
+            }
+        }
+
+        var normalized = sanitized.ToString();
+        if (normalized.Length > 16)
+        {
+            normalized = normalized[..16];
+        }
+
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            normalized = "Player";
+        }
+
+        if (!normalized.Equals(candidate, StringComparison.Ordinal))
+        {
+            logService.LogInfo($"Legacy username normalized from '{candidate}' to '{normalized}'.");
+        }
+
+        return normalized;
     }
 
     private string PrepareLegacyCompatibilityHome(string instanceDirectory)
@@ -1193,13 +1340,14 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
                  })
         {
             var sourceDir = Path.Combine(instanceDirectory, dirName);
-            if (!Directory.Exists(sourceDir))
+            var projectedDir = Path.Combine(legacyMinecraftRoot, dirName);
+            if (Directory.Exists(sourceDir))
             {
+                EnsureDirectoryProjection(projectedDir, sourceDir);
                 continue;
             }
 
-            var projectedDir = Path.Combine(legacyMinecraftRoot, dirName);
-            EnsureDirectoryProjection(projectedDir, sourceDir);
+            RemoveProjectedPath(projectedDir);
         }
 
         var sourceMinecraftJar = Path.Combine(instanceDirectory, "minecraft.jar");
@@ -1207,7 +1355,10 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
         if (File.Exists(sourceMinecraftJar))
         {
             CopyFileIfChanged(sourceMinecraftJar, projectedMinecraftJar);
+            return;
         }
+
+        RemoveProjectedPath(projectedMinecraftJar);
     }
 
     private void EnsureDirectoryProjection(string projectedDir, string sourceDir)
@@ -1257,9 +1408,14 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
     {
         Directory.CreateDirectory(targetDir);
 
+        var sourceDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var sourceFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         foreach (var sourceSubDir in Directory.EnumerateDirectories(sourceDir, "*", SearchOption.AllDirectories))
         {
             var relative = Path.GetRelativePath(sourceDir, sourceSubDir);
+            var normalizedRelative = NormalizePath(relative);
+            sourceDirectories.Add(normalizedRelative);
             var targetSubDir = Path.Combine(targetDir, relative);
             Directory.CreateDirectory(targetSubDir);
         }
@@ -1267,8 +1423,41 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
         foreach (var sourceFile in Directory.EnumerateFiles(sourceDir, "*", SearchOption.AllDirectories))
         {
             var relative = Path.GetRelativePath(sourceDir, sourceFile);
+            var normalizedRelative = NormalizePath(relative);
+            sourceFiles.Add(normalizedRelative);
             var targetFile = Path.Combine(targetDir, relative);
             CopyFileIfChanged(sourceFile, targetFile);
+        }
+
+        foreach (var targetFile in Directory.EnumerateFiles(targetDir, "*", SearchOption.AllDirectories))
+        {
+            var relative = NormalizePath(Path.GetRelativePath(targetDir, targetFile));
+            if (sourceFiles.Contains(relative))
+            {
+                continue;
+            }
+
+            RemoveProjectedPath(targetFile);
+        }
+
+        var targetDirectories = Directory
+            .EnumerateDirectories(targetDir, "*", SearchOption.AllDirectories)
+            .OrderByDescending(path => path.Length)
+            .ToList();
+        foreach (var targetSubDir in targetDirectories)
+        {
+            var relative = NormalizePath(Path.GetRelativePath(targetDir, targetSubDir));
+            if (sourceDirectories.Contains(relative))
+            {
+                continue;
+            }
+
+            if (Directory.EnumerateFileSystemEntries(targetSubDir).Any())
+            {
+                continue;
+            }
+
+            RemoveProjectedPath(targetSubDir);
         }
     }
 
@@ -1292,6 +1481,35 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
             sourceInfo.LastWriteTimeUtc > targetInfo.LastWriteTimeUtc.AddSeconds(1))
         {
             File.Copy(sourceFile, targetFile, overwrite: true);
+        }
+    }
+
+    private static void RemoveProjectedPath(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path))
+            {
+                var attributes = File.GetAttributes(path);
+                var isReparsePoint = (attributes & FileAttributes.ReparsePoint) != 0;
+                Directory.Delete(path, recursive: !isReparsePoint);
+                return;
+            }
+
+            if (File.Exists(path))
+            {
+                var attributes = File.GetAttributes(path);
+                if ((attributes & FileAttributes.ReadOnly) != 0)
+                {
+                    File.SetAttributes(path, attributes & ~FileAttributes.ReadOnly);
+                }
+
+                File.Delete(path);
+            }
+        }
+        catch
+        {
+            // Best-effort cleanup for legacy projection.
         }
     }
 
@@ -1384,16 +1602,29 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
 
     private static void RemoveArgWithValue(List<string> args, string key)
     {
-        var index = args.FindIndex(x => x.Equals(key, StringComparison.OrdinalIgnoreCase));
-        while (index >= 0)
+        var prefix = key + "=";
+        var index = 0;
+        while (index < args.Count)
         {
-            args.RemoveAt(index);
-            if (index < args.Count && !args[index].StartsWith("-", StringComparison.Ordinal))
+            var token = args[index];
+            if (token.Equals(key, StringComparison.OrdinalIgnoreCase))
             {
                 args.RemoveAt(index);
+                if (index < args.Count && !args[index].StartsWith("-", StringComparison.Ordinal))
+                {
+                    args.RemoveAt(index);
+                }
+
+                continue;
             }
 
-            index = args.FindIndex(x => x.Equals(key, StringComparison.OrdinalIgnoreCase));
+            if (token.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                args.RemoveAt(index);
+                continue;
+            }
+
+            index++;
         }
     }
 
