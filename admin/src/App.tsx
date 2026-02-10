@@ -8,6 +8,12 @@ type DashboardPage = 'overview' | 'wizard' | 'servers' | 'build' | 'news' | 'int
 type SetupStatusResponse = { needsSetup: boolean }
 type LoginResponse = { token: string; tokenType: string; username: string }
 type ApiError = { error?: string; title?: string; detail?: string; retryAfterSeconds?: number }
+type LauncherBuildApiError = ApiError & {
+  runtimeIdentifier?: string
+  exitCode?: number
+  stdout?: string
+  stderr?: string
+}
 
 class ApiRequestError extends Error {
   status: number
@@ -3942,8 +3948,21 @@ function App() {
         let parsedError = ''
         if (text) {
           try {
-            const parsed = JSON.parse(text) as ApiError
-            parsedError = parsed.error ?? parsed.title ?? ''
+            const parsed = JSON.parse(text) as LauncherBuildApiError
+            const details = [parsed.stderr, parsed.stdout]
+              .map((value) => (value ?? '').trim())
+              .find((value) => value.length > 0)
+            parsedError = [parsed.error, parsed.detail, parsed.title, details]
+              .map((value) => (value ?? '').trim())
+              .find((value) => value.length > 0) ?? ''
+            if (parsed.runtimeIdentifier || typeof parsed.exitCode === 'number') {
+              const runtimePart = parsed.runtimeIdentifier ? `runtime=${parsed.runtimeIdentifier}` : ''
+              const exitCodePart = typeof parsed.exitCode === 'number' ? `exitCode=${parsed.exitCode}` : ''
+              const meta = [runtimePart, exitCodePart].filter(Boolean).join(', ')
+              if (meta) {
+                parsedError = parsedError ? `${parsedError}\n(${meta})` : `(${meta})`
+              }
+            }
           } catch {
             parsedError = text.slice(0, 300)
           }
