@@ -7,6 +7,7 @@ public sealed class AuthAccount
     public string ExternalId { get; set; } = string.Empty;
     public string Roles { get; set; } = "player";
     public bool Banned { get; set; }
+    public int SessionVersion { get; set; }
     public string HwidHash { get; set; } = string.Empty;
     public string DeviceUserName { get; set; } = string.Empty;
     public bool TwoFactorRequired { get; set; }

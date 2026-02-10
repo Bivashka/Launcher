@@ -81,6 +81,16 @@ public sealed class AdminBansController(
             ExpiresAtUtc = request.ExpiresAtUtc
         };
 
+        var nowUtc = DateTime.UtcNow;
+        var matchedAccounts = await dbContext.AuthAccounts
+            .Where(x => x.HwidHash == hwidHash)
+            .ToListAsync(cancellationToken);
+        foreach (var matchedAccount in matchedAccounts)
+        {
+            matchedAccount.SessionVersion++;
+            matchedAccount.UpdatedAtUtc = nowUtc;
+        }
+
         dbContext.HardwareBans.Add(ban);
         await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -93,6 +103,7 @@ public sealed class AdminBansController(
             details: new
             {
                 ban.HwidHash,
+                revokedSessionsForAccounts = matchedAccounts.Count,
                 ban.ExpiresAtUtc
             },
             cancellationToken: cancellationToken);
@@ -117,9 +128,7 @@ public sealed class AdminBansController(
             return BadRequest(new { error = "ExpiresAtUtc must be in the future." });
         }
 
-        var account = await dbContext.AuthAccounts.FirstOrDefaultAsync(
-            x => x.Username == normalizedUser || x.ExternalId == normalizedUser,
-            cancellationToken);
+        var account = await ResolveAccountByUserAsync(normalizedUser, cancellationToken);
         if (account is null)
         {
             return NotFound(new { error = "Account not found." });
@@ -148,6 +157,7 @@ public sealed class AdminBansController(
         {
             account.Banned = true;
         }
+        account.SessionVersion++;
         account.UpdatedAtUtc = DateTime.UtcNow;
 
         dbContext.HardwareBans.Add(ban);
@@ -164,6 +174,7 @@ public sealed class AdminBansController(
                 accountId = account.Id,
                 account.Username,
                 account.ExternalId,
+                account.SessionVersion,
                 ban.HwidHash,
                 ban.DeviceUserName,
                 ban.ExpiresAtUtc
@@ -182,9 +193,7 @@ public sealed class AdminBansController(
             return BadRequest(new { error = "User is required." });
         }
 
-        var account = await dbContext.AuthAccounts.FirstOrDefaultAsync(
-            x => x.Username == normalizedUser || x.ExternalId == normalizedUser,
-            cancellationToken);
+        var account = await ResolveAccountByUserAsync(normalizedUser, cancellationToken);
         if (account is null)
         {
             return NotFound(new { error = "Account not found." });
@@ -306,5 +315,22 @@ public sealed class AdminBansController(
 
         var normalized = value.Trim().ToLowerInvariant();
         return normalized.Length > 128 ? normalized[..128] : normalized;
+    }
+
+    private async Task<AuthAccount?> ResolveAccountByUserAsync(string normalizedUser, CancellationToken cancellationToken)
+    {
+        var byExternalExact = await dbContext.AuthAccounts.FirstOrDefaultAsync(
+            x => x.ExternalId == normalizedUser,
+            cancellationToken);
+        if (byExternalExact is not null)
+        {
+            return byExternalExact;
+        }
+
+        var normalizedUserLower = normalizedUser.ToLowerInvariant();
+        return await dbContext.AuthAccounts
+            .Where(x => x.Username.ToLower() == normalizedUserLower || x.ExternalId.ToLower() == normalizedUserLower)
+            .OrderByDescending(x => x.UpdatedAtUtc)
+            .FirstOrDefaultAsync(cancellationToken);
     }
 }

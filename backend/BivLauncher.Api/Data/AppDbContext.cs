@@ -63,6 +63,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.Property(x => x.Username).HasMaxLength(64);
             entity.Property(x => x.ExternalId).HasMaxLength(128);
             entity.Property(x => x.Roles).HasMaxLength(512);
+            entity.Property(x => x.SessionVersion).HasDefaultValue(0);
             entity.Property(x => x.HwidHash).HasMaxLength(128);
             entity.Property(x => x.DeviceUserName).HasMaxLength(128);
             entity.Property(x => x.TwoFactorSecret).HasMaxLength(128);

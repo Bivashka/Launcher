@@ -3,6 +3,7 @@ using BivLauncher.Api.Options;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
+using System.Globalization;
 using System.Security.Claims;
 using System.Text;
 
@@ -44,7 +45,8 @@ public sealed class JwtTokenService(IOptions<JwtOptions> options) : IJwtTokenSer
             new(JwtRegisteredClaimNames.Sub, authAccount.Id.ToString()),
             new(JwtRegisteredClaimNames.UniqueName, authAccount.Username),
             new(ClaimTypes.Name, authAccount.Username),
-            new("external_id", authAccount.ExternalId)
+            new("external_id", authAccount.ExternalId),
+            new("session_version", authAccount.SessionVersion.ToString(CultureInfo.InvariantCulture))
         };
 
         foreach (var role in roles.Where(x => !string.IsNullOrWhiteSpace(x)))

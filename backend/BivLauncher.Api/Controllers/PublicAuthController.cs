@@ -27,6 +27,7 @@ public sealed class PublicAuthController(
     {
         var externalId = User.FindFirstValue("external_id")?.Trim() ?? string.Empty;
         var username = User.Identity?.Name?.Trim() ?? string.Empty;
+        var tokenSessionVersionRaw = User.FindFirstValue("session_version");
 
         if (string.IsNullOrWhiteSpace(externalId) && string.IsNullOrWhiteSpace(username))
         {
@@ -52,6 +53,16 @@ public sealed class PublicAuthController(
         if (account is null)
         {
             return Unauthorized(new { error = "Player session is not recognized." });
+        }
+
+        if (!TryParseSessionVersion(tokenSessionVersionRaw, out var tokenSessionVersion))
+        {
+            return Unauthorized(new { error = "Invalid player session token version." });
+        }
+
+        if (tokenSessionVersion != account.SessionVersion)
+        {
+            return Unauthorized(new { error = "Player session expired. Login is required." });
         }
 
         if (account.Banned)
@@ -336,6 +347,17 @@ public sealed class PublicAuthController(
 
         var normalized = rawDeviceUserName.Trim().ToLowerInvariant();
         return normalized.Length > 128 ? normalized[..128] : normalized;
+    }
+
+    private static bool TryParseSessionVersion(string? rawValue, out int sessionVersion)
+    {
+        sessionVersion = 0;
+        if (string.IsNullOrWhiteSpace(rawValue))
+        {
+            return false;
+        }
+
+        return int.TryParse(rawValue.Trim(), out sessionVersion) && sessionVersion >= 0;
     }
 
     private static List<string> NormalizeRoles(IEnumerable<string> roles)
