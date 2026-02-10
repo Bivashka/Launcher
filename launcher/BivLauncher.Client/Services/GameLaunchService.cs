@@ -131,8 +131,14 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
             EnsureLegacyJvmNativePaths(startInfo.ArgumentList, instanceDirectory);
             if (string.Equals(resolvedMainClassForCompatibility, "net.minecraft.launchwrapper.Launch", StringComparison.OrdinalIgnoreCase))
             {
-                EnsureLegacyAuthArguments(gameArgs, settings);
-                EnsureLegacyRouteArguments(gameArgs, route, disableAutoRouteArgs);
+                var usePositionalLegacyArgs = ShouldUseLegacyPositionalArguments(route, manifest, instanceDirectory);
+                if (usePositionalLegacyArgs)
+                {
+                    logService.LogInfo("Legacy launchwrapper compatibility: using positional auth/route args for pre-1.6 client.");
+                }
+
+                EnsureLegacyAuthArguments(gameArgs, settings, usePositionalLegacyArgs);
+                EnsureLegacyRouteArguments(gameArgs, route, disableAutoRouteArgs, usePositionalLegacyArgs);
                 EnsureLegacyLaunchwrapperDefaults(gameArgs, route, manifest, instanceDirectory, resolvedClasspathForCompatibility);
             }
             legacyCompatibilityHome = PrepareLegacyCompatibilityHome(instanceDirectory);
@@ -1089,7 +1095,7 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
         logService.LogInfo("Legacy launchwrapper args: using --tweakClass cpw.mods.fml.common.launcher.FMLTweaker.");
     }
 
-    private void EnsureLegacyAuthArguments(List<string> gameArgs, LauncherSettings settings)
+    private void EnsureLegacyAuthArguments(List<string> gameArgs, LauncherSettings settings, bool usePositionalLegacyArgs)
     {
         var rawUsername = string.IsNullOrWhiteSpace(settings.PlayerAuthUsername)
             ? settings.LastPlayerUsername.Trim()
@@ -1100,6 +1106,21 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
         if (string.IsNullOrWhiteSpace(sessionToken))
         {
             sessionToken = "0";
+        }
+
+        if (usePositionalLegacyArgs)
+        {
+            RemoveArgWithValue(gameArgs, "--username");
+            RemoveArgWithValue(gameArgs, "--session");
+            RemoveArgWithValue(gameArgs, "--uuid");
+
+            // Pre-1.6 clients expect positional args: username, session, server, port.
+            gameArgs.Insert(0, sessionToken);
+            gameArgs.Insert(0, username);
+
+            logService.LogInfo(
+                $"Legacy auth args prepared (positional): username={username}, sourceUsername={rawUsername}, sessionTokenLength={sessionToken.Length}.");
+            return;
         }
 
         EnsureArgumentWithValue(gameArgs, "--username", username);
@@ -1115,8 +1136,32 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
             $"Legacy auth args prepared: username={username}, sourceUsername={rawUsername}, sessionTokenLength={sessionToken.Length}, hasUuid={!string.IsNullOrWhiteSpace(externalId)}.");
     }
 
-    private void EnsureLegacyRouteArguments(List<string> gameArgs, GameLaunchRoute route, bool routeArgsExplicitlyDisabled)
+    private void EnsureLegacyRouteArguments(
+        List<string> gameArgs,
+        GameLaunchRoute route,
+        bool routeArgsExplicitlyDisabled,
+        bool usePositionalLegacyArgs)
     {
+        if (usePositionalLegacyArgs)
+        {
+            RemoveArgWithValue(gameArgs, "--server");
+            RemoveArgWithValue(gameArgs, "--port");
+
+            if (routeArgsExplicitlyDisabled)
+            {
+                logService.LogInfo(
+                    "Legacy launchwrapper args: --bl-no-route requested but positional route args are required for pre-1.6 compatibility.");
+            }
+
+            var address = route.Address.Trim();
+            var port = route.Port.ToString(CultureInfo.InvariantCulture);
+
+            // Keep positional route right after positional auth.
+            gameArgs.Insert(Math.Min(2, gameArgs.Count), address);
+            gameArgs.Insert(Math.Min(3, gameArgs.Count), port);
+            return;
+        }
+
         var hasServer = TryGetArgumentValue(gameArgs, "--server", out var currentServer);
         var hasPort = TryGetArgumentValue(gameArgs, "--port", out var currentPort);
         if (hasServer && hasPort && !string.IsNullOrWhiteSpace(currentServer) && !string.IsNullOrWhiteSpace(currentPort))
@@ -1132,6 +1177,80 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
 
         EnsureArgumentWithValue(gameArgs, "--server", route.Address.Trim());
         EnsureArgumentWithValue(gameArgs, "--port", route.Port.ToString(CultureInfo.InvariantCulture));
+    }
+
+    private static bool ShouldUseLegacyPositionalArguments(
+        GameLaunchRoute route,
+        LauncherManifest manifest,
+        string instanceDirectory)
+    {
+        var resolvedVersion = ResolveLegacyVersion(route, manifest, instanceDirectory);
+        if (string.IsNullOrWhiteSpace(resolvedVersion))
+        {
+            return false;
+        }
+
+        if (string.Equals(resolvedVersion, "legacy", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (!TryParseMajorMinorVersion(resolvedVersion, out var major, out var minor))
+        {
+            return false;
+        }
+
+        return major == 1 && minor <= 5;
+    }
+
+    private static bool TryParseMajorMinorVersion(string rawVersion, out int major, out int minor)
+    {
+        major = 0;
+        minor = 0;
+
+        if (string.IsNullOrWhiteSpace(rawVersion))
+        {
+            return false;
+        }
+
+        var normalized = rawVersion.Trim();
+        var firstDot = normalized.IndexOf('.');
+        if (firstDot <= 0 || firstDot + 1 >= normalized.Length)
+        {
+            return false;
+        }
+
+        var secondDot = normalized.IndexOf('.', firstDot + 1);
+        var majorPart = normalized[..firstDot];
+        var minorPart = secondDot > firstDot
+            ? normalized.Substring(firstDot + 1, secondDot - firstDot - 1)
+            : normalized[(firstDot + 1)..];
+
+        majorPart = ExtractLeadingDigits(majorPart);
+        minorPart = ExtractLeadingDigits(minorPart);
+        if (string.IsNullOrWhiteSpace(majorPart) || string.IsNullOrWhiteSpace(minorPart))
+        {
+            return false;
+        }
+
+        return int.TryParse(majorPart, NumberStyles.Integer, CultureInfo.InvariantCulture, out major) &&
+               int.TryParse(minorPart, NumberStyles.Integer, CultureInfo.InvariantCulture, out minor);
+    }
+
+    private static string ExtractLeadingDigits(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var index = 0;
+        while (index < value.Length && char.IsDigit(value[index]))
+        {
+            index++;
+        }
+
+        return index == 0 ? string.Empty : value[..index];
     }
 
     private static string ResolveLegacyVersion(GameLaunchRoute route, LauncherManifest manifest, string instanceDirectory)
