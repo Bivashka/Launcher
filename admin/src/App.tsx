@@ -2153,7 +2153,8 @@ function App() {
       const loadedS3Settings = await readJsonOrDefault<S3Settings>(s3Data, defaultS3Settings)
       const loadedServerLauncherJar = await readJsonOrDefault<ServerLauncherJarStatus>(serverLauncherJarData, defaultServerLauncherJarStatus)
 
-      if (loadedProfiles.length === 0 && loadedServers.length === 0) {
+      const coreEndpointsUnavailable = !profileData.ok && !serverData.ok
+      if (coreEndpointsUnavailable && loadedProfiles.length === 0 && loadedServers.length === 0) {
         throw new Error('Unable to load core admin data (profiles/servers). Check API logs.')
       }
 
