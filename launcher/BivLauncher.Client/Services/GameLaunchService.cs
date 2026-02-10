@@ -52,8 +52,19 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
         jvmArgs.Insert(0, $"-Xmx{settings.RamMb}M");
         jvmArgs.Insert(0, "-Xms1024M");
 
+        var usePositionalLegacyArgs = ShouldUseLegacyPositionalArguments(route, manifest, instanceDirectory);
         var gameArgs = SplitArgs(manifest.GameArgsDefault).ToList();
+        var forceAutoRouteArgs = StripControlFlag(gameArgs, "--bl-force-route");
         var disableAutoRouteArgs = StripControlFlag(gameArgs, "--bl-no-route");
+
+        // Pre-1.6 launchwrapper clients often have their own in-game server selector in minecraft.jar.
+        // Keep launcher route selection available, but require explicit opt-in via --bl-force-route.
+        if (usePositionalLegacyArgs && !disableAutoRouteArgs && !forceAutoRouteArgs)
+        {
+            disableAutoRouteArgs = true;
+            logService.LogInfo("Auto route args are disabled by default for pre-1.6 compatibility. Add --bl-force-route to enable launcher auto-connect.");
+        }
+
         if (!disableAutoRouteArgs)
         {
             AppendRouteArgs(gameArgs, route.Address, route.Port);
@@ -131,7 +142,6 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
             EnsureLegacyJvmNativePaths(startInfo.ArgumentList, instanceDirectory);
             if (string.Equals(resolvedMainClassForCompatibility, "net.minecraft.launchwrapper.Launch", StringComparison.OrdinalIgnoreCase))
             {
-                var usePositionalLegacyArgs = ShouldUseLegacyPositionalArguments(route, manifest, instanceDirectory);
                 if (usePositionalLegacyArgs)
                 {
                     logService.LogInfo("Legacy launchwrapper compatibility: using positional auth/route args for pre-1.6 client.");
@@ -1147,18 +1157,19 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
             RemoveArgWithValue(gameArgs, "--server");
             RemoveArgWithValue(gameArgs, "--port");
 
+            var positionalServer = route.Address.Trim();
+            var positionalPort = route.Port.ToString(CultureInfo.InvariantCulture);
             if (routeArgsExplicitlyDisabled)
             {
                 logService.LogInfo(
-                    "Legacy launchwrapper args: --bl-no-route requested but positional route args are required for pre-1.6 compatibility.");
+                    "Legacy launchwrapper args: route auto-connect disabled; passing empty positional server/port for in-game server selection.");
+                positionalServer = string.Empty;
+                positionalPort = "0";
             }
 
-            var address = route.Address.Trim();
-            var port = route.Port.ToString(CultureInfo.InvariantCulture);
-
             // Keep positional route right after positional auth.
-            gameArgs.Insert(Math.Min(2, gameArgs.Count), address);
-            gameArgs.Insert(Math.Min(3, gameArgs.Count), port);
+            gameArgs.Insert(Math.Min(2, gameArgs.Count), positionalServer);
+            gameArgs.Insert(Math.Min(3, gameArgs.Count), positionalPort);
             return;
         }
 
