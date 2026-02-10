@@ -74,6 +74,24 @@ public sealed class PublicAuthController(
             return StatusCode(StatusCodes.Status403Forbidden, new { error = $"Account is banned: {activeAccountBan}" });
         }
 
+        var normalizedDeviceUserName = NormalizeDeviceUserName(account.DeviceUserName);
+        if (!string.IsNullOrWhiteSpace(normalizedDeviceUserName))
+        {
+            var activeDeviceUserBan = await dbContext.HardwareBans
+                .AsNoTracking()
+                .Where(x =>
+                    x.DeviceUserName == normalizedDeviceUserName &&
+                    (x.ExpiresAtUtc == null || x.ExpiresAtUtc > now))
+                .OrderByDescending(x => x.CreatedAtUtc)
+                .Select(x => x.Reason)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (activeDeviceUserBan is not null)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { error = $"Device user banned: {activeDeviceUserBan}" });
+            }
+        }
+
         var roles = NormalizeRoles(account.Roles.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
 
         return Ok(new PublicAuthSessionResponse(
@@ -88,6 +106,7 @@ public sealed class PublicAuthController(
         CancellationToken cancellationToken)
     {
         var username = request.Username.Trim();
+        var deviceUserName = NormalizeDeviceUserName(request.DeviceUserName);
         var hwidHash = hardwareFingerprintService.NormalizeLegacyHash(request.HwidHash);
         var hwidFingerprint = hardwareFingerprintService.NormalizeLegacyHash(request.HwidFingerprint);
         if (!string.IsNullOrWhiteSpace(hwidFingerprint))
@@ -114,6 +133,23 @@ public sealed class PublicAuthController(
             if (activeHardwareBan is not null)
             {
                 return StatusCode(StatusCodes.Status403Forbidden, new { error = $"Hardware banned: {activeHardwareBan}" });
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(deviceUserName))
+        {
+            var activeDeviceUserBan = await dbContext.HardwareBans
+                .AsNoTracking()
+                .Where(x =>
+                    x.DeviceUserName == deviceUserName &&
+                    (x.ExpiresAtUtc == null || x.ExpiresAtUtc > now))
+                .OrderByDescending(x => x.CreatedAtUtc)
+                .Select(x => x.Reason)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (activeDeviceUserBan is not null)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { error = $"Device user banned: {activeDeviceUserBan}" });
             }
         }
 
@@ -153,7 +189,8 @@ public sealed class PublicAuthController(
                 Username = normalizedUsername,
                 Roles = string.Join(',', roles),
                 Banned = false,
-                HwidHash = hwidHash
+                HwidHash = hwidHash,
+                DeviceUserName = deviceUserName
             };
             dbContext.AuthAccounts.Add(account);
         }
@@ -162,6 +199,7 @@ public sealed class PublicAuthController(
             account.Username = normalizedUsername;
             account.Roles = string.Join(',', roles);
             account.HwidHash = hwidHash;
+            account.DeviceUserName = deviceUserName;
             account.UpdatedAtUtc = DateTime.UtcNow;
         }
 
@@ -287,6 +325,17 @@ public sealed class PublicAuthController(
         }
 
         return new string(rawCode.Where(char.IsDigit).ToArray());
+    }
+
+    private static string NormalizeDeviceUserName(string? rawDeviceUserName)
+    {
+        if (string.IsNullOrWhiteSpace(rawDeviceUserName))
+        {
+            return string.Empty;
+        }
+
+        var normalized = rawDeviceUserName.Trim().ToLowerInvariant();
+        return normalized.Length > 128 ? normalized[..128] : normalized;
     }
 
     private static List<string> NormalizeRoles(IEnumerable<string> roles)

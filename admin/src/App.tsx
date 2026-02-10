@@ -355,6 +355,7 @@ type BanItem = {
   accountUsername: string
   accountExternalId: string
   hwidHash: string
+  deviceUserName: string
   reason: string
   createdAtUtc: string
   expiresAtUtc: string | null
@@ -1299,6 +1300,36 @@ function toSlug(value: string): string {
     .replace(/-+$/, '')
 }
 
+function sanitizeApiErrorMessage(raw: string, status: number): string {
+  const normalized = raw.replace(/\r/g, '').trim()
+  if (!normalized) {
+    return ''
+  }
+
+  const lower = normalized.toLowerCase()
+  const looksLikeHtml = lower.startsWith('<!doctype html') || lower.startsWith('<html')
+  const looksLikeStackTrace =
+    (normalized.includes('\n   at ') || normalized.includes('\n at ')) &&
+    (lower.includes('exception') ||
+      lower.includes('stacktrace') ||
+      lower.includes('developerexceptionpage'))
+
+  if (looksLikeHtml || looksLikeStackTrace) {
+    if (status >= 500) {
+      return `Server error (${status}). Check API logs for details.`
+    }
+
+    return `Request failed (${status}).`
+  }
+
+  const collapsed = normalized.replace(/\s+/g, ' ')
+  if (collapsed.length > 500) {
+    return `${collapsed.slice(0, 500)}...`
+  }
+
+  return collapsed
+}
+
 function App() {
   const apiBaseUrl = useMemo(() => {
     const configured = import.meta.env.VITE_API_BASE_URL
@@ -1418,8 +1449,8 @@ function App() {
   const [discordScopeId, setDiscordScopeId] = useState('')
   const [discordRpcSettings, setDiscordRpcSettings] = useState<DiscordRpcSettings>(defaultDiscordRpcSettings)
   const [discordForm, setDiscordForm] = useState(defaultDiscordForm)
-  const [rebuildLoaderType, setRebuildLoaderType] = useState<string>('vanilla')
-  const [rebuildMcVersion, setRebuildMcVersion] = useState('1.21.1')
+  const [rebuildLoaderType, setRebuildLoaderType] = useState<string>('')
+  const [rebuildMcVersion, setRebuildMcVersion] = useState('')
   const [rebuildJvmArgsDefault, setRebuildJvmArgsDefault] = useState('')
   const [rebuildGameArgsDefault, setRebuildGameArgsDefault] = useState('')
   const [rebuildSourceSubPath, setRebuildSourceSubPath] = useState('')
@@ -1707,12 +1738,12 @@ function App() {
       if (text) {
         try {
           const payload = JSON.parse(text) as ApiError
-          parsedError = payload.error ?? payload.title ?? ''
+          parsedError = sanitizeApiErrorMessage(payload.error ?? payload.detail ?? payload.title ?? '', response.status)
           if (typeof payload.retryAfterSeconds === 'number' && payload.retryAfterSeconds > 0) {
             retryAfterSeconds = Math.ceil(payload.retryAfterSeconds)
           }
         } catch {
-          parsedError = text
+          parsedError = sanitizeApiErrorMessage(text, response.status)
         }
       }
 
@@ -4010,11 +4041,17 @@ function App() {
     setError('')
     setNotice('')
     try {
+      const fallbackServer = servers
+        .filter((server) => server.profileId === profileId)
+        .sort((left, right) => left.order - right.order)[0]
+      const effectiveLoaderType = rebuildLoaderType.trim() || fallbackServer?.loaderType?.trim() || ''
+      const effectiveMcVersion = rebuildMcVersion.trim() || fallbackServer?.mcVersion?.trim() || ''
+
       const build = await requestWithAuth<BuildResponse>(`/api/admin/profiles/${profileId}/rebuild`, {
         method: 'POST',
         body: JSON.stringify({
-          loaderType: rebuildLoaderType,
-          mcVersion: rebuildMcVersion.trim(),
+          loaderType: effectiveLoaderType,
+          mcVersion: effectiveMcVersion,
           jvmArgsDefault: rebuildJvmArgsDefault.trim(),
           gameArgsDefault: rebuildGameArgsDefault.trim(),
           sourceSubPath: rebuildSourceSubPath.trim(),
@@ -4720,8 +4757,8 @@ function App() {
     setDiscordScopeType('profile')
     setDiscordScopeId('')
     setDiscordForm(defaultDiscordForm)
-    setRebuildLoaderType('vanilla')
-    setRebuildMcVersion('1.21.1')
+    setRebuildLoaderType('')
+    setRebuildMcVersion('')
     setRebuildJvmArgsDefault('')
     setRebuildGameArgsDefault('')
     setRebuildSourceSubPath('')
@@ -5747,6 +5784,7 @@ function App() {
                   <h4>Параметры пересборки</h4>
                   <div className="grid-inline">
                     <select value={rebuildLoaderType} onChange={(event) => setRebuildLoaderType(event.target.value)}>
+                      <option value="">auto (from profile/server)</option>
                       {supportedLoaders.map((loader) => (
                         <option key={loader} value={loader}>
                           {loader}
@@ -6322,6 +6360,8 @@ function App() {
                       <span className="list-text">
                         {ban.accountId ? `account: ${ban.accountUsername}` : 'hwid'}
                         <small>{ban.accountId ? ban.accountExternalId : ban.hwidHash || 'n/a'}</small>
+                        {ban.deviceUserName && <small>device user: {ban.deviceUserName}</small>}
+                        {ban.hwidHash && ban.accountId && <small>hwid: {ban.hwidHash}</small>}
                         <small>
                           active: {String(ban.active)} | created: {new Date(ban.createdAtUtc).toLocaleString()}
                         </small>

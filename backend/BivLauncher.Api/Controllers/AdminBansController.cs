@@ -39,6 +39,7 @@ public sealed class AdminBansController(
                 x.Account != null ? x.Account.Username : string.Empty,
                 x.Account != null ? x.Account.ExternalId : string.Empty,
                 x.HwidHash,
+                x.DeviceUserName,
                 x.Reason,
                 x.CreatedAtUtc,
                 x.ExpiresAtUtc,
@@ -74,6 +75,7 @@ public sealed class AdminBansController(
         var ban = new HardwareBan
         {
             HwidHash = hwidHash,
+            DeviceUserName = string.Empty,
             Reason = NormalizeReason(request.Reason),
             CreatedAtUtc = DateTime.UtcNow,
             ExpiresAtUtc = request.ExpiresAtUtc
@@ -135,7 +137,8 @@ public sealed class AdminBansController(
         var ban = new HardwareBan
         {
             AccountId = account.Id,
-            HwidHash = string.Empty,
+            HwidHash = NormalizeHwidHash(account.HwidHash),
+            DeviceUserName = NormalizeDeviceUserName(account.DeviceUserName),
             Reason = NormalizeReason(request.Reason),
             CreatedAtUtc = DateTime.UtcNow,
             ExpiresAtUtc = request.ExpiresAtUtc
@@ -161,6 +164,8 @@ public sealed class AdminBansController(
                 accountId = account.Id,
                 account.Username,
                 account.ExternalId,
+                ban.HwidHash,
+                ban.DeviceUserName,
                 ban.ExpiresAtUtc
             },
             cancellationToken: cancellationToken);
@@ -233,7 +238,8 @@ public sealed class AdminBansController(
             details: new
             {
                 ban.AccountId,
-                ban.HwidHash
+                ban.HwidHash,
+                ban.DeviceUserName
             },
             cancellationToken: cancellationToken);
 
@@ -268,6 +274,7 @@ public sealed class AdminBansController(
             username ?? string.Empty,
             externalId ?? string.Empty,
             ban.HwidHash,
+            ban.DeviceUserName,
             ban.Reason,
             ban.CreatedAtUtc,
             ban.ExpiresAtUtc,
@@ -278,5 +285,26 @@ public sealed class AdminBansController(
     {
         var normalized = reason.Trim();
         return string.IsNullOrWhiteSpace(normalized) ? "Manual ban" : normalized;
+    }
+
+    private static string NormalizeHwidHash(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        return value.Trim().ToLowerInvariant();
+    }
+
+    private static string NormalizeDeviceUserName(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var normalized = value.Trim().ToLowerInvariant();
+        return normalized.Length > 128 ? normalized[..128] : normalized;
     }
 }

@@ -6,6 +6,7 @@ public sealed record BanDto(
     string AccountUsername,
     string AccountExternalId,
     string HwidHash,
+    string DeviceUserName,
     string Reason,
     DateTime CreatedAtUtc,
     DateTime? ExpiresAtUtc,

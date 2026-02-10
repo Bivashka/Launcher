@@ -6,6 +6,7 @@ public sealed class PublicAuthLoginRequest
     public string Password { get; set; } = string.Empty;
     public string HwidFingerprint { get; set; } = string.Empty;
     public string HwidHash { get; set; } = string.Empty;
+    public string DeviceUserName { get; set; } = string.Empty;
     public string TwoFactorCode { get; set; } = string.Empty;
 }
 

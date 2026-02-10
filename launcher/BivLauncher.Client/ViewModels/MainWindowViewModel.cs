@@ -882,7 +882,10 @@ public partial class MainWindowViewModel : ViewModelBase
                     CancellationToken.None);
 
                 CompleteFileSyncProgress(result);
-                StatusText = F("status.verifyComplete", result.DownloadedFiles, result.VerifiedFiles);
+                var verifyCompleteText = F("status.verifyComplete", result.DownloadedFiles, result.VerifiedFiles);
+                StatusText = result.RemovedFiles > 0
+                    ? $"{verifyCompleteText} Removed orphan files: {result.RemovedFiles}."
+                    : verifyCompleteText;
                 _logService.LogInfo(StatusText);
             }
             finally
@@ -913,6 +916,14 @@ public partial class MainWindowViewModel : ViewModelBase
 
             try
             {
+                var preLaunchSessionValidationError = await ValidatePlayerSessionBeforeLaunchAsync();
+                if (!string.IsNullOrWhiteSpace(preLaunchSessionValidationError))
+                {
+                    StatusText = preLaunchSessionValidationError;
+                    _logService.LogInfo(preLaunchSessionValidationError);
+                    return;
+                }
+
                 await SaveSettingsAsync();
 
                 StatusText = T("status.fetchingManifest");
@@ -935,6 +946,10 @@ public partial class MainWindowViewModel : ViewModelBase
                     CancellationToken.None);
                 CompleteFileSyncProgress(installResult);
                 StopFileSyncProgress();
+                if (installResult.RemovedFiles > 0)
+                {
+                    _logService.LogInfo($"Removed orphan files: {installResult.RemovedFiles}");
+                }
 
                 StatusText = T("status.launchingJava");
                 launchRoute = ResolveLaunchRoute(selectedServer);
@@ -1366,6 +1381,7 @@ public partial class MainWindowViewModel : ViewModelBase
                 Username = username,
                 Password = PlayerPassword,
                 HwidFingerprint = ComputeHwidFingerprint(),
+                DeviceUserName = ComputeDeviceUserName(),
                 TwoFactorCode = PlayerTwoFactorCode.Trim()
             });
 
@@ -1465,6 +1481,41 @@ public partial class MainWindowViewModel : ViewModelBase
                 currentApiBaseUrl);
 
             _logService.LogError($"Player session validation failed, restored cached session: {ex.Message}");
+        }
+    }
+
+    private async Task<string> ValidatePlayerSessionBeforeLaunchAsync()
+    {
+        if (!IsPlayerLoggedIn || string.IsNullOrWhiteSpace(_playerAuthToken))
+        {
+            return string.Empty;
+        }
+
+        var currentApiBaseUrl = NormalizeBaseUrl(ApiBaseUrl);
+
+        try
+        {
+            var session = await _launcherApiService.GetSessionAsync(ApiBaseUrl, _playerAuthToken, _playerAuthTokenType);
+            SetAuthenticatedPlayerSession(
+                _playerAuthToken,
+                _playerAuthTokenType,
+                session.Username,
+                session.ExternalId,
+                session.Roles,
+                currentApiBaseUrl);
+            await PersistSettingsSnapshotAsync();
+            return string.Empty;
+        }
+        catch (LauncherApiException apiException) when (
+            apiException.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+        {
+            ClearAuthenticatedPlayerSession();
+            await PersistSettingsSnapshotAsync();
+            return "Player session rejected by server (possibly banned). Login is required.";
+        }
+        catch (Exception ex)
+        {
+            return $"Failed to validate player session before launch: {ex.Message}";
         }
     }
 
@@ -2190,6 +2241,17 @@ public partial class MainWindowViewModel : ViewModelBase
         var bytes = Encoding.UTF8.GetBytes(raw);
         var hash = SHA256.HashData(bytes);
         return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    private static string ComputeDeviceUserName()
+    {
+        if (string.IsNullOrWhiteSpace(Environment.UserName))
+        {
+            return string.Empty;
+        }
+
+        var normalized = Environment.UserName.Trim().ToLowerInvariant();
+        return normalized.Length > 128 ? normalized[..128] : normalized;
     }
 
     private static string NormalizeHwidPart(string? value)

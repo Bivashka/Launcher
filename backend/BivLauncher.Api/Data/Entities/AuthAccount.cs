@@ -8,6 +8,7 @@ public sealed class AuthAccount
     public string Roles { get; set; } = "player";
     public bool Banned { get; set; }
     public string HwidHash { get; set; } = string.Empty;
+    public string DeviceUserName { get; set; } = string.Empty;
     public bool TwoFactorRequired { get; set; }
     public string TwoFactorSecret { get; set; } = string.Empty;
     public DateTime? TwoFactorEnrolledAtUtc { get; set; }
