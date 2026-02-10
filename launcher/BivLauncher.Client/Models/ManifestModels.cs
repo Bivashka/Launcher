@@ -44,6 +44,7 @@ public sealed class InstallResult
     public required string InstanceDirectory { get; init; }
     public required int DownloadedFiles { get; init; }
     public required int VerifiedFiles { get; init; }
+    public int RemovedFiles { get; init; }
 }
 
 public sealed class LaunchResult
