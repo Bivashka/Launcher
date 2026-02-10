@@ -50,4 +50,6 @@ Launch strategy metadata (manifest):
   - other loaders default to `jar`
 - Typical classpath entries:
   - `libraries/**/*.jar`
+  - `libraries/**/*.jar2`
   - `*.jar`
+  - `*.jar2`

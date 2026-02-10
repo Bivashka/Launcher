@@ -5,7 +5,9 @@ using BivLauncher.Api.Data.Entities;
 using BivLauncher.Api.Options;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using System.IO.Compression;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace BivLauncher.Api.Services;
@@ -17,6 +19,10 @@ public sealed class BuildPipelineService(
     IWebHostEnvironment environment,
     ILogger<BuildPipelineService> logger) : IBuildPipelineService
 {
+    private const string LegacyBridgeInternalName = "com/mojang/authlib/yggdrasil/LegacyBridge";
+    private const string LegacyBridgeClassEntry = LegacyBridgeInternalName + ".class";
+    private const string LegacyBridgeCompatArtifactPath = "libraries/00-legacybridge-compat.jar";
+
     private static readonly JsonSerializerOptions ManifestJsonOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = false
@@ -76,7 +82,11 @@ public sealed class BuildPipelineService(
                 throw new DirectoryNotFoundException("No files found in build source directories.");
             }
 
-            var manifestFiles = new List<LauncherManifestFile>(sourceFiles.Count);
+            var generatedFiles = BuildGeneratedFiles(sourceFiles);
+            launchProfile = EnsureGeneratedFilesAreOnClasspath(launchProfile, generatedFiles);
+
+            var manifestFiles = new List<LauncherManifestFile>(sourceFiles.Count + generatedFiles.Count);
+            var skippedMissingFiles = new List<string>();
             long totalSize = 0;
             var buildIdString = buildId.ToString("N");
 
@@ -89,17 +99,76 @@ public sealed class BuildPipelineService(
                 var s3Key = $"clients/{profile.Slug}/{buildIdString}/{relativePath}";
                 var contentType = ResolveContentType(filePath);
 
-                await using var stream = File.OpenRead(filePath);
-                var sha256 = await ComputeSha256Async(stream, cancellationToken);
-                stream.Position = 0;
+                try
+                {
+                    await using var stream = File.OpenRead(filePath);
+                    var sha256 = await ComputeSha256Async(stream, cancellationToken);
+                    stream.Position = 0;
 
-                await objectStorageService.UploadAsync(s3Key, stream, contentType, cancellationToken: cancellationToken);
+                    await objectStorageService.UploadAsync(s3Key, stream, contentType, cancellationToken: cancellationToken);
+
+                    var fileSize = stream.Length;
+                    totalSize += fileSize;
+
+                    manifestFiles.Add(new LauncherManifestFile(
+                        Path: relativePath,
+                        Sha256: sha256,
+                        Size: fileSize,
+                        S3Key: s3Key));
+                }
+                catch (FileNotFoundException)
+                {
+                    skippedMissingFiles.Add(relativePath);
+                    logger.LogWarning(
+                        "Skipping source file '{RelativePath}' because it no longer exists at build time: {FilePath}",
+                        relativePath,
+                        filePath);
+                }
+                catch (DirectoryNotFoundException)
+                {
+                    skippedMissingFiles.Add(relativePath);
+                    logger.LogWarning(
+                        "Skipping source file '{RelativePath}' because its directory no longer exists at build time: {FilePath}",
+                        relativePath,
+                        filePath);
+                }
+            }
+
+            if (manifestFiles.Count == 0)
+            {
+                if (skippedMissingFiles.Count > 0)
+                {
+                    throw new DirectoryNotFoundException(
+                        $"No readable files found in build source directories. " +
+                        $"Skipped {skippedMissingFiles.Count} missing file(s); first missing path: '{skippedMissingFiles[0]}'.");
+                }
+
+                throw new DirectoryNotFoundException("No files found in build source directories.");
+            }
+
+            if (skippedMissingFiles.Count > 0)
+            {
+                logger.LogWarning(
+                    "Skipped {MissingFilesCount} source file(s) that disappeared during rebuild for profile '{ProfileSlug}'.",
+                    skippedMissingFiles.Count,
+                    profile.Slug);
+            }
+
+            foreach (var generatedFile in generatedFiles)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var s3Key = $"clients/{profile.Slug}/{buildIdString}/{generatedFile.Path}";
+                var sha256 = Convert.ToHexString(SHA256.HashData(generatedFile.Content)).ToLowerInvariant();
+                await using var stream = new MemoryStream(generatedFile.Content, writable: false);
+
+                await objectStorageService.UploadAsync(s3Key, stream, generatedFile.ContentType, cancellationToken: cancellationToken);
 
                 var fileSize = stream.Length;
                 totalSize += fileSize;
 
                 manifestFiles.Add(new LauncherManifestFile(
-                    Path: relativePath,
+                    Path: generatedFile.Path,
                     Sha256: sha256,
                     Size: fileSize,
                     S3Key: s3Key));
@@ -472,13 +541,11 @@ public sealed class BuildPipelineService(
             return [];
         }
 
-        var entries = rawClasspath
+        return rawClasspath
             .Split(new[] { '\r', '\n', ';', ',' }, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
             .Select(NormalizeClasspathEntry)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
-
-        return entries;
     }
 
     private static string NormalizeClasspathEntry(string entry)
@@ -519,6 +586,758 @@ public sealed class BuildPipelineService(
         string Mode,
         string MainClass,
         IReadOnlyList<string> ClasspathEntries);
+
+    private static LaunchProfile EnsureGeneratedFilesAreOnClasspath(
+        LaunchProfile launchProfile,
+        IReadOnlyList<GeneratedManifestFile> generatedFiles)
+    {
+        if (!string.Equals(launchProfile.Mode, "mainclass", StringComparison.OrdinalIgnoreCase) ||
+            generatedFiles.Count == 0)
+        {
+            return launchProfile;
+        }
+
+        var classpathEntries = launchProfile.ClasspathEntries
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        foreach (var generatedFile in generatedFiles)
+        {
+            if (!classpathEntries.Contains(generatedFile.Path, StringComparer.OrdinalIgnoreCase))
+            {
+                classpathEntries.Add(generatedFile.Path);
+            }
+        }
+
+        return new LaunchProfile(launchProfile.Mode, launchProfile.MainClass, classpathEntries);
+    }
+
+    private List<GeneratedManifestFile> BuildGeneratedFiles(IReadOnlyDictionary<string, string> sourceFiles)
+    {
+        var generatedFiles = new List<GeneratedManifestFile>();
+
+        var legacyBridgeCompatFile = TryBuildLegacyBridgeCompatFile(sourceFiles);
+        if (legacyBridgeCompatFile is not null)
+        {
+            generatedFiles.Add(legacyBridgeCompatFile);
+        }
+
+        return generatedFiles;
+    }
+
+    private GeneratedManifestFile? TryBuildLegacyBridgeCompatFile(IReadOnlyDictionary<string, string> sourceFiles)
+    {
+        var existingRelativePaths = new HashSet<string>(sourceFiles.Keys, StringComparer.OrdinalIgnoreCase);
+        var archivePaths = sourceFiles.Values
+            .Where(IsArchiveCandidate)
+            .Select(Path.GetFullPath)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (archivePaths.Count == 0)
+        {
+            return null;
+        }
+
+        var requiredMethods = new HashSet<LegacyBridgeMethodSignature>();
+        foreach (var archivePath in archivePaths.OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
+        {
+            try
+            {
+                using var archive = ZipFile.OpenRead(archivePath);
+                if (archive.Entries.Any(x => x.FullName.Equals(LegacyBridgeClassEntry, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return null;
+                }
+
+                foreach (var classEntry in archive.Entries.Where(x => x.FullName.EndsWith(".class", StringComparison.OrdinalIgnoreCase)))
+                {
+                    using var entryStream = classEntry.Open();
+                    using var memory = new MemoryStream();
+                    entryStream.CopyTo(memory);
+                    TryCollectLegacyBridgeMethodRefs(memory.ToArray(), requiredMethods);
+                }
+            }
+            catch (Exception ex) when (
+                ex is InvalidDataException or
+                IOException or
+                UnauthorizedAccessException)
+            {
+                logger.LogDebug(ex, "Failed to inspect archive '{ArchivePath}' while checking LegacyBridge compatibility.", archivePath);
+            }
+        }
+
+        if (requiredMethods.Count == 0)
+        {
+            return null;
+        }
+
+        var artifactPath = ResolveGeneratedArtifactPath(existingRelativePaths, LegacyBridgeCompatArtifactPath);
+        var compatJarBytes = BuildLegacyBridgeCompatJar(requiredMethods);
+        logger.LogWarning(
+            "Generated LegacyBridge compatibility artifact '{ArtifactPath}' with {MethodCount} method signature(s).",
+            artifactPath,
+            requiredMethods.Count);
+
+        return new GeneratedManifestFile(
+            Path: artifactPath,
+            Content: compatJarBytes,
+            ContentType: "application/java-archive");
+    }
+
+    private static bool IsArchiveCandidate(string filePath)
+    {
+        var extension = Path.GetExtension(filePath);
+        return extension.Equals(".jar", StringComparison.OrdinalIgnoreCase) ||
+               extension.Equals(".jar2", StringComparison.OrdinalIgnoreCase) ||
+               extension.Equals(".zip", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string ResolveGeneratedArtifactPath(IReadOnlySet<string> existingRelativePaths, string preferredPath)
+    {
+        if (!existingRelativePaths.Contains(preferredPath))
+        {
+            return preferredPath;
+        }
+
+        var directory = NormalizePath(Path.GetDirectoryName(preferredPath) ?? string.Empty).Trim('/');
+        var fileNameWithoutExtension = Path.GetFileNameWithoutExtension(preferredPath);
+        var extension = Path.GetExtension(preferredPath);
+
+        for (var suffix = 1; suffix <= 1024; suffix++)
+        {
+            var candidateFileName = $"{fileNameWithoutExtension}-{suffix}{extension}";
+            var candidatePath = string.IsNullOrWhiteSpace(directory)
+                ? candidateFileName
+                : $"{directory}/{candidateFileName}";
+            if (!existingRelativePaths.Contains(candidatePath))
+            {
+                return candidatePath;
+            }
+        }
+
+        return preferredPath;
+    }
+
+    private static void TryCollectLegacyBridgeMethodRefs(
+        byte[] classFileBytes,
+        ISet<LegacyBridgeMethodSignature> requiredMethods)
+    {
+        var span = classFileBytes.AsSpan();
+        var offset = 0;
+
+        if (!TryReadU4(span, ref offset, out var magic) || magic != 0xCAFEBABE)
+        {
+            return;
+        }
+
+        if (!TrySkip(span, ref offset, 4))
+        {
+            return;
+        }
+
+        if (!TryReadU2(span, ref offset, out var constantPoolCount) || constantPoolCount == 0)
+        {
+            return;
+        }
+
+        var tags = new byte[constantPoolCount];
+        var utf8Values = new string?[constantPoolCount];
+        var classNameIndices = new ushort[constantPoolCount];
+        var nameIndices = new ushort[constantPoolCount];
+        var descriptorIndices = new ushort[constantPoolCount];
+        var methodClassIndices = new ushort[constantPoolCount];
+        var methodNameAndTypeIndices = new ushort[constantPoolCount];
+
+        for (var index = 1; index < constantPoolCount; index++)
+        {
+            if (!TryReadU1(span, ref offset, out var tag))
+            {
+                return;
+            }
+
+            tags[index] = tag;
+
+            switch (tag)
+            {
+                case 1:
+                    if (!TryReadU2(span, ref offset, out var utfLength) ||
+                        !TryReadBytes(span, ref offset, utfLength, out var utfBytes))
+                    {
+                        return;
+                    }
+
+                    utf8Values[index] = Encoding.UTF8.GetString(utfBytes);
+                    break;
+                case 3:
+                case 4:
+                    if (!TrySkip(span, ref offset, 4))
+                    {
+                        return;
+                    }
+
+                    break;
+                case 5:
+                case 6:
+                    if (!TrySkip(span, ref offset, 8))
+                    {
+                        return;
+                    }
+
+                    index++;
+                    break;
+                case 7:
+                    if (!TryReadU2(span, ref offset, out classNameIndices[index]))
+                    {
+                        return;
+                    }
+
+                    break;
+                case 8:
+                case 16:
+                case 19:
+                case 20:
+                    if (!TrySkip(span, ref offset, 2))
+                    {
+                        return;
+                    }
+
+                    break;
+                case 9:
+                case 10:
+                case 11:
+                case 12:
+                case 17:
+                case 18:
+                    if (!TryReadU2(span, ref offset, out var firstIndex) ||
+                        !TryReadU2(span, ref offset, out var secondIndex))
+                    {
+                        return;
+                    }
+
+                    if (tag == 12)
+                    {
+                        nameIndices[index] = firstIndex;
+                        descriptorIndices[index] = secondIndex;
+                    }
+                    else if (tag == 10 || tag == 11)
+                    {
+                        methodClassIndices[index] = firstIndex;
+                        methodNameAndTypeIndices[index] = secondIndex;
+                    }
+
+                    break;
+                case 15:
+                    if (!TrySkip(span, ref offset, 3))
+                    {
+                        return;
+                    }
+
+                    break;
+                default:
+                    return;
+            }
+        }
+
+        for (var index = 1; index < constantPoolCount; index++)
+        {
+            if (tags[index] is not 10 and not 11)
+            {
+                continue;
+            }
+
+            var classIndex = methodClassIndices[index];
+            var nameAndTypeIndex = methodNameAndTypeIndices[index];
+            if (classIndex <= 0 ||
+                nameAndTypeIndex <= 0 ||
+                classIndex >= constantPoolCount ||
+                nameAndTypeIndex >= constantPoolCount ||
+                tags[classIndex] != 7 ||
+                tags[nameAndTypeIndex] != 12)
+            {
+                continue;
+            }
+
+            var classNameIndex = classNameIndices[classIndex];
+            if (classNameIndex <= 0 || classNameIndex >= constantPoolCount)
+            {
+                continue;
+            }
+
+            var className = utf8Values[classNameIndex];
+            if (!string.Equals(className, LegacyBridgeInternalName, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var methodNameIndex = nameIndices[nameAndTypeIndex];
+            var methodDescriptorIndex = descriptorIndices[nameAndTypeIndex];
+            if (methodNameIndex <= 0 ||
+                methodDescriptorIndex <= 0 ||
+                methodNameIndex >= constantPoolCount ||
+                methodDescriptorIndex >= constantPoolCount)
+            {
+                continue;
+            }
+
+            var methodName = utf8Values[methodNameIndex];
+            var descriptor = utf8Values[methodDescriptorIndex];
+            if (string.IsNullOrWhiteSpace(methodName) ||
+                string.IsNullOrWhiteSpace(descriptor) ||
+                methodName[0] == '<' ||
+                descriptor[0] != '(' ||
+                !descriptor.Contains(')'))
+            {
+                continue;
+            }
+
+            requiredMethods.Add(new LegacyBridgeMethodSignature(methodName, descriptor));
+        }
+    }
+
+    private static bool TryReadU1(ReadOnlySpan<byte> span, ref int offset, out byte value)
+    {
+        if (offset + 1 > span.Length)
+        {
+            value = 0;
+            return false;
+        }
+
+        value = span[offset];
+        offset++;
+        return true;
+    }
+
+    private static bool TryReadU2(ReadOnlySpan<byte> span, ref int offset, out ushort value)
+    {
+        if (offset + 2 > span.Length)
+        {
+            value = 0;
+            return false;
+        }
+
+        value = (ushort)((span[offset] << 8) | span[offset + 1]);
+        offset += 2;
+        return true;
+    }
+
+    private static bool TryReadU4(ReadOnlySpan<byte> span, ref int offset, out uint value)
+    {
+        if (offset + 4 > span.Length)
+        {
+            value = 0;
+            return false;
+        }
+
+        value = ((uint)span[offset] << 24) |
+                ((uint)span[offset + 1] << 16) |
+                ((uint)span[offset + 2] << 8) |
+                span[offset + 3];
+        offset += 4;
+        return true;
+    }
+
+    private static bool TryReadBytes(ReadOnlySpan<byte> span, ref int offset, int length, out ReadOnlySpan<byte> slice)
+    {
+        if (length < 0 || offset + length > span.Length)
+        {
+            slice = ReadOnlySpan<byte>.Empty;
+            return false;
+        }
+
+        slice = span.Slice(offset, length);
+        offset += length;
+        return true;
+    }
+
+    private static bool TrySkip(ReadOnlySpan<byte> span, ref int offset, int length)
+    {
+        if (length < 0 || offset + length > span.Length)
+        {
+            return false;
+        }
+
+        offset += length;
+        return true;
+    }
+
+    private static byte[] BuildLegacyBridgeCompatJar(IReadOnlyCollection<LegacyBridgeMethodSignature> requiredMethods)
+    {
+        var classBytes = BuildLegacyBridgeClass(requiredMethods);
+
+        using var stream = new MemoryStream();
+        using (var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            var manifestEntry = archive.CreateEntry("META-INF/MANIFEST.MF", CompressionLevel.Fastest);
+            using (var writer = new StreamWriter(
+                       manifestEntry.Open(),
+                       new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                       bufferSize: 1024,
+                       leaveOpen: false))
+            {
+                writer.Write("Manifest-Version: 1.0\r\nCreated-By: BivLauncher\r\n\r\n");
+            }
+
+            var classEntry = archive.CreateEntry(LegacyBridgeClassEntry, CompressionLevel.Optimal);
+            using var classStream = classEntry.Open();
+            classStream.Write(classBytes, 0, classBytes.Length);
+        }
+
+        return stream.ToArray();
+    }
+
+    private static byte[] BuildLegacyBridgeClass(IReadOnlyCollection<LegacyBridgeMethodSignature> requiredMethods)
+    {
+        var pool = new ConstantPoolBuilder();
+
+        var thisClassIndex = pool.AddClass(LegacyBridgeInternalName);
+        var superClassIndex = pool.AddClass("java/lang/Object");
+        var codeAttributeNameIndex = pool.AddUtf8("Code");
+
+        var ctorNameIndex = pool.AddUtf8("<init>");
+        var ctorDescriptorIndex = pool.AddUtf8("()V");
+        var objectCtorMethodRefIndex = pool.AddMethodRef("java/lang/Object", "<init>", "()V");
+
+        var methodIndices = requiredMethods
+            .OrderBy(x => x.Name, StringComparer.Ordinal)
+            .ThenBy(x => x.Descriptor, StringComparer.Ordinal)
+            .Select(x => new MethodIndex(
+                NameIndex: pool.AddUtf8(x.Name),
+                DescriptorIndex: pool.AddUtf8(x.Descriptor),
+                Descriptor: x.Descriptor))
+            .ToList();
+
+        using var stream = new MemoryStream();
+        WriteU4(stream, 0xCAFEBABE);
+        WriteU2(stream, 0);
+        WriteU2(stream, 52);
+        WriteU2(stream, pool.Count);
+        pool.WriteTo(stream);
+
+        WriteU2(stream, 0x0021);
+        WriteU2(stream, thisClassIndex);
+        WriteU2(stream, superClassIndex);
+        WriteU2(stream, 0);
+        WriteU2(stream, 0);
+        WriteU2(stream, checked((ushort)(1 + methodIndices.Count)));
+
+        var ctorCode = BuildConstructorCode(objectCtorMethodRefIndex);
+        WriteMethod(
+            stream,
+            accessFlags: 0x0001,
+            nameIndex: ctorNameIndex,
+            descriptorIndex: ctorDescriptorIndex,
+            codeAttributeNameIndex: codeAttributeNameIndex,
+            maxStack: 1,
+            maxLocals: 1,
+            code: ctorCode);
+
+        foreach (var method in methodIndices)
+        {
+            var (stubCode, maxStack) = BuildStubCodeForDescriptor(method.Descriptor);
+            var maxLocals = checked((ushort)GetMethodParameterSlotCount(method.Descriptor));
+            WriteMethod(
+                stream,
+                accessFlags: 0x0009,
+                nameIndex: method.NameIndex,
+                descriptorIndex: method.DescriptorIndex,
+                codeAttributeNameIndex: codeAttributeNameIndex,
+                maxStack: maxStack,
+                maxLocals: maxLocals,
+                code: stubCode);
+        }
+
+        WriteU2(stream, 0);
+        return stream.ToArray();
+    }
+
+    private static byte[] BuildConstructorCode(ushort objectCtorMethodRefIndex)
+    {
+        return
+        [
+            0x2A,
+            0xB7,
+            (byte)(objectCtorMethodRefIndex >> 8),
+            (byte)(objectCtorMethodRefIndex & 0xFF),
+            0xB1
+        ];
+    }
+
+    private static (byte[] Code, ushort MaxStack) BuildStubCodeForDescriptor(string descriptor)
+    {
+        var returnType = GetMethodReturnType(descriptor);
+        return returnType switch
+        {
+            'V' => ([0xB1], 0),
+            'J' => ([0x09, 0xAD], 2),
+            'D' => ([0x0E, 0xAF], 2),
+            'F' => ([0x0B, 0xAE], 1),
+            'I' or 'Z' or 'B' or 'C' or 'S' => ([0x03, 0xAC], 1),
+            _ => ([0x01, 0xB0], 1)
+        };
+    }
+
+    private static char GetMethodReturnType(string descriptor)
+    {
+        if (string.IsNullOrWhiteSpace(descriptor))
+        {
+            return 'L';
+        }
+
+        var closeParen = descriptor.IndexOf(')');
+        if (closeParen < 0 || closeParen + 1 >= descriptor.Length)
+        {
+            return 'L';
+        }
+
+        return descriptor[closeParen + 1];
+    }
+
+    private static int GetMethodParameterSlotCount(string descriptor)
+    {
+        if (string.IsNullOrWhiteSpace(descriptor))
+        {
+            return 0;
+        }
+
+        var openParen = descriptor.IndexOf('(');
+        var closeParen = descriptor.IndexOf(')');
+        if (openParen < 0 || closeParen <= openParen)
+        {
+            return 0;
+        }
+
+        var slots = 0;
+        for (var index = openParen + 1; index < closeParen;)
+        {
+            var type = descriptor[index];
+            switch (type)
+            {
+                case 'B':
+                case 'C':
+                case 'F':
+                case 'I':
+                case 'S':
+                case 'Z':
+                    slots++;
+                    index++;
+                    break;
+                case 'J':
+                case 'D':
+                    slots += 2;
+                    index++;
+                    break;
+                case 'L':
+                {
+                    var semicolonIndex = descriptor.IndexOf(';', index);
+                    if (semicolonIndex < 0 || semicolonIndex > closeParen)
+                    {
+                        return slots;
+                    }
+
+                    slots++;
+                    index = semicolonIndex + 1;
+                    break;
+                }
+                case '[':
+                {
+                    while (index < closeParen && descriptor[index] == '[')
+                    {
+                        index++;
+                    }
+
+                    if (index >= closeParen)
+                    {
+                        return slots;
+                    }
+
+                    if (descriptor[index] == 'L')
+                    {
+                        var semicolonIndex = descriptor.IndexOf(';', index);
+                        if (semicolonIndex < 0 || semicolonIndex > closeParen)
+                        {
+                            return slots;
+                        }
+
+                        index = semicolonIndex + 1;
+                    }
+                    else
+                    {
+                        index++;
+                    }
+
+                    slots++;
+                    break;
+                }
+                default:
+                    index++;
+                    break;
+            }
+        }
+
+        return slots;
+    }
+
+    private static void WriteMethod(
+        Stream stream,
+        ushort accessFlags,
+        ushort nameIndex,
+        ushort descriptorIndex,
+        ushort codeAttributeNameIndex,
+        ushort maxStack,
+        ushort maxLocals,
+        byte[] code)
+    {
+        WriteU2(stream, accessFlags);
+        WriteU2(stream, nameIndex);
+        WriteU2(stream, descriptorIndex);
+        WriteU2(stream, 1);
+
+        WriteU2(stream, codeAttributeNameIndex);
+        var attributeLength = checked((uint)(2 + 2 + 4 + code.Length + 2 + 2));
+        WriteU4(stream, attributeLength);
+
+        WriteU2(stream, maxStack);
+        WriteU2(stream, maxLocals);
+        WriteU4(stream, checked((uint)code.Length));
+        stream.Write(code, 0, code.Length);
+        WriteU2(stream, 0);
+        WriteU2(stream, 0);
+    }
+
+    private static void WriteU2(Stream stream, ushort value)
+    {
+        stream.WriteByte((byte)(value >> 8));
+        stream.WriteByte((byte)(value & 0xFF));
+    }
+
+    private static void WriteU4(Stream stream, uint value)
+    {
+        stream.WriteByte((byte)((value >> 24) & 0xFF));
+        stream.WriteByte((byte)((value >> 16) & 0xFF));
+        stream.WriteByte((byte)((value >> 8) & 0xFF));
+        stream.WriteByte((byte)(value & 0xFF));
+    }
+
+    private sealed record GeneratedManifestFile(
+        string Path,
+        byte[] Content,
+        string ContentType);
+
+    private sealed record LegacyBridgeMethodSignature(
+        string Name,
+        string Descriptor);
+
+    private sealed record MethodIndex(
+        ushort NameIndex,
+        ushort DescriptorIndex,
+        string Descriptor);
+
+    private sealed class ConstantPoolBuilder
+    {
+        private readonly List<ConstantPoolEntry> _entries = [];
+        private readonly Dictionary<string, ushort> _utf8 = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, ushort> _classes = new(StringComparer.Ordinal);
+        private readonly Dictionary<(string Name, string Descriptor), ushort> _nameAndTypes = [];
+        private readonly Dictionary<(string Class, string Name, string Descriptor), ushort> _methodRefs = [];
+
+        public ushort Count => checked((ushort)(_entries.Count + 1));
+
+        public ushort AddUtf8(string value)
+        {
+            if (_utf8.TryGetValue(value, out var index))
+            {
+                return index;
+            }
+
+            index = AddEntry(new ConstantPoolEntry(1, value, 0, 0));
+            _utf8[value] = index;
+            return index;
+        }
+
+        public ushort AddClass(string internalName)
+        {
+            if (_classes.TryGetValue(internalName, out var index))
+            {
+                return index;
+            }
+
+            var nameIndex = AddUtf8(internalName);
+            index = AddEntry(new ConstantPoolEntry(7, string.Empty, nameIndex, 0));
+            _classes[internalName] = index;
+            return index;
+        }
+
+        public ushort AddNameAndType(string name, string descriptor)
+        {
+            var key = (name, descriptor);
+            if (_nameAndTypes.TryGetValue(key, out var index))
+            {
+                return index;
+            }
+
+            var nameIndex = AddUtf8(name);
+            var descriptorIndex = AddUtf8(descriptor);
+            index = AddEntry(new ConstantPoolEntry(12, string.Empty, nameIndex, descriptorIndex));
+            _nameAndTypes[key] = index;
+            return index;
+        }
+
+        public ushort AddMethodRef(string classInternalName, string name, string descriptor)
+        {
+            var key = (classInternalName, name, descriptor);
+            if (_methodRefs.TryGetValue(key, out var index))
+            {
+                return index;
+            }
+
+            var classIndex = AddClass(classInternalName);
+            var nameAndTypeIndex = AddNameAndType(name, descriptor);
+            index = AddEntry(new ConstantPoolEntry(10, string.Empty, classIndex, nameAndTypeIndex));
+            _methodRefs[key] = index;
+            return index;
+        }
+
+        public void WriteTo(Stream stream)
+        {
+            foreach (var entry in _entries)
+            {
+                stream.WriteByte(entry.Tag);
+                switch (entry.Tag)
+                {
+                    case 1:
+                    {
+                        var bytes = Encoding.UTF8.GetBytes(entry.Utf8Value);
+                        WriteU2(stream, checked((ushort)bytes.Length));
+                        stream.Write(bytes, 0, bytes.Length);
+                        break;
+                    }
+                    case 7:
+                        WriteU2(stream, entry.FirstIndex);
+                        break;
+                    case 10:
+                    case 12:
+                        WriteU2(stream, entry.FirstIndex);
+                        WriteU2(stream, entry.SecondIndex);
+                        break;
+                    default:
+                        throw new InvalidOperationException($"Unsupported constant pool tag {entry.Tag}.");
+                }
+            }
+        }
+
+        private ushort AddEntry(ConstantPoolEntry entry)
+        {
+            _entries.Add(entry);
+            return checked((ushort)_entries.Count);
+        }
+    }
+
+    private sealed record ConstantPoolEntry(
+        byte Tag,
+        string Utf8Value,
+        ushort FirstIndex,
+        ushort SecondIndex);
 
     private static Dictionary<string, string> CollectSourceFiles(IReadOnlyList<string> sourceDirectories)
     {
@@ -655,6 +1474,7 @@ public sealed class BuildPipelineService(
             ".webp" => "image/webp",
             ".svg" => "image/svg+xml",
             ".jar" => "application/java-archive",
+            ".jar2" => "application/java-archive",
             ".zip" => "application/zip",
             _ => "application/octet-stream"
         };

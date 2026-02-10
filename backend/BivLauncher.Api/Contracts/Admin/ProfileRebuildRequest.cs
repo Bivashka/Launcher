@@ -5,10 +5,10 @@ namespace BivLauncher.Api.Contracts.Admin;
 public sealed class ProfileRebuildRequest
 {
     [MaxLength(32)]
-    public string LoaderType { get; set; } = "vanilla";
+    public string LoaderType { get; set; } = string.Empty;
 
     [MaxLength(32)]
-    public string McVersion { get; set; } = "1.21.1";
+    public string McVersion { get; set; } = string.Empty;
 
     [MaxLength(64)]
     public string ClientVersion { get; set; } = string.Empty;
@@ -26,7 +26,7 @@ public sealed class ProfileRebuildRequest
     public string JavaRuntimeArtifactKey { get; set; } = string.Empty;
 
     [MaxLength(16)]
-    public string LaunchMode { get; set; } = "auto";
+    public string LaunchMode { get; set; } = string.Empty;
 
     [MaxLength(512)]
     public string LaunchMainClass { get; set; } = string.Empty;

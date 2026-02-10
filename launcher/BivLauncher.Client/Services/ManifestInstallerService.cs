@@ -8,6 +8,8 @@ public sealed class ManifestInstallerService(
     ILauncherApiService launcherApiService,
     ILogService logService) : IManifestInstallerService
 {
+    private static readonly string[] ManagedCleanupRoots = ["mods/", "libraries/"];
+
     public async Task<InstallResult> VerifyAndInstallAsync(
         string apiBaseUrl,
         LauncherManifest manifest,
@@ -90,12 +92,121 @@ public sealed class ManifestInstallerService(
             });
         }
 
+        var removedFiles = CleanupOrphanFiles(instanceDirectory, manifest, cancellationToken);
+        if (removedFiles > 0)
+        {
+            logService.LogInfo($"Removed orphan files: {removedFiles}");
+        }
+
         return new InstallResult
         {
             InstanceDirectory = instanceDirectory,
             DownloadedFiles = downloaded,
-            VerifiedFiles = verified
+            VerifiedFiles = verified,
+            RemovedFiles = removedFiles
         };
+    }
+
+    private int CleanupOrphanFiles(string instanceDirectory, LauncherManifest manifest, CancellationToken cancellationToken)
+    {
+        var expectedPaths = new HashSet<string>(
+            manifest.Files
+                .Select(file => NormalizeRelativePath(file.Path))
+                .Where(path => !string.IsNullOrWhiteSpace(path)),
+            StringComparer.OrdinalIgnoreCase);
+
+        var removedFiles = 0;
+        foreach (var managedRoot in ManagedCleanupRoots)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var managedRootPath = Path.Combine(
+                instanceDirectory,
+                managedRoot.TrimEnd('/').Replace('/', Path.DirectorySeparatorChar));
+            if (!Directory.Exists(managedRootPath))
+            {
+                continue;
+            }
+
+            var files = Directory.EnumerateFiles(managedRootPath, "*", SearchOption.AllDirectories).ToList();
+            foreach (var absoluteFilePath in files)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var normalizedRelativePath = NormalizeRelativePath(Path.GetRelativePath(instanceDirectory, absoluteFilePath));
+                if (string.IsNullOrWhiteSpace(normalizedRelativePath) ||
+                    !normalizedRelativePath.StartsWith(managedRoot, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (expectedPaths.Contains(normalizedRelativePath))
+                {
+                    continue;
+                }
+
+                if (TryDeleteFile(absoluteFilePath))
+                {
+                    removedFiles++;
+                    logService.LogInfo($"Removed orphan file: {normalizedRelativePath}");
+                }
+            }
+
+            CleanupEmptyDirectories(managedRootPath, cancellationToken);
+        }
+
+        return removedFiles;
+    }
+
+    private static string NormalizeRelativePath(string path)
+    {
+        return path
+            .Replace('\\', '/')
+            .Trim()
+            .TrimStart('/');
+    }
+
+    private static bool TryDeleteFile(string path)
+    {
+        try
+        {
+            var attributes = File.GetAttributes(path);
+            if ((attributes & FileAttributes.ReadOnly) != 0)
+            {
+                File.SetAttributes(path, attributes & ~FileAttributes.ReadOnly);
+            }
+
+            File.Delete(path);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void CleanupEmptyDirectories(string rootPath, CancellationToken cancellationToken)
+    {
+        var directories = Directory
+            .EnumerateDirectories(rootPath, "*", SearchOption.AllDirectories)
+            .OrderByDescending(path => path.Length)
+            .ToList();
+
+        foreach (var directoryPath in directories)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                if (!Directory.EnumerateFileSystemEntries(directoryPath).Any())
+                {
+                    Directory.Delete(directoryPath, recursive: false);
+                }
+            }
+            catch
+            {
+                // Best-effort cleanup.
+            }
+        }
     }
 
     private async Task EnsureRuntimeAsync(

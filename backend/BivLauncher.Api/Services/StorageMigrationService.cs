@@ -665,6 +665,7 @@ public sealed class StorageMigrationService(
             ".svg" => "image/svg+xml",
             ".zip" => "application/zip",
             ".jar" => "application/java-archive",
+            ".jar2" => "application/java-archive",
             _ => "application/octet-stream"
         };
     }
