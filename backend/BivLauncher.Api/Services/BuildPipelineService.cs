@@ -58,7 +58,7 @@ public sealed class BuildPipelineService(
         var javaRuntimePath = ResolveJavaRuntimePath(request.JavaRuntimePath, profile.BundledJavaPath);
         var javaRuntimeArtifactKey = ResolveRuntimeArtifactKey(request.JavaRuntimeArtifactKey, profile.BundledRuntimeKey);
         var javaRuntimeArtifactMetadata = await ResolveRuntimeArtifactMetadataAsync(javaRuntimeArtifactKey, profile, cancellationToken);
-        var launchProfile = ResolveLaunchProfile(request, loaderType);
+        var launchProfile = ResolveLaunchProfile(request, loaderType, mcVersion);
 
         var buildId = Guid.NewGuid();
         var build = new Build
@@ -481,7 +481,7 @@ public sealed class BuildPipelineService(
         return path.Replace('\\', '/');
     }
 
-    private static LaunchProfile ResolveLaunchProfile(ProfileRebuildRequest request, string loaderType)
+    private static LaunchProfile ResolveLaunchProfile(ProfileRebuildRequest request, string loaderType, string mcVersion)
     {
         var requestedMode = (request.LaunchMode ?? string.Empty).Trim().ToLowerInvariant();
         var normalizedMainClass = (request.LaunchMainClass ?? string.Empty).Trim();
@@ -492,7 +492,7 @@ public sealed class BuildPipelineService(
             if (IsMainClassLoader(loaderType))
             {
                 var mainClass = string.IsNullOrWhiteSpace(normalizedMainClass)
-                    ? GetDefaultMainClass(loaderType)
+                    ? GetDefaultMainClass(loaderType, mcVersion)
                     : normalizedMainClass;
                 if (string.IsNullOrWhiteSpace(mainClass))
                 {
@@ -570,16 +570,48 @@ public sealed class BuildPipelineService(
         return loaderType is "forge" or "neoforge" or "fabric" or "quilt";
     }
 
-    private static string GetDefaultMainClass(string loaderType)
+    private static string GetDefaultMainClass(string loaderType, string mcVersion)
     {
         return loaderType switch
         {
+            "forge" when IsLegacyForgeVersion(mcVersion) => "net.minecraft.launchwrapper.Launch",
             "forge" => "cpw.mods.modlauncher.Launcher",
             "neoforge" => "cpw.mods.modlauncher.Launcher",
             "fabric" => "net.fabricmc.loader.impl.launch.knot.KnotClient",
             "quilt" => "org.quiltmc.loader.impl.launch.knot.KnotClient",
             _ => string.Empty
         };
+    }
+
+    private static bool IsLegacyForgeVersion(string mcVersion)
+    {
+        if (!TryParseMajorMinorVersion(mcVersion, out var major, out var minor))
+        {
+            return false;
+        }
+
+        return major == 1 && minor <= 12;
+    }
+
+    private static bool TryParseMajorMinorVersion(string rawVersion, out int major, out int minor)
+    {
+        major = 0;
+        minor = 0;
+
+        if (string.IsNullOrWhiteSpace(rawVersion))
+        {
+            return false;
+        }
+
+        var parts = rawVersion
+            .Trim()
+            .Split(new[] { '.', '-', '_', ' ' }, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length < 2)
+        {
+            return false;
+        }
+
+        return int.TryParse(parts[0], out major) && int.TryParse(parts[1], out minor);
     }
 
     private sealed record LaunchProfile(

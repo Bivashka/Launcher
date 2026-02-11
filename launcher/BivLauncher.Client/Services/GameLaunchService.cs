@@ -101,11 +101,28 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
                 throw new InvalidOperationException("Manifest launchMainClass is required for mainclass mode.");
             }
 
-            var classpath = ResolveClasspath(manifest, instanceDirectory, route.PreferredJarPath);
+            var classpathEntries = ResolveClasspathEntries(manifest, instanceDirectory, route.PreferredJarPath);
+            if (!TryResolveMainClassFromClasspath(
+                    classpathEntries,
+                    launchMainClass,
+                    out var resolvedMainClass,
+                    out var mainClassResolveReason))
+            {
+                throw new InvalidOperationException(
+                    $"Manifest launchMainClass '{launchMainClass}' is not available in launch classpath. {mainClassResolveReason}");
+            }
+
+            if (!string.Equals(resolvedMainClass, launchMainClass, StringComparison.OrdinalIgnoreCase))
+            {
+                logService.LogInfo(
+                    $"Configured main class '{launchMainClass}' was not found in classpath. Falling back to '{resolvedMainClass}'.");
+            }
+
+            var classpath = string.Join(Path.PathSeparator, classpathEntries);
             startInfo.ArgumentList.Add("-cp");
             startInfo.ArgumentList.Add(classpath);
-            startInfo.ArgumentList.Add(launchMainClass);
-            resolvedMainClassForCompatibility = launchMainClass;
+            startInfo.ArgumentList.Add(resolvedMainClass);
+            resolvedMainClassForCompatibility = resolvedMainClass;
             resolvedClasspathForCompatibility = classpath;
         }
         else
@@ -393,36 +410,57 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
         }
 
         var explicitMainClass = manifest.LaunchMainClass?.Trim() ?? string.Empty;
-        if (!string.IsNullOrWhiteSpace(explicitMainClass))
+        if (TryResolveMainClassFromClasspath(classpathEntries, explicitMainClass, out mainClass, out reason))
         {
-            if (ContainsClass(classpathEntries, explicitMainClass))
-            {
-                mainClass = explicitMainClass;
-                classpath = string.Join(Path.PathSeparator, classpathEntries);
-                reason = string.Empty;
-                return true;
-            }
-        }
-
-        foreach (var candidate in ImplicitMainClassCandidates)
-        {
-            if (!ContainsClass(classpathEntries, candidate))
-            {
-                continue;
-            }
-
-            mainClass = candidate;
             classpath = string.Join(Path.PathSeparator, classpathEntries);
-            reason = string.Empty;
             return true;
         }
 
         mainClass = string.Empty;
         classpath = string.Empty;
-        var checkedCandidates = !string.IsNullOrWhiteSpace(explicitMainClass)
-            ? $"{explicitMainClass}, {string.Join(", ", ImplicitMainClassCandidates)}"
-            : string.Join(", ", ImplicitMainClassCandidates);
-        reason = $"No known main class found in classpath jars. Checked: {checkedCandidates}.";
+        return false;
+    }
+
+    private static bool TryResolveMainClassFromClasspath(
+        IReadOnlyList<string> classpathEntries,
+        string preferredMainClass,
+        out string resolvedMainClass,
+        out string reason)
+    {
+        var candidates = new List<string>();
+        var seenCandidates = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void AddCandidate(string candidate)
+        {
+            if (string.IsNullOrWhiteSpace(candidate))
+            {
+                return;
+            }
+
+            if (seenCandidates.Add(candidate))
+            {
+                candidates.Add(candidate);
+            }
+        }
+
+        AddCandidate(preferredMainClass?.Trim() ?? string.Empty);
+        foreach (var candidate in ImplicitMainClassCandidates)
+        {
+            AddCandidate(candidate);
+        }
+
+        foreach (var candidate in candidates)
+        {
+            if (ContainsClass(classpathEntries, candidate))
+            {
+                resolvedMainClass = candidate;
+                reason = string.Empty;
+                return true;
+            }
+        }
+
+        resolvedMainClass = string.Empty;
+        reason = $"No known main class found in classpath jars. Checked: {string.Join(", ", candidates)}.";
         return false;
     }
 
@@ -493,7 +531,7 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
         return false;
     }
 
-    private static string ResolveClasspath(LauncherManifest manifest, string instanceDirectory, string preferredJarPath)
+    private static List<string> ResolveClasspathEntries(LauncherManifest manifest, string instanceDirectory, string preferredJarPath)
     {
         var resolved = new List<string>();
 
@@ -522,7 +560,7 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
             throw new InvalidOperationException("Launch classpath is empty.");
         }
 
-        return string.Join(Path.PathSeparator, resolved);
+        return resolved;
     }
 
     private static IReadOnlyList<string> ExpandClasspathEntry(string instanceDirectory, string rawEntry)
