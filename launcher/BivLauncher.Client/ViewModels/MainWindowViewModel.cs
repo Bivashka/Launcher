@@ -932,34 +932,40 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private async Task<ServerOnlineProbeResult> ProbeServerOnlineAsync(ManagedServerItem server)
     {
-        var host = string.IsNullOrWhiteSpace(server.MainAddress) ? server.Address : server.MainAddress;
-        var port = server.MainPort > 0 ? server.MainPort : server.Port;
-        if (string.IsNullOrWhiteSpace(host) || port <= 0)
+        var endpoints = ResolveProbeEndpoints(server);
+        if (endpoints.Count == 0)
         {
             return new ServerOnlineProbeResult(server.ServerId, false, 0, -1);
         }
 
-        try
+        foreach (var endpoint in endpoints)
         {
-            var modernResult = await TryProbeModernServerAsync(host.Trim(), port);
-            if (modernResult.IsOnline)
+            try
             {
-                return modernResult with { ServerId = server.ServerId };
+                var modernResult = await TryProbeModernServerAsync(endpoint.Host, endpoint.Port);
+                if (modernResult.IsOnline)
+                {
+                    return modernResult with { ServerId = server.ServerId };
+                }
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                var legacyResult = await TryProbeLegacyServerAsync(endpoint.Host, endpoint.Port);
+                if (legacyResult.IsOnline)
+                {
+                    return legacyResult with { ServerId = server.ServerId };
+                }
+            }
+            catch
+            {
             }
         }
-        catch
-        {
-        }
 
-        try
-        {
-            var legacyResult = await TryProbeLegacyServerAsync(host.Trim(), port);
-            return legacyResult with { ServerId = server.ServerId };
-        }
-        catch
-        {
-            return new ServerOnlineProbeResult(server.ServerId, false, 0, -1);
-        }
+        return new ServerOnlineProbeResult(server.ServerId, false, 0, -1);
     }
 
     private static async Task<ServerOnlineProbeResult> TryProbeModernServerAsync(string host, int port)
@@ -1057,7 +1063,114 @@ public partial class MainWindowViewModel : ViewModelBase
             return new ServerOnlineProbeResult(Guid.Empty, true, Math.Max(0, online), Math.Max(max, -1));
         }
 
+        // Older server list ping format is MOTD§online§max.
+        var sectionParts = responseText.Split('§');
+        if (sectionParts.Length >= 3 &&
+            int.TryParse(sectionParts[^2], NumberStyles.Integer, CultureInfo.InvariantCulture, out var oldOnline) &&
+            int.TryParse(sectionParts[^1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var oldMax))
+        {
+            return new ServerOnlineProbeResult(Guid.Empty, true, Math.Max(0, oldOnline), Math.Max(oldMax, -1));
+        }
+
         return new ServerOnlineProbeResult(Guid.Empty, true, 0, -1);
+    }
+
+    private static List<ServerEndpoint> ResolveProbeEndpoints(ManagedServerItem server)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var endpoints = new List<ServerEndpoint>(3);
+
+        Add(server.MainAddress, server.MainPort);
+        Add(server.Address, server.Port);
+        Add(server.RuProxyAddress, server.RuProxyPort);
+        return endpoints;
+
+        void Add(string? rawAddress, int rawPort)
+        {
+            if (!TryResolveServerEndpoint(rawAddress, rawPort, out var endpoint))
+            {
+                return;
+            }
+
+            var key = $"{endpoint.Host}:{endpoint.Port}";
+            if (!seen.Add(key))
+            {
+                return;
+            }
+
+            endpoints.Add(endpoint);
+        }
+    }
+
+    private static bool TryResolveServerEndpoint(string? rawAddress, int rawPort, out ServerEndpoint endpoint)
+    {
+        endpoint = default;
+        var trimmed = (rawAddress ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(trimmed))
+        {
+            return false;
+        }
+
+        var normalized = trimmed;
+        if (normalized.StartsWith("minecraft://", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = normalized["minecraft://".Length..];
+        }
+        else if (normalized.StartsWith("mc://", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = normalized["mc://".Length..];
+        }
+
+        var resolvedHost = normalized.Trim();
+        var resolvedPort = rawPort is > 0 and <= 65535 ? rawPort : 25565;
+
+        if (resolvedHost.StartsWith("[", StringComparison.Ordinal) &&
+            resolvedHost.Contains(']', StringComparison.Ordinal))
+        {
+            var closingBracketIndex = resolvedHost.IndexOf(']');
+            var bracketHost = resolvedHost[1..closingBracketIndex].Trim();
+            var remaining = resolvedHost[(closingBracketIndex + 1)..].Trim();
+            if (remaining.StartsWith(":", StringComparison.Ordinal) &&
+                int.TryParse(remaining[1..], NumberStyles.Integer, CultureInfo.InvariantCulture, out var bracketPort) &&
+                bracketPort is > 0 and <= 65535)
+            {
+                resolvedPort = bracketPort;
+            }
+
+            resolvedHost = bracketHost;
+        }
+        else
+        {
+            var slashIndex = resolvedHost.IndexOf('/');
+            if (slashIndex >= 0)
+            {
+                resolvedHost = resolvedHost[..slashIndex];
+            }
+
+            var lastColon = resolvedHost.LastIndexOf(':');
+            if (lastColon > 0 &&
+                lastColon < resolvedHost.Length - 1 &&
+                resolvedHost.Count(ch => ch == ':') == 1 &&
+                int.TryParse(
+                    resolvedHost[(lastColon + 1)..],
+                    NumberStyles.Integer,
+                    CultureInfo.InvariantCulture,
+                    out var inlinePort) &&
+                inlinePort is > 0 and <= 65535)
+            {
+                resolvedPort = inlinePort;
+                resolvedHost = resolvedHost[..lastColon];
+            }
+        }
+
+        resolvedHost = resolvedHost.Trim();
+        if (string.IsNullOrWhiteSpace(resolvedHost))
+        {
+            return false;
+        }
+
+        endpoint = new ServerEndpoint(resolvedHost, resolvedPort);
+        return true;
     }
 
     private static void WriteString(Stream stream, string value)
@@ -3401,6 +3514,8 @@ public partial class MainWindowViewModel : ViewModelBase
         bool IsOnline,
         int OnlinePlayers,
         int OnlineMaxPlayers);
+
+    private readonly record struct ServerEndpoint(string Host, int Port);
 
     private sealed class MinecraftStatusPayload
     {
