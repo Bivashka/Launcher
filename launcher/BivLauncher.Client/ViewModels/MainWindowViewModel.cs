@@ -40,6 +40,8 @@ public partial class MainWindowViewModel : ViewModelBase
     private readonly DispatcherTimer _serverOnlineRefreshTimer;
     private const int MaxLiveLogLines = 500;
     private const int ServerOnlineTimeoutMs = 3500;
+    private static readonly TimeSpan PendingSubmissionFlushTimeout = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan PendingSubmissionSendTimeout = TimeSpan.FromSeconds(6);
     private static readonly TimeSpan ServerOnlineRefreshInterval = TimeSpan.FromSeconds(25);
     private const string LocalFallbackApiBaseUrl = "http://localhost:8080";
     private const string LauncherApiBaseUrlEnvVar = "BIVLAUNCHER_API_BASE_URL";
@@ -1294,7 +1296,7 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             StatusText = T("status.fetchingBootstrap");
             var bootstrap = await _launcherApiService.GetBootstrapAsync(ApiBaseUrl);
-            await FlushPendingSubmissionsAsync();
+            _ = FlushPendingSubmissionsAsync();
             await TrySubmitInstallTelemetryAsync(bootstrap);
 
             await ApplyLauncherDirectoryNameAsync(bootstrap.Branding);
@@ -1689,47 +1691,62 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private async Task FlushPendingSubmissionsAsync()
     {
-        var result = await _pendingSubmissionService.FlushAsync(async (item, cancellationToken) =>
+        using var flushCts = new CancellationTokenSource(PendingSubmissionFlushTimeout);
+        PendingSubmissionFlushResult result;
+
+        try
         {
-            if (item.Type.Equals(PendingSubmissionTypes.CrashReport, StringComparison.OrdinalIgnoreCase))
+            result = await _pendingSubmissionService.FlushAsync(async (item, cancellationToken) =>
             {
-                if (item.CrashReport is null)
+                using var sendCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                sendCts.CancelAfter(PendingSubmissionSendTimeout);
+                var sendToken = sendCts.Token;
+
+                if (item.Type.Equals(PendingSubmissionTypes.CrashReport, StringComparison.OrdinalIgnoreCase))
                 {
+                    if (item.CrashReport is null)
+                    {
+                        return true;
+                    }
+
+                    var response = await _launcherApiService.SubmitCrashReportAsync(
+                        item.ApiBaseUrl,
+                        item.CrashReport,
+                        sendToken);
+                    _logService.LogInfo($"Queued crash report sent: {response.CrashId}");
                     return true;
                 }
 
-                var response = await _launcherApiService.SubmitCrashReportAsync(
-                    item.ApiBaseUrl,
-                    item.CrashReport,
-                    cancellationToken);
-                _logService.LogInfo($"Queued crash report sent: {response.CrashId}");
-                return true;
-            }
-
-            if (item.Type.Equals(PendingSubmissionTypes.InstallTelemetry, StringComparison.OrdinalIgnoreCase))
-            {
-                if (item.InstallTelemetry is null)
+                if (item.Type.Equals(PendingSubmissionTypes.InstallTelemetry, StringComparison.OrdinalIgnoreCase))
                 {
+                    if (item.InstallTelemetry is null)
+                    {
+                        return true;
+                    }
+
+                    var response = await _launcherApiService.SubmitInstallTelemetryAsync(
+                        item.ApiBaseUrl,
+                        item.InstallTelemetry,
+                        sendToken);
+
+                    if (response.Accepted || !response.Enabled)
+                    {
+                        _installTelemetrySent = true;
+                    }
+
                     return true;
                 }
 
-                var response = await _launcherApiService.SubmitInstallTelemetryAsync(
-                    item.ApiBaseUrl,
-                    item.InstallTelemetry,
-                    cancellationToken);
-
-                if (response.Accepted || !response.Enabled)
-                {
-                    _installTelemetrySent = true;
-                }
-
                 return true;
-            }
+            }, flushCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            _logService.LogInfo("Pending submissions sync timed out and was deferred.");
+            return;
+        }
 
-            return true;
-        });
-
-        if (result.SentCount == 0 && result.DroppedCount == 0)
+        if (result.SentCount == 0 && result.DroppedCount == 0 && result.FailedCount == 0)
         {
             return;
         }
