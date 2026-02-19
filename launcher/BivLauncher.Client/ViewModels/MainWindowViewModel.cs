@@ -938,18 +938,22 @@ public partial class MainWindowViewModel : ViewModelBase
             return new ServerOnlineProbeResult(server.ServerId, false, 0, -1);
         }
 
+        var preferLegacyProbe = ShouldPreferLegacyProbe(server.McVersion);
         foreach (var endpoint in endpoints)
         {
-            try
+            if (!preferLegacyProbe)
             {
-                var modernResult = await TryProbeModernServerAsync(endpoint.Host, endpoint.Port);
-                if (modernResult.IsOnline)
+                try
                 {
-                    return modernResult with { ServerId = server.ServerId };
+                    var modernResult = await TryProbeModernServerAsync(endpoint.Host, endpoint.Port);
+                    if (modernResult.IsOnline)
+                    {
+                        return modernResult with { ServerId = server.ServerId };
+                    }
                 }
-            }
-            catch
-            {
+                catch
+                {
+                }
             }
 
             try
@@ -1029,12 +1033,32 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private static async Task<ServerOnlineProbeResult> TryProbeLegacyServerAsync(string host, int port)
     {
+        try
+        {
+            var extended = await TryProbeLegacyServerAsync(host, port, new byte[] { 0xFE, 0x01 });
+            if (extended.IsOnline)
+            {
+                return extended;
+            }
+        }
+        catch
+        {
+        }
+
+        return await TryProbeLegacyServerAsync(host, port, new byte[] { 0xFE });
+    }
+
+    private static async Task<ServerOnlineProbeResult> TryProbeLegacyServerAsync(
+        string host,
+        int port,
+        byte[] requestPayload)
+    {
         using var cancellationTokenSource = new CancellationTokenSource(ServerOnlineTimeoutMs);
         using var client = new TcpClient();
         await client.ConnectAsync(host, port, cancellationTokenSource.Token);
         using var stream = client.GetStream();
 
-        await stream.WriteAsync(new byte[] { 0xFE, 0x01 }, cancellationTokenSource.Token);
+        await stream.WriteAsync(requestPayload, cancellationTokenSource.Token);
         await stream.FlushAsync(cancellationTokenSource.Token);
 
         var packetId = await ReadByteAsync(stream, cancellationTokenSource.Token);
@@ -1073,6 +1097,36 @@ public partial class MainWindowViewModel : ViewModelBase
         }
 
         return new ServerOnlineProbeResult(Guid.Empty, true, 0, -1);
+    }
+
+    private static bool ShouldPreferLegacyProbe(string? mcVersion)
+    {
+        if (!TryParseMinecraftMajorMinor(mcVersion, out var major, out var minor))
+        {
+            return false;
+        }
+
+        return major == 1 && minor <= 6;
+    }
+
+    private static bool TryParseMinecraftMajorMinor(string? mcVersion, out int major, out int minor)
+    {
+        major = 0;
+        minor = 0;
+        if (string.IsNullOrWhiteSpace(mcVersion))
+        {
+            return false;
+        }
+
+        var raw = mcVersion.Trim();
+        var match = Regex.Match(raw, @"(?<!\d)(\d+)\.(\d+)(?:\.\d+)?", RegexOptions.CultureInvariant);
+        if (!match.Success || match.Groups.Count < 3)
+        {
+            return false;
+        }
+
+        return int.TryParse(match.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out major) &&
+               int.TryParse(match.Groups[2].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out minor);
     }
 
     private static List<ServerEndpoint> ResolveProbeEndpoints(ManagedServerItem server)
