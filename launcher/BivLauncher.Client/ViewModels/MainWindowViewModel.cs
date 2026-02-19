@@ -8,10 +8,12 @@ using BivLauncher.Client.Models;
 using BivLauncher.Client.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using System.Buffers.Binary;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.Net;
+using System.Net.Sockets;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
@@ -34,7 +36,11 @@ public partial class MainWindowViewModel : ViewModelBase
     private readonly Dictionary<string, IImage?> _iconCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, IImage?> _brandingImageCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly Queue<string> _liveLogLines = new();
+    private readonly SemaphoreSlim _serverOnlineRefreshLock = new(1, 1);
+    private readonly DispatcherTimer _serverOnlineRefreshTimer;
     private const int MaxLiveLogLines = 500;
+    private const int ServerOnlineTimeoutMs = 3500;
+    private static readonly TimeSpan ServerOnlineRefreshInterval = TimeSpan.FromSeconds(25);
     private const string LocalFallbackApiBaseUrl = "http://localhost:8080";
     private const string LauncherApiBaseUrlEnvVar = "BIVLAUNCHER_API_BASE_URL";
     private const string LauncherApiBaseUrlAssemblyMetadataKey = "BivLauncher.ApiBaseUrl";
@@ -46,11 +52,13 @@ public partial class MainWindowViewModel : ViewModelBase
     private bool _isSyncingRouteOption;
     private bool _installTelemetrySent;
     private bool _isAutomaticUpdateInProgress;
+    private bool _allowAutoSessionRestore = true;
     private string _playerAuthToken = string.Empty;
     private string _playerAuthTokenType = "Bearer";
     private string _playerAuthExternalId = string.Empty;
     private List<string> _playerAuthRoles = [];
     private string _playerAuthApiBaseUrl = string.Empty;
+    private DateTime _lastServerOnlineRefreshUtc;
 
     private LauncherSettings _settings = new();
 
@@ -75,6 +83,7 @@ public partial class MainWindowViewModel : ViewModelBase
 
         ManagedServers = new ObservableCollection<ManagedServerItem>();
         NewsItems = new ObservableCollection<LauncherNewsItem>();
+        StoredPlayerAccounts = new ObservableCollection<StoredPlayerAccount>();
         LanguageOptions = new ObservableCollection<LocalizedOption>(LauncherLocalization.SupportedLanguages);
         JavaModeOptions = new ObservableCollection<LocalizedOption>();
         RouteOptions = new ObservableCollection<LocalizedOption>();
@@ -83,6 +92,9 @@ public partial class MainWindowViewModel : ViewModelBase
 
         RefreshCommand = new AsyncRelayCommand(RefreshAsync, CanOperate);
         LoginCommand = new AsyncRelayCommand(LoginAsync, CanOperate);
+        SwitchAccountCommand = new AsyncRelayCommand(SwitchAccountAsync, CanSwitchAccount);
+        LogoutCommand = new AsyncRelayCommand(LogoutAsync, CanLogout);
+        AddAccountCommand = new RelayCommand(AddAccount, CanAddAccount);
         SaveSettingsCommand = new AsyncRelayCommand(SaveSettingsAsync, CanOperate);
         VerifyFilesCommand = new AsyncRelayCommand(VerifyFilesAsync, CanVerifyOrLaunch);
         LaunchCommand = new AsyncRelayCommand(LaunchAsync, CanVerifyOrLaunch);
@@ -94,17 +106,34 @@ public partial class MainWindowViewModel : ViewModelBase
         DownloadUpdateCommand = new AsyncRelayCommand(DownloadUpdateAsync, CanDownloadUpdate);
         InstallUpdateCommand = new AsyncRelayCommand(InstallUpdateAsync, CanInstallUpdate);
 
+        StoredPlayerAccounts.CollectionChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(HasStoredAccounts));
+            OnPropertyChanged(nameof(ServerMonitoringText));
+            SwitchAccountCommand.NotifyCanExecuteChanged();
+        };
+
+        _serverOnlineRefreshTimer = new DispatcherTimer
+        {
+            Interval = ServerOnlineRefreshInterval
+        };
+        _serverOnlineRefreshTimer.Tick += async (_, _) => await RefreshServerOnlineStatusesAsync();
+
         _logService.LineAdded += OnLogLineAdded;
     }
 
     public ObservableCollection<ManagedServerItem> ManagedServers { get; }
     public ObservableCollection<LauncherNewsItem> NewsItems { get; }
+    public ObservableCollection<StoredPlayerAccount> StoredPlayerAccounts { get; }
     public ObservableCollection<LocalizedOption> LanguageOptions { get; }
     public ObservableCollection<LocalizedOption> JavaModeOptions { get; }
     public ObservableCollection<LocalizedOption> RouteOptions { get; }
 
     public IAsyncRelayCommand RefreshCommand { get; }
     public IAsyncRelayCommand LoginCommand { get; }
+    public IAsyncRelayCommand SwitchAccountCommand { get; }
+    public IAsyncRelayCommand LogoutCommand { get; }
+    public IRelayCommand AddAccountCommand { get; }
     public IAsyncRelayCommand SaveSettingsCommand { get; }
     public IAsyncRelayCommand VerifyFilesCommand { get; }
     public IAsyncRelayCommand LaunchCommand { get; }
@@ -250,6 +279,9 @@ public partial class MainWindowViewModel : ViewModelBase
     private LocalizedOption? _selectedRouteOption;
 
     [ObservableProperty]
+    private StoredPlayerAccount? _selectedStoredAccount;
+
+    [ObservableProperty]
     private ManagedServerItem? _selectedServer;
 
     [ObservableProperty]
@@ -364,6 +396,10 @@ public partial class MainWindowViewModel : ViewModelBase
     public string PasswordLabelText => T("label.password");
     public string TwoFactorCodeLabelText => T("label.twoFactorCode");
     public string LoginButtonText => IsTwoFactorStepActive ? T("button.verifyTwoFactor") : T("button.login");
+    public string AddAccountButtonText => _languageCode == "en" ? "Add account" : "Добавить аккаунт";
+    public string LogoutButtonText => _languageCode == "en" ? "Logout" : "Выйти";
+    public string SwitchAccountButtonText => _languageCode == "en" ? "Switch" : "Переключить";
+    public string SavedAccountsLabelText => _languageCode == "en" ? "Saved accounts" : "Сохранённые аккаунты";
     public string TwoFactorHintText => BuildTwoFactorHintText();
     public string SkinStatusText => F("status.skin", BoolWord(HasSkin));
     public string CapeStatusText => F("status.cape", BoolWord(HasCape));
@@ -401,9 +437,11 @@ public partial class MainWindowViewModel : ViewModelBase
         ? $"{FileSyncProcessedFiles}/{FileSyncTotalFiles}  Downloaded: {FileSyncDownloadedFiles}  Verified: {FileSyncVerifiedFiles}"
         : "Preparing file synchronization...";
     public string FileSyncPercentText => $"{FileSyncProgressPercent}%";
+    public string ServerMonitoringText => BuildServerMonitoringText();
     public bool HasUpdateReleaseNotes => !string.IsNullOrWhiteSpace(UpdateReleaseNotes);
     public bool IsUpdatePackageReady => !string.IsNullOrWhiteSpace(DownloadedUpdatePackagePath) && File.Exists(DownloadedUpdatePackagePath);
     public bool HasBrandingBackgroundImage => BrandingBackgroundImage is not null;
+    public bool HasStoredAccounts => StoredPlayerAccounts.Count > 0;
     public bool IsLoginRequired => !IsPlayerLoggedIn;
     public bool IsLauncherReady => IsPlayerLoggedIn;
 
@@ -457,6 +495,9 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         RefreshCommand.NotifyCanExecuteChanged();
         LoginCommand.NotifyCanExecuteChanged();
+        SwitchAccountCommand.NotifyCanExecuteChanged();
+        LogoutCommand.NotifyCanExecuteChanged();
+        AddAccountCommand.NotifyCanExecuteChanged();
         SaveSettingsCommand.NotifyCanExecuteChanged();
         VerifyFilesCommand.NotifyCanExecuteChanged();
         LaunchCommand.NotifyCanExecuteChanged();
@@ -652,6 +693,7 @@ public partial class MainWindowViewModel : ViewModelBase
         RebuildRouteOptions();
         RefreshLocalizedBindings();
         RelocalizeCollections();
+        RelocalizeServerOnlineStatuses();
 
         if (!IsPlayerLoggedIn)
         {
@@ -681,9 +723,65 @@ public partial class MainWindowViewModel : ViewModelBase
         SyncSelectedRouteOption();
     }
 
+    partial void OnSelectedStoredAccountChanged(StoredPlayerAccount? value)
+    {
+        SwitchAccountCommand.NotifyCanExecuteChanged();
+        if (!IsPlayerLoggedIn && value is not null && !string.IsNullOrWhiteSpace(value.Username))
+        {
+            PlayerUsername = value.Username.Trim();
+        }
+    }
+
+    private void RelocalizeServerOnlineStatuses()
+    {
+        foreach (var server in ManagedServers)
+        {
+            if (!IsPlayerLoggedIn)
+            {
+                server.OnlineStatusText = _languageCode == "en" ? "Monitoring disabled" : "Мониторинг выключен";
+                server.OnlineStatusBrush = new SolidColorBrush(Color.Parse("#8799B5"));
+                continue;
+            }
+
+            if (server.OnlineLastCheckedAtUtc == default)
+            {
+                server.OnlineStatusText = _languageCode == "en" ? "Checking..." : "Проверка...";
+                server.OnlineStatusBrush = new SolidColorBrush(Color.Parse("#8EA3C0"));
+                continue;
+            }
+
+            var result = new ServerOnlineProbeResult(
+                server.ServerId,
+                server.IsOnline,
+                server.OnlinePlayers,
+                server.OnlineMaxPlayers);
+            server.OnlineStatusText = BuildOnlineStatusText(result);
+            server.OnlineStatusBrush = server.IsOnline
+                ? new SolidColorBrush(Color.Parse("#33B97C"))
+                : new SolidColorBrush(Color.Parse("#D76464"));
+        }
+    }
+
     private bool CanOperate() => !IsBusy;
 
     private bool CanVerifyOrLaunch() => !IsBusy && IsPlayerLoggedIn && SelectedServer is not null;
+
+    private bool CanSwitchAccount()
+    {
+        return !IsBusy &&
+               SelectedStoredAccount is not null &&
+               !string.IsNullOrWhiteSpace(SelectedStoredAccount.AuthToken);
+    }
+
+    private bool CanLogout()
+    {
+        return !IsBusy && IsPlayerLoggedIn;
+    }
+
+    private bool CanAddAccount()
+    {
+        return !IsBusy && IsPlayerLoggedIn;
+    }
 
     private void StartFileSyncProgress()
     {
@@ -732,6 +830,295 @@ public partial class MainWindowViewModel : ViewModelBase
     private void StopFileSyncProgress()
     {
         IsFileSyncInProgress = false;
+    }
+
+    private string BuildServerMonitoringText()
+    {
+        if (!IsPlayerLoggedIn)
+        {
+            return _languageCode == "en" ? "Monitoring: login required" : "Мониторинг: нужен вход";
+        }
+
+        if (_lastServerOnlineRefreshUtc == default)
+        {
+            return _languageCode == "en" ? "Monitoring: waiting..." : "Мониторинг: ожидание...";
+        }
+
+        var local = _lastServerOnlineRefreshUtc.ToLocalTime().ToString("HH:mm:ss");
+        return _languageCode == "en"
+            ? $"Monitoring: updated {local}"
+            : $"Мониторинг: обновлено {local}";
+    }
+
+    private async Task RefreshServerOnlineStatusesAsync(bool force = false)
+    {
+        if (!IsPlayerLoggedIn || ManagedServers.Count == 0)
+        {
+            return;
+        }
+
+        if (!force && _lastServerOnlineRefreshUtc != default &&
+            DateTime.UtcNow - _lastServerOnlineRefreshUtc < TimeSpan.FromSeconds(3))
+        {
+            return;
+        }
+
+        if (!await _serverOnlineRefreshLock.WaitAsync(0))
+        {
+            return;
+        }
+
+        try
+        {
+            foreach (var server in ManagedServers.Where(x => x.OnlineLastCheckedAtUtc == default))
+            {
+                server.OnlineStatusText = _languageCode == "en" ? "Checking..." : "Проверка...";
+                server.OnlineStatusBrush = new SolidColorBrush(Color.Parse("#8EA3C0"));
+            }
+
+            var snapshot = ManagedServers.ToList();
+            var tasks = snapshot.Select(server => ProbeServerOnlineAsync(server));
+            var results = await Task.WhenAll(tasks);
+
+            foreach (var result in results)
+            {
+                var server = ManagedServers.FirstOrDefault(x => x.ServerId == result.ServerId);
+                if (server is null)
+                {
+                    continue;
+                }
+
+                server.IsOnline = result.IsOnline;
+                server.OnlinePlayers = result.OnlinePlayers;
+                server.OnlineMaxPlayers = result.OnlineMaxPlayers;
+                server.OnlineLastCheckedAtUtc = DateTime.UtcNow;
+                server.OnlineStatusText = BuildOnlineStatusText(result);
+                server.OnlineStatusBrush = result.IsOnline
+                    ? new SolidColorBrush(Color.Parse("#33B97C"))
+                    : new SolidColorBrush(Color.Parse("#D76464"));
+            }
+
+            _lastServerOnlineRefreshUtc = DateTime.UtcNow;
+            OnPropertyChanged(nameof(ServerMonitoringText));
+        }
+        catch (Exception ex)
+        {
+            _logService.LogError($"Failed to refresh server monitoring: {ex.Message}");
+        }
+        finally
+        {
+            _serverOnlineRefreshLock.Release();
+        }
+    }
+
+    private string BuildOnlineStatusText(ServerOnlineProbeResult result)
+    {
+        if (!result.IsOnline)
+        {
+            return _languageCode == "en" ? "Offline" : "Оффлайн";
+        }
+
+        if (result.OnlineMaxPlayers > 0)
+        {
+            return _languageCode == "en"
+                ? $"{result.OnlinePlayers}/{result.OnlineMaxPlayers} online"
+                : $"{result.OnlinePlayers}/{result.OnlineMaxPlayers} онлайн";
+        }
+
+        return _languageCode == "en"
+            ? $"{result.OnlinePlayers} online"
+            : $"{result.OnlinePlayers} онлайн";
+    }
+
+    private async Task<ServerOnlineProbeResult> ProbeServerOnlineAsync(ManagedServerItem server)
+    {
+        var host = string.IsNullOrWhiteSpace(server.MainAddress) ? server.Address : server.MainAddress;
+        var port = server.MainPort > 0 ? server.MainPort : server.Port;
+        if (string.IsNullOrWhiteSpace(host) || port <= 0)
+        {
+            return new ServerOnlineProbeResult(server.ServerId, false, 0, -1);
+        }
+
+        try
+        {
+            var modernResult = await TryProbeModernServerAsync(host.Trim(), port);
+            if (modernResult.IsOnline)
+            {
+                return modernResult with { ServerId = server.ServerId };
+            }
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            var legacyResult = await TryProbeLegacyServerAsync(host.Trim(), port);
+            return legacyResult with { ServerId = server.ServerId };
+        }
+        catch
+        {
+            return new ServerOnlineProbeResult(server.ServerId, false, 0, -1);
+        }
+    }
+
+    private static async Task<ServerOnlineProbeResult> TryProbeModernServerAsync(string host, int port)
+    {
+        using var cancellationTokenSource = new CancellationTokenSource(ServerOnlineTimeoutMs);
+        using var client = new TcpClient();
+        await client.ConnectAsync(host, port, cancellationTokenSource.Token);
+        using var stream = client.GetStream();
+
+        using var handshakePayload = new MemoryStream();
+        WriteVarInt(handshakePayload, 0);
+        WriteVarInt(handshakePayload, 760);
+        WriteString(handshakePayload, host);
+        var portBytes = BitConverter.GetBytes((ushort)port);
+        if (BitConverter.IsLittleEndian)
+        {
+            Array.Reverse(portBytes);
+        }
+
+        await handshakePayload.WriteAsync(portBytes, cancellationTokenSource.Token);
+        WriteVarInt(handshakePayload, 1);
+
+        using var handshakePacket = new MemoryStream();
+        WriteVarInt(handshakePacket, checked((int)handshakePayload.Length));
+        handshakePayload.Position = 0;
+        await handshakePayload.CopyToAsync(handshakePacket, cancellationTokenSource.Token);
+        handshakePacket.Position = 0;
+        await handshakePacket.CopyToAsync(stream, cancellationTokenSource.Token);
+
+        await stream.WriteAsync(new byte[] { 0x01, 0x00 }, cancellationTokenSource.Token);
+        await stream.FlushAsync(cancellationTokenSource.Token);
+
+        _ = await ReadVarIntAsync(stream, cancellationTokenSource.Token);
+        var packetId = await ReadVarIntAsync(stream, cancellationTokenSource.Token);
+        if (packetId != 0)
+        {
+            return new ServerOnlineProbeResult(Guid.Empty, false, 0, -1);
+        }
+
+        var jsonLength = await ReadVarIntAsync(stream, cancellationTokenSource.Token);
+        if (jsonLength <= 0)
+        {
+            return new ServerOnlineProbeResult(Guid.Empty, false, 0, -1);
+        }
+
+        var jsonBytes = new byte[jsonLength];
+        await stream.ReadExactlyAsync(jsonBytes, cancellationTokenSource.Token);
+        var payloadJson = Encoding.UTF8.GetString(jsonBytes);
+        var payload = JsonSerializer.Deserialize<MinecraftStatusPayload>(payloadJson);
+        if (payload?.Players is null)
+        {
+            return new ServerOnlineProbeResult(Guid.Empty, true, 0, -1);
+        }
+
+        return new ServerOnlineProbeResult(
+            Guid.Empty,
+            true,
+            Math.Max(0, payload.Players.Online),
+            Math.Max(payload.Players.Max, -1));
+    }
+
+    private static async Task<ServerOnlineProbeResult> TryProbeLegacyServerAsync(string host, int port)
+    {
+        using var cancellationTokenSource = new CancellationTokenSource(ServerOnlineTimeoutMs);
+        using var client = new TcpClient();
+        await client.ConnectAsync(host, port, cancellationTokenSource.Token);
+        using var stream = client.GetStream();
+
+        await stream.WriteAsync(new byte[] { 0xFE, 0x01 }, cancellationTokenSource.Token);
+        await stream.FlushAsync(cancellationTokenSource.Token);
+
+        var packetId = await ReadByteAsync(stream, cancellationTokenSource.Token);
+        if (packetId != 0xFF)
+        {
+            return new ServerOnlineProbeResult(Guid.Empty, false, 0, -1);
+        }
+
+        var lengthBytes = new byte[2];
+        await stream.ReadExactlyAsync(lengthBytes, cancellationTokenSource.Token);
+        var charLength = BinaryPrimitives.ReadInt16BigEndian(lengthBytes);
+        if (charLength <= 0)
+        {
+            return new ServerOnlineProbeResult(Guid.Empty, true, 0, -1);
+        }
+
+        var payloadBytes = new byte[charLength * 2];
+        await stream.ReadExactlyAsync(payloadBytes, cancellationTokenSource.Token);
+        var responseText = Encoding.BigEndianUnicode.GetString(payloadBytes);
+        var parts = responseText.Split('\0');
+        if (parts.Length >= 6 &&
+            string.Equals(parts[0], "§1", StringComparison.Ordinal) &&
+            int.TryParse(parts[4], NumberStyles.Integer, CultureInfo.InvariantCulture, out var online) &&
+            int.TryParse(parts[5], NumberStyles.Integer, CultureInfo.InvariantCulture, out var max))
+        {
+            return new ServerOnlineProbeResult(Guid.Empty, true, Math.Max(0, online), Math.Max(max, -1));
+        }
+
+        return new ServerOnlineProbeResult(Guid.Empty, true, 0, -1);
+    }
+
+    private static void WriteString(Stream stream, string value)
+    {
+        var bytes = Encoding.UTF8.GetBytes(value);
+        WriteVarInt(stream, bytes.Length);
+        stream.Write(bytes, 0, bytes.Length);
+    }
+
+    private static void WriteVarInt(Stream stream, int value)
+    {
+        var unsigned = (uint)value;
+        do
+        {
+            var temp = (byte)(unsigned & 0b0111_1111u);
+            unsigned >>= 7;
+            if (unsigned != 0)
+            {
+                temp |= 0b1000_0000;
+            }
+
+            stream.WriteByte(temp);
+        } while (unsigned != 0);
+    }
+
+    private static async Task<int> ReadVarIntAsync(Stream stream, CancellationToken cancellationToken)
+    {
+        var numRead = 0;
+        var result = 0;
+
+        while (true)
+        {
+            var read = await ReadByteAsync(stream, cancellationToken);
+            var value = read & 0b0111_1111;
+            result |= value << (7 * numRead);
+
+            numRead++;
+            if (numRead > 5)
+            {
+                throw new InvalidOperationException("VarInt is too big.");
+            }
+
+            if ((read & 0b1000_0000) == 0)
+            {
+                break;
+            }
+        }
+
+        return result;
+    }
+
+    private static async Task<byte> ReadByteAsync(Stream stream, CancellationToken cancellationToken)
+    {
+        var buffer = new byte[1];
+        var read = await stream.ReadAsync(buffer, cancellationToken);
+        if (read != 1)
+        {
+            throw new IOException("Unexpected end of stream.");
+        }
+
+        return buffer[0];
     }
 
     private async Task RefreshAsync()
@@ -799,7 +1186,13 @@ public partial class MainWindowViewModel : ViewModelBase
                             rpc?.AppId ?? string.Empty,
                             effectiveRpcDetails,
                             effectiveRpcState),
-                        Icon = icon
+                        Icon = icon,
+                        IsOnline = false,
+                        OnlinePlayers = 0,
+                        OnlineMaxPlayers = -1,
+                        OnlineStatusText = _languageCode == "en" ? "Checking..." : "Проверка...",
+                        OnlineStatusBrush = new SolidColorBrush(Color.Parse("#8EA3C0")),
+                        OnlineLastCheckedAtUtc = default
                     });
                 }
             }
@@ -846,6 +1239,11 @@ public partial class MainWindowViewModel : ViewModelBase
                 ?? ManagedServers[0];
 
             StatusText = F("status.loadedServers", ManagedServers.Count);
+
+            if (IsPlayerLoggedIn)
+            {
+                await RefreshServerOnlineStatusesAsync(force: true);
+            }
         });
     }
 
@@ -1324,10 +1722,44 @@ public partial class MainWindowViewModel : ViewModelBase
     private LauncherSettings BuildSettingsSnapshot()
     {
         var configuredApiBaseUrl = TryResolveConfiguredApiBaseUrl();
+        var storedAccounts = NormalizeStoredAccounts(StoredPlayerAccounts);
+        var activeStoredAccount = ResolveStoredAccount(PlayerLoggedInAs)
+            ?? SelectedStoredAccount;
         var hasActiveSession = IsPlayerLoggedIn &&
                                !string.IsNullOrWhiteSpace(_playerAuthToken) &&
                                !string.IsNullOrWhiteSpace(PlayerLoggedInAs);
+        var canAutoRestore = _allowAutoSessionRestore && (hasActiveSession || activeStoredAccount is not null);
         var authRoles = hasActiveSession ? NormalizePlayerRoles(_playerAuthRoles) : [];
+        var legacyToken = !canAutoRestore
+            ? string.Empty
+            : hasActiveSession
+            ? _playerAuthToken
+            : (activeStoredAccount?.AuthToken ?? string.Empty);
+        var legacyTokenType = !canAutoRestore
+            ? "Bearer"
+            : hasActiveSession
+            ? _playerAuthTokenType
+            : (string.IsNullOrWhiteSpace(activeStoredAccount?.AuthTokenType) ? "Bearer" : activeStoredAccount!.AuthTokenType);
+        var legacyUsername = !canAutoRestore
+            ? string.Empty
+            : hasActiveSession
+            ? PlayerLoggedInAs.Trim()
+            : (activeStoredAccount?.Username ?? string.Empty);
+        var legacyExternalId = !canAutoRestore
+            ? string.Empty
+            : hasActiveSession
+            ? _playerAuthExternalId
+            : (activeStoredAccount?.ExternalId ?? string.Empty);
+        var legacyRoles = !canAutoRestore
+            ? []
+            : hasActiveSession
+            ? authRoles
+            : (activeStoredAccount is null ? [] : NormalizePlayerRoles(activeStoredAccount.Roles));
+        var legacyApiBaseUrl = !canAutoRestore
+            ? string.Empty
+            : hasActiveSession
+            ? _playerAuthApiBaseUrl
+            : NormalizeBaseUrlOrEmpty(activeStoredAccount?.ApiBaseUrl);
 
         return new LauncherSettings
         {
@@ -1349,12 +1781,23 @@ public partial class MainWindowViewModel : ViewModelBase
                 .ToList(),
             SelectedServerId = SelectedServer?.ServerId.ToString() ?? string.Empty,
             LastPlayerUsername = PlayerUsername.Trim(),
-            PlayerAuthToken = hasActiveSession ? _playerAuthToken : string.Empty,
-            PlayerAuthTokenType = hasActiveSession ? _playerAuthTokenType : "Bearer",
-            PlayerAuthUsername = hasActiveSession ? PlayerLoggedInAs.Trim() : string.Empty,
-            PlayerAuthExternalId = hasActiveSession ? _playerAuthExternalId : string.Empty,
-            PlayerAuthRoles = hasActiveSession ? authRoles : [],
-            PlayerAuthApiBaseUrl = hasActiveSession ? _playerAuthApiBaseUrl : string.Empty
+            PlayerAuthToken = legacyToken,
+            PlayerAuthTokenType = legacyTokenType,
+            PlayerAuthUsername = legacyUsername,
+            PlayerAuthExternalId = legacyExternalId,
+            PlayerAuthRoles = legacyRoles,
+            PlayerAuthApiBaseUrl = legacyApiBaseUrl,
+            PlayerAccounts = [.. storedAccounts.Select(account => new StoredPlayerAccount
+            {
+                Username = account.Username,
+                AuthToken = account.AuthToken,
+                AuthTokenType = account.AuthTokenType,
+                ExternalId = account.ExternalId,
+                Roles = [.. account.Roles],
+                ApiBaseUrl = account.ApiBaseUrl,
+                LastUsedAtUtc = account.LastUsedAtUtc
+            })],
+            ActivePlayerAccountUsername = canAutoRestore ? (activeStoredAccount?.Username ?? string.Empty) : string.Empty
         };
     }
 
@@ -1412,15 +1855,137 @@ public partial class MainWindowViewModel : ViewModelBase
         });
     }
 
+    private async Task SwitchAccountAsync()
+    {
+        if (SelectedStoredAccount is null)
+        {
+            return;
+        }
+
+        await RunBusyAsync(async () =>
+        {
+            var account = SelectedStoredAccount;
+            var token = (account.AuthToken ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                throw new InvalidOperationException("No saved session token for this account.");
+            }
+
+            var currentApiBaseUrl = NormalizeBaseUrl(ApiBaseUrl);
+            var accountApiBaseUrl = NormalizeBaseUrlOrEmpty(account.ApiBaseUrl);
+            if (!string.IsNullOrWhiteSpace(accountApiBaseUrl) &&
+                !string.Equals(accountApiBaseUrl, currentApiBaseUrl, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Saved account belongs to another API endpoint.");
+            }
+
+            try
+            {
+                var session = await _launcherApiService.GetSessionAsync(
+                    ApiBaseUrl,
+                    token,
+                    string.IsNullOrWhiteSpace(account.AuthTokenType) ? "Bearer" : account.AuthTokenType);
+                SetAuthenticatedPlayerSession(
+                    token,
+                    account.AuthTokenType,
+                    session.Username,
+                    session.ExternalId,
+                    session.Roles,
+                    currentApiBaseUrl);
+                await RefreshPlayerCosmeticsAsync(session.Username);
+                await PersistSettingsSnapshotAsync();
+                StatusText = T("status.ready");
+            }
+            catch (LauncherApiException apiException) when (
+                apiException.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+            {
+                RemoveStoredAccount(account.Username);
+                IsPlayerLoggedIn = false;
+                await PersistSettingsSnapshotAsync();
+                StatusText = _languageCode == "en"
+                    ? "Saved account session expired. Login again."
+                    : "Сессия аккаунта истекла. Войдите заново.";
+            }
+        });
+    }
+
+    private async Task LogoutAsync()
+    {
+        await RunBusyAsync(async () =>
+        {
+            _allowAutoSessionRestore = false;
+            IsPlayerLoggedIn = false;
+            PlayerPassword = string.Empty;
+            PlayerTwoFactorCode = string.Empty;
+            StatusText = T("status.notLoggedIn");
+            await PersistSettingsSnapshotAsync();
+        });
+    }
+
+    private void AddAccount()
+    {
+        if (!CanAddAccount())
+        {
+            return;
+        }
+
+        _allowAutoSessionRestore = false;
+        IsPlayerLoggedIn = false;
+        IsTwoFactorStepActive = false;
+        TwoFactorSetupSecret = string.Empty;
+        TwoFactorSetupUri = string.Empty;
+        PlayerTwoFactorCode = string.Empty;
+        PlayerPassword = string.Empty;
+        PlayerUsername = string.Empty;
+        SelectedStoredAccount = null;
+        StatusText = _languageCode == "en" ? "Add another account." : "Добавьте новый аккаунт.";
+    }
+
     private void LoadStoredPlayerSessionState()
     {
-        _playerAuthToken = (_settings.PlayerAuthToken ?? string.Empty).Trim();
-        _playerAuthTokenType = string.IsNullOrWhiteSpace(_settings.PlayerAuthTokenType)
+        var knownAccounts = NormalizeStoredAccounts(_settings.PlayerAccounts);
+        if (knownAccounts.Count == 0 &&
+            !string.IsNullOrWhiteSpace(_settings.PlayerAuthUsername) &&
+            !string.IsNullOrWhiteSpace(_settings.PlayerAuthToken))
+        {
+            knownAccounts.Add(new StoredPlayerAccount
+            {
+                Username = _settings.PlayerAuthUsername.Trim(),
+                AuthToken = _settings.PlayerAuthToken.Trim(),
+                AuthTokenType = string.IsNullOrWhiteSpace(_settings.PlayerAuthTokenType)
+                    ? "Bearer"
+                    : _settings.PlayerAuthTokenType.Trim(),
+                ExternalId = string.IsNullOrWhiteSpace(_settings.PlayerAuthExternalId)
+                    ? _settings.PlayerAuthUsername.Trim()
+                    : _settings.PlayerAuthExternalId.Trim(),
+                Roles = NormalizePlayerRoles(_settings.PlayerAuthRoles),
+                ApiBaseUrl = NormalizeBaseUrlOrEmpty(_settings.PlayerAuthApiBaseUrl),
+                LastUsedAtUtc = DateTime.UtcNow
+            });
+        }
+
+        SetStoredAccounts(knownAccounts);
+
+        var autoRestoreAccount = ResolveStoredAccount(_settings.ActivePlayerAccountUsername)
+            ?? ResolveStoredAccount(_settings.PlayerAuthUsername);
+        SelectedStoredAccount = autoRestoreAccount ?? StoredPlayerAccounts.FirstOrDefault();
+
+        if (autoRestoreAccount is null)
+        {
+            _allowAutoSessionRestore = false;
+            ClearAuthenticatedPlayerSession();
+            return;
+        }
+
+        _allowAutoSessionRestore = true;
+        _playerAuthToken = (autoRestoreAccount.AuthToken ?? string.Empty).Trim();
+        _playerAuthTokenType = string.IsNullOrWhiteSpace(autoRestoreAccount.AuthTokenType)
             ? "Bearer"
-            : _settings.PlayerAuthTokenType.Trim();
-        _playerAuthExternalId = (_settings.PlayerAuthExternalId ?? string.Empty).Trim();
-        _playerAuthRoles = NormalizePlayerRoles(_settings.PlayerAuthRoles);
-        _playerAuthApiBaseUrl = NormalizeBaseUrlOrEmpty(_settings.PlayerAuthApiBaseUrl);
+            : autoRestoreAccount.AuthTokenType.Trim();
+        _playerAuthExternalId = (autoRestoreAccount.ExternalId ?? string.Empty).Trim();
+        _playerAuthRoles = NormalizePlayerRoles(autoRestoreAccount.Roles);
+        _playerAuthApiBaseUrl = NormalizeBaseUrlOrEmpty(autoRestoreAccount.ApiBaseUrl);
+        PlayerUsername = autoRestoreAccount.Username.Trim();
     }
 
     private async Task TryRestorePlayerSessionAsync()
@@ -1438,6 +2003,8 @@ public partial class MainWindowViewModel : ViewModelBase
             await PersistSettingsSnapshotAsync();
             return;
         }
+
+        var fallbackStoredUsername = SelectedStoredAccount?.Username?.Trim() ?? string.Empty;
 
         try
         {
@@ -1457,6 +2024,11 @@ public partial class MainWindowViewModel : ViewModelBase
         catch (LauncherApiException apiException) when (
             apiException.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
         {
+            if (!string.IsNullOrWhiteSpace(fallbackStoredUsername))
+            {
+                RemoveStoredAccount(fallbackStoredUsername);
+            }
+
             ClearAuthenticatedPlayerSession();
             await PersistSettingsSnapshotAsync();
             _logService.LogInfo("Stored player session was rejected by API. Login is required.");
@@ -1464,7 +2036,7 @@ public partial class MainWindowViewModel : ViewModelBase
         catch (Exception ex)
         {
             var fallbackUsername = string.IsNullOrWhiteSpace(_settings.PlayerAuthUsername)
-                ? PlayerUsername.Trim()
+                ? (string.IsNullOrWhiteSpace(fallbackStoredUsername) ? PlayerUsername.Trim() : fallbackStoredUsername)
                 : _settings.PlayerAuthUsername.Trim();
             if (string.IsNullOrWhiteSpace(fallbackUsername))
             {
@@ -1509,6 +2081,11 @@ public partial class MainWindowViewModel : ViewModelBase
         catch (LauncherApiException apiException) when (
             apiException.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
         {
+            if (!string.IsNullOrWhiteSpace(PlayerLoggedInAs))
+            {
+                RemoveStoredAccount(PlayerLoggedInAs);
+            }
+
             ClearAuthenticatedPlayerSession();
             await PersistSettingsSnapshotAsync();
             return "Player session rejected by server (possibly banned). Login is required.";
@@ -1540,6 +2117,18 @@ public partial class MainWindowViewModel : ViewModelBase
             : externalId.Trim();
         _playerAuthRoles = NormalizePlayerRoles(roles);
         _playerAuthApiBaseUrl = NormalizeBaseUrl(sourceApiBaseUrl);
+        _allowAutoSessionRestore = true;
+        UpsertStoredAccount(new StoredPlayerAccount
+        {
+            Username = normalizedUsername,
+            AuthToken = _playerAuthToken,
+            AuthTokenType = _playerAuthTokenType,
+            ExternalId = _playerAuthExternalId,
+            Roles = [.. _playerAuthRoles],
+            ApiBaseUrl = _playerAuthApiBaseUrl,
+            LastUsedAtUtc = DateTime.UtcNow
+        });
+        SelectedStoredAccount = ResolveStoredAccount(normalizedUsername);
 
         IsPlayerLoggedIn = true;
         IsSettingsOpen = false;
@@ -1602,6 +2191,117 @@ public partial class MainWindowViewModel : ViewModelBase
         return normalized;
     }
 
+    private static List<StoredPlayerAccount> NormalizeStoredAccounts(IEnumerable<StoredPlayerAccount>? accounts)
+    {
+        var result = new List<StoredPlayerAccount>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var account in accounts ?? [])
+        {
+            var username = (account.Username ?? string.Empty).Trim();
+            var token = (account.AuthToken ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(token))
+            {
+                continue;
+            }
+
+            if (!seen.Add(username))
+            {
+                continue;
+            }
+
+            result.Add(new StoredPlayerAccount
+            {
+                Username = username,
+                AuthToken = token,
+                AuthTokenType = string.IsNullOrWhiteSpace(account.AuthTokenType) ? "Bearer" : account.AuthTokenType.Trim(),
+                ExternalId = string.IsNullOrWhiteSpace(account.ExternalId) ? username : account.ExternalId.Trim(),
+                Roles = NormalizePlayerRoles(account.Roles),
+                ApiBaseUrl = NormalizeBaseUrlOrEmpty(account.ApiBaseUrl),
+                LastUsedAtUtc = account.LastUsedAtUtc == default ? DateTime.UtcNow : account.LastUsedAtUtc
+            });
+        }
+
+        return result
+            .OrderByDescending(x => x.LastUsedAtUtc)
+            .ThenBy(x => x.Username, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private void SetStoredAccounts(IEnumerable<StoredPlayerAccount> accounts)
+    {
+        var normalized = NormalizeStoredAccounts(accounts);
+        StoredPlayerAccounts.Clear();
+        foreach (var account in normalized)
+        {
+            StoredPlayerAccounts.Add(account);
+        }
+    }
+
+    private StoredPlayerAccount? ResolveStoredAccount(string? username)
+    {
+        var key = (username ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return null;
+        }
+
+        return StoredPlayerAccounts.FirstOrDefault(x =>
+            string.Equals(x.Username, key, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void UpsertStoredAccount(StoredPlayerAccount account)
+    {
+        var normalized = NormalizeStoredAccounts([account]);
+        if (normalized.Count == 0)
+        {
+            return;
+        }
+
+        var candidate = normalized[0];
+        var existing = ResolveStoredAccount(candidate.Username);
+        if (existing is not null)
+        {
+            existing.AuthToken = candidate.AuthToken;
+            existing.AuthTokenType = candidate.AuthTokenType;
+            existing.ExternalId = candidate.ExternalId;
+            existing.Roles = candidate.Roles;
+            existing.ApiBaseUrl = candidate.ApiBaseUrl;
+            existing.LastUsedAtUtc = candidate.LastUsedAtUtc;
+        }
+        else
+        {
+            StoredPlayerAccounts.Add(candidate);
+        }
+
+        var ordered = StoredPlayerAccounts
+            .OrderByDescending(x => x.LastUsedAtUtc)
+            .ThenBy(x => x.Username, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        StoredPlayerAccounts.Clear();
+        foreach (var item in ordered)
+        {
+            StoredPlayerAccounts.Add(item);
+        }
+    }
+
+    private void RemoveStoredAccount(string username)
+    {
+        var existing = ResolveStoredAccount(username);
+        if (existing is null)
+        {
+            return;
+        }
+
+        StoredPlayerAccounts.Remove(existing);
+        if (SelectedStoredAccount is not null &&
+            string.Equals(SelectedStoredAccount.Username, username, StringComparison.OrdinalIgnoreCase))
+        {
+            SelectedStoredAccount = StoredPlayerAccounts.FirstOrDefault();
+        }
+    }
+
     private void OnLogLineAdded(string line)
     {
         if (!DebugMode)
@@ -1649,11 +2349,17 @@ public partial class MainWindowViewModel : ViewModelBase
         VerifyFilesCommand.NotifyCanExecuteChanged();
         LaunchCommand.NotifyCanExecuteChanged();
         ToggleSettingsCommand.NotifyCanExecuteChanged();
+        SwitchAccountCommand.NotifyCanExecuteChanged();
+        LogoutCommand.NotifyCanExecuteChanged();
+        AddAccountCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(IsLoginRequired));
         OnPropertyChanged(nameof(IsLauncherReady));
+        OnPropertyChanged(nameof(ServerMonitoringText));
 
         if (!value)
         {
+            _serverOnlineRefreshTimer.Stop();
+            _lastServerOnlineRefreshUtc = default;
             ClearAuthenticatedPlayerSession();
             IsSettingsOpen = false;
             IsTwoFactorStepActive = false;
@@ -1663,7 +2369,26 @@ public partial class MainWindowViewModel : ViewModelBase
             HasSkin = false;
             HasCape = false;
             AuthStatusText = T("status.notLoggedIn");
+            foreach (var server in ManagedServers)
+            {
+                server.IsOnline = false;
+                server.OnlinePlayers = 0;
+                server.OnlineMaxPlayers = -1;
+                server.OnlineStatusText = _languageCode == "en" ? "Monitoring disabled" : "Мониторинг выключен";
+                server.OnlineStatusBrush = new SolidColorBrush(Color.Parse("#8799B5"));
+            }
+
+            return;
         }
+
+        _lastServerOnlineRefreshUtc = default;
+        OnPropertyChanged(nameof(ServerMonitoringText));
+        if (!_serverOnlineRefreshTimer.IsEnabled)
+        {
+            _serverOnlineRefreshTimer.Start();
+        }
+
+        _ = RefreshServerOnlineStatusesAsync();
     }
 
     private bool CanToggleSettings()
@@ -2584,7 +3309,13 @@ public partial class MainWindowViewModel : ViewModelBase
                 server.DiscordRpcAppId,
                 server.DiscordRpcDetails,
                 server.DiscordRpcState),
-            Icon = server.Icon
+            Icon = server.Icon,
+            IsOnline = server.IsOnline,
+            OnlinePlayers = server.OnlinePlayers,
+            OnlineMaxPlayers = server.OnlineMaxPlayers,
+            OnlineStatusText = server.OnlineStatusText,
+            OnlineStatusBrush = server.OnlineStatusBrush,
+            OnlineLastCheckedAtUtc = server.OnlineLastCheckedAtUtc
         }).ToList();
 
         ManagedServers.Clear();
@@ -2641,6 +3372,10 @@ public partial class MainWindowViewModel : ViewModelBase
         OnPropertyChanged(nameof(PasswordLabelText));
         OnPropertyChanged(nameof(TwoFactorCodeLabelText));
         OnPropertyChanged(nameof(LoginButtonText));
+        OnPropertyChanged(nameof(AddAccountButtonText));
+        OnPropertyChanged(nameof(LogoutButtonText));
+        OnPropertyChanged(nameof(SwitchAccountButtonText));
+        OnPropertyChanged(nameof(SavedAccountsLabelText));
         OnPropertyChanged(nameof(TwoFactorHintText));
         OnPropertyChanged(nameof(SkinStatusText));
         OnPropertyChanged(nameof(CapeStatusText));
@@ -2658,6 +3393,24 @@ public partial class MainWindowViewModel : ViewModelBase
         OnPropertyChanged(nameof(CopyCrashButtonText));
         OnPropertyChanged(nameof(CrashFlagText));
         OnPropertyChanged(nameof(DebugLogHeaderText));
+        OnPropertyChanged(nameof(ServerMonitoringText));
+    }
+
+    private readonly record struct ServerOnlineProbeResult(
+        Guid ServerId,
+        bool IsOnline,
+        int OnlinePlayers,
+        int OnlineMaxPlayers);
+
+    private sealed class MinecraftStatusPayload
+    {
+        public MinecraftStatusPlayers? Players { get; set; }
+    }
+
+    private sealed class MinecraftStatusPlayers
+    {
+        public int Online { get; set; }
+        public int Max { get; set; }
     }
 
     private string T(string key)

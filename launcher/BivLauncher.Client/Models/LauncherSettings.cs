@@ -17,7 +17,20 @@ public sealed class LauncherSettings
     public string PlayerAuthExternalId { get; set; } = string.Empty;
     public List<string> PlayerAuthRoles { get; set; } = [];
     public string PlayerAuthApiBaseUrl { get; set; } = string.Empty;
+    public List<StoredPlayerAccount> PlayerAccounts { get; set; } = [];
+    public string ActivePlayerAccountUsername { get; set; } = string.Empty;
     public string LastAutoUpdateVersionAttempted { get; set; } = string.Empty;
+}
+
+public sealed class StoredPlayerAccount
+{
+    public string Username { get; set; } = string.Empty;
+    public string AuthToken { get; set; } = string.Empty;
+    public string AuthTokenType { get; set; } = "Bearer";
+    public string ExternalId { get; set; } = string.Empty;
+    public List<string> Roles { get; set; } = [];
+    public string ApiBaseUrl { get; set; } = string.Empty;
+    public DateTime LastUsedAtUtc { get; set; }
 }
 
 public sealed class ProfileRouteSelection

@@ -41,21 +41,66 @@
                      Margin="0,8,0,0"
                      Text="{Binding AuthStatusText}"
                      TextWrapping="Wrap" />
-          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Top">
-            <Button Classes="ghostButton"
-                    Content="{Binding RefreshButtonText}"
-                    Background="{Binding PrimaryButtonBackgroundBrush}"
-                    BorderBrush="{Binding PrimaryButtonBorderBrush}"
-                    Foreground="{Binding PrimaryButtonForegroundBrush}"
-                    Command="{Binding RefreshCommand}"
-                    IsVisible="{Binding IsLauncherReady}" />
-            <Button Classes="iconButton"
-                    Content="&#xE713;"
-                    Background="{Binding PrimaryButtonBackgroundBrush}"
-                    BorderBrush="{Binding PrimaryButtonBorderBrush}"
-                    Foreground="{Binding PrimaryButtonForegroundBrush}"
-                    Command="{Binding ToggleSettingsCommand}"
-                    IsVisible="{Binding IsLauncherReady}" />
+          <StackPanel Grid.Column="1" Grid.RowSpan="3" Spacing="8" VerticalAlignment="Top">
+            <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+              <Button Classes="ghostButton"
+                      Content="{Binding RefreshButtonText}"
+                      Background="{Binding PrimaryButtonBackgroundBrush}"
+                      BorderBrush="{Binding PrimaryButtonBorderBrush}"
+                      Foreground="{Binding PrimaryButtonForegroundBrush}"
+                      Command="{Binding RefreshCommand}"
+                      IsVisible="{Binding IsLauncherReady}" />
+              <Button Classes="iconButton"
+                      Background="{Binding PrimaryButtonBackgroundBrush}"
+                      BorderBrush="{Binding PrimaryButtonBorderBrush}"
+                      Foreground="{Binding PrimaryButtonForegroundBrush}"
+                      Command="{Binding ToggleSettingsCommand}"
+                      IsVisible="{Binding IsLauncherReady}">
+                <TextBlock Text="&#xE713;" FontFamily="Segoe MDL2 Assets" />
+              </Button>
+            </StackPanel>
+
+            <StackPanel Orientation="Horizontal"
+                        Spacing="8"
+                        HorizontalAlignment="Right"
+                        IsVisible="{Binding IsLauncherReady}">
+              <ComboBox Width="220"
+                        Background="{Binding InputBackgroundBrush}"
+                        BorderBrush="{Binding InputBorderBrush}"
+                        Foreground="{Binding InputForegroundBrush}"
+                        ItemsSource="{Binding StoredPlayerAccounts}"
+                        SelectedItem="{Binding SelectedStoredAccount}">
+                <ComboBox.ItemTemplate>
+                  <DataTemplate>
+                    <TextBlock Text="{Binding Username}" />
+                  </DataTemplate>
+                </ComboBox.ItemTemplate>
+              </ComboBox>
+              <Button Classes="ghostButton"
+                      Content="{Binding SwitchAccountButtonText}"
+                      Background="{Binding PrimaryButtonBackgroundBrush}"
+                      BorderBrush="{Binding PrimaryButtonBorderBrush}"
+                      Foreground="{Binding PrimaryButtonForegroundBrush}"
+                      Command="{Binding SwitchAccountCommand}" />
+            </StackPanel>
+
+            <StackPanel Orientation="Horizontal"
+                        Spacing="8"
+                        HorizontalAlignment="Right"
+                        IsVisible="{Binding IsLauncherReady}">
+              <Button Classes="ghostButton"
+                      Content="{Binding AddAccountButtonText}"
+                      Background="{Binding PrimaryButtonBackgroundBrush}"
+                      BorderBrush="{Binding PrimaryButtonBorderBrush}"
+                      Foreground="{Binding PrimaryButtonForegroundBrush}"
+                      Command="{Binding AddAccountCommand}" />
+              <Button Classes="ghostButton"
+                      Content="{Binding LogoutButtonText}"
+                      Background="{Binding PrimaryButtonBackgroundBrush}"
+                      BorderBrush="{Binding PrimaryButtonBorderBrush}"
+                      Foreground="{Binding PrimaryButtonForegroundBrush}"
+                      Command="{Binding LogoutCommand}" />
+            </StackPanel>
           </StackPanel>
         </Grid>
       </Border>
@@ -69,7 +114,7 @@
                 Background="{Binding LoginCardBackgroundBrush}"
                 BorderBrush="{Binding LoginCardBorderBrush}"
                 IsVisible="{Binding IsLoginRequired}">
-          <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="10">
+          <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="10">
             <TextBlock Classes="sectionTitle"
                        Foreground="{Binding PrimaryTextBrush}"
                        Text="{Binding AccountHeaderText}" />
@@ -81,24 +126,49 @@
 
             <TextBlock Grid.Row="2"
                        Foreground="{Binding PrimaryTextBrush}"
+                       Text="{Binding SavedAccountsLabelText}"
+                       IsVisible="{Binding HasStoredAccounts}" />
+            <ComboBox Grid.Row="3"
+                      Background="{Binding InputBackgroundBrush}"
+                      BorderBrush="{Binding InputBorderBrush}"
+                      Foreground="{Binding InputForegroundBrush}"
+                      ItemsSource="{Binding StoredPlayerAccounts}"
+                      SelectedItem="{Binding SelectedStoredAccount}"
+                      IsVisible="{Binding HasStoredAccounts}">
+              <ComboBox.ItemTemplate>
+                <DataTemplate>
+                  <TextBlock Text="{Binding Username}" />
+                </DataTemplate>
+              </ComboBox.ItemTemplate>
+            </ComboBox>
+            <Button Grid.Row="4"
+                    Content="{Binding SwitchAccountButtonText}"
+                    Background="{Binding PrimaryButtonBackgroundBrush}"
+                    BorderBrush="{Binding PrimaryButtonBorderBrush}"
+                    Foreground="{Binding PrimaryButtonForegroundBrush}"
+                    Command="{Binding SwitchAccountCommand}"
+                    IsVisible="{Binding HasStoredAccounts}" />
+
+            <TextBlock Grid.Row="5"
+                       Foreground="{Binding PrimaryTextBrush}"
                        Text="{Binding UsernameLabelText}" />
-            <TextBox Grid.Row="3"
+            <TextBox Grid.Row="6"
                      Watermark="Player"
                      Background="{Binding InputBackgroundBrush}"
                      BorderBrush="{Binding InputBorderBrush}"
                      Foreground="{Binding InputForegroundBrush}"
                      Text="{Binding PlayerUsername}" />
 
-            <TextBlock Grid.Row="4"
+            <TextBlock Grid.Row="7"
                        Foreground="{Binding PrimaryTextBrush}"
                        Text="{Binding PasswordLabelText}" />
-            <TextBox Grid.Row="5"
+            <TextBox Grid.Row="8"
                      Background="{Binding InputBackgroundBrush}"
                      BorderBrush="{Binding InputBorderBrush}"
                      Foreground="{Binding InputForegroundBrush}"
                      Text="{Binding PlayerPassword}"
                      PasswordChar="*" />
-            <Button Grid.Row="6"
+            <Button Grid.Row="9"
                     Classes="playButton"
                     Content="{Binding LoginButtonText}"
                     Background="{Binding PlayButtonBackgroundBrush}"
@@ -106,18 +176,18 @@
                     Foreground="{Binding PlayButtonForegroundBrush}"
                     Command="{Binding LoginCommand}" />
 
-            <TextBlock Grid.Row="7"
+            <TextBlock Grid.Row="10"
                        Foreground="{Binding PrimaryTextBrush}"
                        Text="{Binding TwoFactorCodeLabelText}"
                        IsVisible="{Binding IsTwoFactorStepActive}" />
-            <TextBox Grid.Row="8"
+            <TextBox Grid.Row="11"
                      Watermark="123456"
                      Background="{Binding InputBackgroundBrush}"
                      BorderBrush="{Binding InputBorderBrush}"
                      Foreground="{Binding InputForegroundBrush}"
                      Text="{Binding PlayerTwoFactorCode}"
                      IsVisible="{Binding IsTwoFactorStepActive}" />
-            <TextBlock Grid.Row="9"
+            <TextBlock Grid.Row="12"
                        Classes="subtle"
                        Foreground="{Binding SecondaryTextBrush}"
                        Text="{Binding TwoFactorHintText}"
@@ -132,7 +202,7 @@
           <Border Classes="featurePanel"
                   Background="{Binding PanelBackgroundBrush}"
                   BorderBrush="{Binding PanelBorderBrush}">
-            <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,*" RowSpacing="12">
+            <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,*" RowSpacing="12">
               <TextBlock Classes="sectionTitle"
                          Foreground="{Binding PrimaryTextBrush}"
                          Text="{Binding PlayButtonText}" />
@@ -146,7 +216,16 @@
                          Classes="subtle"
                          Foreground="{Binding SecondaryTextBrush}"
                          Text="{Binding SelectedServer.RuntimeDisplay, TargetNullValue='-'}" />
-              <Grid Grid.Row="3"
+              <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="8">
+                <Ellipse Width="10"
+                         Height="10"
+                         VerticalAlignment="Center"
+                         Fill="{Binding SelectedServer.OnlineStatusBrush, TargetNullValue=#8EA3C0}" />
+                <TextBlock Classes="subtle"
+                           Foreground="{Binding SecondaryTextBrush}"
+                           Text="{Binding SelectedServer.OnlineStatusText, TargetNullValue='Проверка...'}" />
+              </StackPanel>
+              <Grid Grid.Row="4"
                     ColumnDefinitions="Auto,*"
                     ColumnSpacing="10">
                 <TextBlock VerticalAlignment="Center"
@@ -160,13 +239,13 @@
                           ItemsSource="{Binding RouteOptions}"
                           SelectedItem="{Binding SelectedRouteOption}" />
               </Grid>
-              <TextBlock Grid.Row="4"
+              <TextBlock Grid.Row="5"
                          Classes="subtle"
                          Foreground="{Binding SecondaryTextBrush}"
                          Text="{Binding AuthStatusText}"
                          TextWrapping="Wrap" />
 
-              <Border Grid.Row="5"
+              <Border Grid.Row="6"
                       IsVisible="{Binding IsFileSyncInProgress}"
                       CornerRadius="12"
                       BorderThickness="1"
@@ -197,7 +276,7 @@
                 </StackPanel>
               </Border>
 
-              <StackPanel Grid.Row="6"
+              <StackPanel Grid.Row="7"
                           Orientation="Horizontal"
                           Spacing="10"
                           VerticalAlignment="Bottom">
@@ -221,9 +300,16 @@
                     Background="{Binding PanelBackgroundBrush}"
                     BorderBrush="{Binding PanelBorderBrush}">
               <Grid RowDefinitions="Auto,*" RowSpacing="10">
-                <TextBlock Classes="sectionTitle"
-                           Foreground="{Binding PrimaryTextBrush}"
-                           Text="{Binding ServersHeaderText}" />
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                  <TextBlock Classes="sectionTitle"
+                             Foreground="{Binding PrimaryTextBrush}"
+                             Text="{Binding ServersHeaderText}" />
+                  <TextBlock Grid.Column="1"
+                             Classes="subtle"
+                             Foreground="{Binding SecondaryTextBrush}"
+                             VerticalAlignment="Center"
+                             Text="{Binding ServerMonitoringText}" />
+                </Grid>
                 <ListBox Grid.Row="1"
                          MaxHeight="290"
                          Background="{Binding ListBackgroundBrush}"
@@ -242,13 +328,21 @@
                                 VerticalAlignment="Top">
                           <Image Source="{Binding Icon}" Stretch="UniformToFill" />
                         </Border>
-                        <Grid Grid.Column="1" RowDefinitions="Auto,Auto">
+                        <Grid Grid.Column="1" RowDefinitions="Auto,Auto,Auto" RowSpacing="2">
                           <TextBlock Text="{Binding DisplayName}"
                                      FontWeight="SemiBold"
                                      TextWrapping="Wrap" />
                           <TextBlock Grid.Row="1"
                                      Opacity="0.82"
                                      Text="{Binding RuntimeDisplay}" />
+                          <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="6">
+                            <Ellipse Width="8"
+                                     Height="8"
+                                     VerticalAlignment="Center"
+                                     Fill="{Binding OnlineStatusBrush}" />
+                            <TextBlock Opacity="0.88"
+                                       Text="{Binding OnlineStatusText}" />
+                          </StackPanel>
                         </Grid>
                       </Grid>
                     </DataTemplate>
@@ -314,11 +408,12 @@
                              Text="{Binding SettingsHeaderText}" />
                   <Button Grid.Column="1"
                           Classes="iconButton"
-                          Content="&#xE711;"
                           Background="{Binding PrimaryButtonBackgroundBrush}"
                           BorderBrush="{Binding PrimaryButtonBorderBrush}"
                           Foreground="{Binding PrimaryButtonForegroundBrush}"
-                          Command="{Binding CloseSettingsCommand}" />
+                          Command="{Binding CloseSettingsCommand}">
+                    <TextBlock Text="&#xE711;" FontFamily="Segoe MDL2 Assets" />
+                  </Button>
                 </Grid>
 
                 <ScrollViewer Grid.Row="1"

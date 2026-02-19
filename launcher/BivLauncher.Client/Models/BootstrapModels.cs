@@ -1,4 +1,5 @@
 using Avalonia.Media;
+using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace BivLauncher.Client.Models;
 
@@ -128,7 +129,7 @@ public sealed class LauncherNewsItem
     public required DateTime CreatedAtUtc { get; init; }
 }
 
-public sealed class ManagedServerItem
+public sealed partial class ManagedServerItem : ObservableObject
 {
     public required Guid ServerId { get; init; }
     public required string ProfileSlug { get; init; }
@@ -155,6 +156,24 @@ public sealed class ManagedServerItem
     public required string RuProxyAddress { get; init; }
     public required int RuProxyPort { get; init; }
     public required string RuJarPath { get; init; }
+
+    [ObservableProperty]
+    private string _onlineStatusText = "Checking...";
+
+    [ObservableProperty]
+    private IBrush _onlineStatusBrush = new SolidColorBrush(Color.Parse("#8EA3C0"));
+
+    [ObservableProperty]
+    private int _onlinePlayers;
+
+    [ObservableProperty]
+    private int _onlineMaxPlayers = -1;
+
+    [ObservableProperty]
+    private DateTime _onlineLastCheckedAtUtc;
+
+    [ObservableProperty]
+    private bool _isOnline;
 
     public string DisplayName => $"{ProfileName} / {ServerName}";
     public string RuntimeDisplay => $"{LoaderType} {McVersion}".Trim();
