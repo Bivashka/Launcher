@@ -606,12 +606,71 @@ public sealed class BuildPipelineService(
         var parts = rawVersion
             .Trim()
             .Split(new[] { '.', '-', '_', ' ' }, StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length < 2)
+        if (parts.Length == 0)
         {
             return false;
         }
 
-        return int.TryParse(parts[0], out major) && int.TryParse(parts[1], out minor);
+        var parsed = new List<int>(capacity: 2);
+        foreach (var part in parts)
+        {
+            var digits = ExtractFirstDigitSequence(part);
+            if (string.IsNullOrWhiteSpace(digits))
+            {
+                continue;
+            }
+
+            if (!int.TryParse(digits, out var value))
+            {
+                continue;
+            }
+
+            parsed.Add(value);
+            if (parsed.Count == 2)
+            {
+                break;
+            }
+        }
+
+        if (parsed.Count < 2)
+        {
+            return false;
+        }
+
+        major = parsed[0];
+        minor = parsed[1];
+        return true;
+    }
+
+    private static string ExtractFirstDigitSequence(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var start = -1;
+        for (var index = 0; index < value.Length; index++)
+        {
+            if (char.IsDigit(value[index]))
+            {
+                start = index;
+                break;
+            }
+        }
+
+        if (start < 0)
+        {
+            return string.Empty;
+        }
+
+        var end = start;
+        while (end < value.Length && char.IsDigit(value[end]))
+        {
+            end++;
+        }
+
+        return value[start..end];
     }
 
     private sealed record LaunchProfile(

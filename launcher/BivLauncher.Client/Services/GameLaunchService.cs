@@ -429,6 +429,7 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
     {
         var candidates = new List<string>();
         var seenCandidates = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var normalizedPreferredMainClass = preferredMainClass?.Trim() ?? string.Empty;
 
         void AddCandidate(string candidate)
         {
@@ -443,7 +444,12 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
             }
         }
 
-        AddCandidate(preferredMainClass?.Trim() ?? string.Empty);
+        if (ShouldPreferLaunchwrapperCandidate(classpathEntries, normalizedPreferredMainClass))
+        {
+            AddCandidate("net.minecraft.launchwrapper.Launch");
+        }
+
+        AddCandidate(normalizedPreferredMainClass);
         foreach (var candidate in ImplicitMainClassCandidates)
         {
             AddCandidate(candidate);
@@ -462,6 +468,28 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
         resolvedMainClass = string.Empty;
         reason = $"No known main class found in classpath jars. Checked: {string.Join(", ", candidates)}.";
         return false;
+    }
+
+    private static bool ShouldPreferLaunchwrapperCandidate(
+        IReadOnlyList<string> classpathEntries,
+        string preferredMainClass)
+    {
+        if (!string.Equals(preferredMainClass, "cpw.mods.modlauncher.Launcher", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (!ContainsClass(classpathEntries, "net.minecraft.launchwrapper.Launch"))
+        {
+            return false;
+        }
+
+        return !classpathEntries.Any(path =>
+        {
+            var fileName = Path.GetFileName(path);
+            return fileName.Contains("modlauncher", StringComparison.OrdinalIgnoreCase) ||
+                   fileName.Contains("bootstraplauncher", StringComparison.OrdinalIgnoreCase);
+        });
     }
 
     private static List<string> BuildImplicitClasspathEntries(string instanceDirectory, string gameJarPath)
@@ -1262,44 +1290,74 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
             return false;
         }
 
-        var normalized = rawVersion.Trim();
-        var firstDot = normalized.IndexOf('.');
-        if (firstDot <= 0 || firstDot + 1 >= normalized.Length)
+        var parts = rawVersion
+            .Trim()
+            .Split(new[] { '.', '-', '_', ' ' }, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0)
         {
             return false;
         }
 
-        var secondDot = normalized.IndexOf('.', firstDot + 1);
-        var majorPart = normalized[..firstDot];
-        var minorPart = secondDot > firstDot
-            ? normalized.Substring(firstDot + 1, secondDot - firstDot - 1)
-            : normalized[(firstDot + 1)..];
+        var parsed = new List<int>(capacity: 2);
+        foreach (var part in parts)
+        {
+            var digits = ExtractFirstDigitSequence(part);
+            if (string.IsNullOrWhiteSpace(digits))
+            {
+                continue;
+            }
 
-        majorPart = ExtractLeadingDigits(majorPart);
-        minorPart = ExtractLeadingDigits(minorPart);
-        if (string.IsNullOrWhiteSpace(majorPart) || string.IsNullOrWhiteSpace(minorPart))
+            if (!int.TryParse(digits, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value))
+            {
+                continue;
+            }
+
+            parsed.Add(value);
+            if (parsed.Count == 2)
+            {
+                break;
+            }
+        }
+
+        if (parsed.Count < 2)
         {
             return false;
         }
 
-        return int.TryParse(majorPart, NumberStyles.Integer, CultureInfo.InvariantCulture, out major) &&
-               int.TryParse(minorPart, NumberStyles.Integer, CultureInfo.InvariantCulture, out minor);
+        major = parsed[0];
+        minor = parsed[1];
+        return true;
     }
 
-    private static string ExtractLeadingDigits(string value)
+    private static string ExtractFirstDigitSequence(string value)
     {
         if (string.IsNullOrWhiteSpace(value))
         {
             return string.Empty;
         }
 
-        var index = 0;
-        while (index < value.Length && char.IsDigit(value[index]))
+        var start = -1;
+        for (var index = 0; index < value.Length; index++)
         {
-            index++;
+            if (char.IsDigit(value[index]))
+            {
+                start = index;
+                break;
+            }
         }
 
-        return index == 0 ? string.Empty : value[..index];
+        if (start < 0)
+        {
+            return string.Empty;
+        }
+
+        var end = start;
+        while (end < value.Length && char.IsDigit(value[end]))
+        {
+            end++;
+        }
+
+        return value[start..end];
     }
 
     private static string ResolveLegacyVersion(GameLaunchRoute route, LauncherManifest manifest, string instanceDirectory)
