@@ -1573,7 +1573,7 @@ public partial class MainWindowViewModel : ViewModelBase
                     launchResult = await Task.Run(() =>
                             _gameLaunchService.LaunchAsync(
                                 manifest,
-                                BuildSettingsSnapshot(),
+                                BuildSettingsSnapshot(includeRuntimeAuthSnapshot: true),
                                 launchRoute,
                                 installResult.InstanceDirectory,
                                 line => _logService.LogInfo(line)),
@@ -1948,7 +1948,7 @@ public partial class MainWindowViewModel : ViewModelBase
         });
     }
 
-    private LauncherSettings BuildSettingsSnapshot()
+    private LauncherSettings BuildSettingsSnapshot(bool includeRuntimeAuthSnapshot = false)
     {
         var configuredApiBaseUrl = TryResolveConfiguredApiBaseUrl();
         var storedAccounts = NormalizeStoredAccounts(StoredPlayerAccounts);
@@ -1958,6 +1958,24 @@ public partial class MainWindowViewModel : ViewModelBase
                                !string.IsNullOrWhiteSpace(_playerAuthToken) &&
                                !string.IsNullOrWhiteSpace(PlayerLoggedInAs);
         var canAutoRestore = _allowAutoSessionRestore && (hasActiveSession || activeStoredAccount is not null);
+        var runtimeAuthToken = includeRuntimeAuthSnapshot && hasActiveSession
+            ? _playerAuthToken
+            : string.Empty;
+        var runtimeAuthTokenType = includeRuntimeAuthSnapshot && hasActiveSession
+            ? _playerAuthTokenType
+            : "Bearer";
+        var runtimeAuthUsername = includeRuntimeAuthSnapshot && hasActiveSession
+            ? PlayerLoggedInAs.Trim()
+            : string.Empty;
+        var runtimeAuthExternalId = includeRuntimeAuthSnapshot && hasActiveSession
+            ? _playerAuthExternalId
+            : string.Empty;
+        var runtimeAuthRoles = includeRuntimeAuthSnapshot && hasActiveSession
+            ? NormalizePlayerRoles(_playerAuthRoles)
+            : [];
+        var runtimeAuthApiBaseUrl = includeRuntimeAuthSnapshot && hasActiveSession
+            ? _playerAuthApiBaseUrl
+            : string.Empty;
 
         return new LauncherSettings
         {
@@ -1979,14 +1997,13 @@ public partial class MainWindowViewModel : ViewModelBase
                 .ToList(),
             SelectedServerId = SelectedServer?.ServerId.ToString() ?? string.Empty,
             LastPlayerUsername = PlayerUsername.Trim(),
-            // Legacy single-account fields are intentionally cleared.
-            // Stored accounts + active username are the source of truth.
-            PlayerAuthToken = string.Empty,
-            PlayerAuthTokenType = "Bearer",
-            PlayerAuthUsername = string.Empty,
-            PlayerAuthExternalId = string.Empty,
-            PlayerAuthRoles = [],
-            PlayerAuthApiBaseUrl = string.Empty,
+            // Persist path keeps these empty; runtime launch snapshot may include active session values.
+            PlayerAuthToken = runtimeAuthToken,
+            PlayerAuthTokenType = runtimeAuthTokenType,
+            PlayerAuthUsername = runtimeAuthUsername,
+            PlayerAuthExternalId = runtimeAuthExternalId,
+            PlayerAuthRoles = runtimeAuthRoles,
+            PlayerAuthApiBaseUrl = runtimeAuthApiBaseUrl,
             PlayerAccounts = [.. storedAccounts.Select(account => new StoredPlayerAccount
             {
                 Username = account.Username,
