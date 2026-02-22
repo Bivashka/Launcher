@@ -52,6 +52,8 @@ public sealed class AdminLauncherController(
     private const string ServerLauncherJarStorageKey = "uploads/assets/launcher.jar";
     private const string DefaultServerLauncherJarVersion = "1.2.7";
     private const long DefaultServerLauncherJarMaxBytes = 32L * 1024 * 1024;
+    private const string LegacySessionDomainSource = "authserver.mojang.com";
+    private const string LegacySessionDomainTarget = "session.minecraft.net";
 
     [HttpGet("server-jar")]
     public async Task<IActionResult> GetServerLauncherJarStatus(CancellationToken cancellationToken = default)
@@ -174,6 +176,9 @@ public sealed class AdminLauncherController(
             });
         }
 
+        var legacySessionPatchStats = PatchLegacySessionDomainMapping(payload);
+        payload = legacySessionPatchStats.Payload;
+
         await using (var uploadStream = new MemoryStream(payload, writable: false))
         {
             await objectStorageService.UploadAsync(
@@ -197,6 +202,9 @@ public sealed class AdminLauncherController(
                 maxBytes,
                 downloadedSizeBytes = payload.LongLength,
                 upstreamStatusCode = responseStatusCode,
+                legacySessionPatchEnabled = true,
+                legacySessionPatchClassEntriesTouched = legacySessionPatchStats.ClassEntriesTouched,
+                legacySessionPatchStringReplacements = legacySessionPatchStats.StringReplacements,
                 finishedAtUtc = DateTime.UtcNow,
                 durationMs = (long)(DateTime.UtcNow - startedAt).TotalMilliseconds,
                 storageSizeBytes = metadata?.SizeBytes ?? payload.LongLength,
@@ -214,7 +222,10 @@ public sealed class AdminLauncherController(
             contentType = metadata?.ContentType ?? contentType,
             sha256 = metadata?.Sha256 ?? string.Empty,
             sourceUrl,
-            version = resolvedVersion
+            version = resolvedVersion,
+            legacySessionPatchEnabled = true,
+            legacySessionPatchClassEntriesTouched = legacySessionPatchStats.ClassEntriesTouched,
+            legacySessionPatchStringReplacements = legacySessionPatchStats.StringReplacements
         });
     }
 
@@ -912,6 +923,106 @@ public sealed class AdminLauncherController(
                (payload[2] == 3 || payload[2] == 5 || payload[2] == 7) &&
                (payload[3] == 4 || payload[3] == 6 || payload[3] == 8);
     }
+
+    private static LegacySessionPatchStats PatchLegacySessionDomainMapping(byte[] payload)
+    {
+        if (payload.Length <= 0)
+        {
+            return new LegacySessionPatchStats(payload, 0, 0);
+        }
+
+        using var input = new MemoryStream(payload, writable: false);
+        using var output = new MemoryStream(capacity: payload.Length + 1024);
+        var classEntriesTouched = 0;
+        var stringReplacements = 0;
+        using (var inputArchive = new ZipArchive(input, ZipArchiveMode.Read, leaveOpen: true))
+        using (var outputArchive = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            foreach (var entry in inputArchive.Entries)
+            {
+                var target = outputArchive.CreateEntry(entry.FullName, CompressionLevel.Optimal);
+                target.LastWriteTime = entry.LastWriteTime;
+
+                using var sourceStream = entry.Open();
+                using var destinationStream = target.Open();
+                if (!entry.FullName.EndsWith(".class", StringComparison.OrdinalIgnoreCase))
+                {
+                    sourceStream.CopyTo(destinationStream);
+                    continue;
+                }
+
+                using var classBuffer = new MemoryStream();
+                sourceStream.CopyTo(classBuffer);
+                var classBytes = classBuffer.ToArray();
+                if (classBytes.Length <= 0)
+                {
+                    continue;
+                }
+
+                var replacements = ReplaceAsciiSequenceInPlace(
+                    classBytes,
+                    LegacySessionDomainSource,
+                    LegacySessionDomainTarget);
+
+                if (replacements > 0)
+                {
+                    classEntriesTouched++;
+                    stringReplacements += replacements;
+                }
+
+                destinationStream.Write(classBytes, 0, classBytes.Length);
+            }
+        }
+
+        return new LegacySessionPatchStats(output.ToArray(), classEntriesTouched, stringReplacements);
+    }
+
+    private static int ReplaceAsciiSequenceInPlace(byte[] payload, string source, string target)
+    {
+        if (payload.Length == 0 || string.IsNullOrEmpty(source) || string.IsNullOrEmpty(target))
+        {
+            return 0;
+        }
+
+        var sourceBytes = Encoding.ASCII.GetBytes(source);
+        var targetBytes = Encoding.ASCII.GetBytes(target);
+        if (sourceBytes.Length != targetBytes.Length || sourceBytes.Length == 0 || payload.Length < sourceBytes.Length)
+        {
+            return 0;
+        }
+
+        var replacements = 0;
+        for (var index = 0; index <= payload.Length - sourceBytes.Length; index++)
+        {
+            var matched = true;
+            for (var offset = 0; offset < sourceBytes.Length; offset++)
+            {
+                if (payload[index + offset] == sourceBytes[offset])
+                {
+                    continue;
+                }
+
+                matched = false;
+                break;
+            }
+
+            if (!matched)
+            {
+                continue;
+            }
+
+            Buffer.BlockCopy(targetBytes, 0, payload, index, targetBytes.Length);
+            replacements++;
+            index += sourceBytes.Length - 1;
+        }
+
+        return replacements;
+    }
+
+    private sealed record LegacySessionPatchStats(
+        byte[] Payload,
+        int ClassEntriesTouched,
+        int StringReplacements);
 
     private static string Truncate(string value, int maxLength)
     {
