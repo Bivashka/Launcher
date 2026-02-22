@@ -196,11 +196,15 @@ public sealed class PublicYggdrasilController(
         return NoContent();
     }
 
+    [HttpPost("/authserver/session/minecraft/join")]
     [HttpPost("/session/minecraft/join")]
     [HttpPost("/sessionserver/session/minecraft/join")]
+    [HttpPost("/api/public/authserver/session/minecraft/join")]
     [HttpPost("/api/public/sessionserver/session/minecraft/join")]
+    [HttpPost("/api/public/yggdrasil/authserver/session/minecraft/join")]
     [HttpPost("/api/public/yggdrasil/session/minecraft/join")]
     [HttpPost("/api/public/yggdrasil/sessionserver/session/minecraft/join")]
+    [HttpPost("/api/yggdrasil/authserver/session/minecraft/join")]
     [HttpPost("/api/yggdrasil/sessionserver/session/minecraft/join")]
     public async Task<IActionResult> Join(
         [FromBody] YggdrasilJoinRequest? request,
@@ -300,6 +304,11 @@ public sealed class PublicYggdrasilController(
     [HttpPost("/api/yggdrasil/sessionserver/joinserver.jsp")]
     public async Task<IActionResult> LegacyJoinServer(CancellationToken cancellationToken)
     {
+        logger.LogWarning(
+            "Legacy join endpoint hit: {Path}{Query}",
+            Request.Path.Value ?? string.Empty,
+            Request.QueryString.Value ?? string.Empty);
+
         var accessToken = await ReadLegacyParameterAsync(cancellationToken, "sessionId", "accessToken");
         var serverId = await ReadLegacyParameterAsync(cancellationToken, "serverId");
         var selectedProfile = await ReadLegacyParameterAsync(cancellationToken, "selectedProfile");
@@ -338,11 +347,15 @@ public sealed class PublicYggdrasilController(
         return LegacyText(LegacyJoinBadLogin);
     }
 
+    [HttpGet("/authserver/session/minecraft/hasJoined")]
     [HttpGet("/session/minecraft/hasJoined")]
     [HttpGet("/sessionserver/session/minecraft/hasJoined")]
+    [HttpGet("/api/public/authserver/session/minecraft/hasJoined")]
     [HttpGet("/api/public/sessionserver/session/minecraft/hasJoined")]
+    [HttpGet("/api/public/yggdrasil/authserver/session/minecraft/hasJoined")]
     [HttpGet("/api/public/yggdrasil/session/minecraft/hasJoined")]
     [HttpGet("/api/public/yggdrasil/sessionserver/session/minecraft/hasJoined")]
+    [HttpGet("/api/yggdrasil/authserver/session/minecraft/hasJoined")]
     [HttpGet("/api/yggdrasil/sessionserver/session/minecraft/hasJoined")]
     public async Task<IActionResult> HasJoined(
         [FromQuery] string? username,
@@ -449,17 +462,26 @@ public sealed class PublicYggdrasilController(
         [FromQuery] string? serverId,
         CancellationToken cancellationToken)
     {
+        logger.LogWarning(
+            "Legacy check endpoint hit: {Path}{Query}",
+            Request.Path.Value ?? string.Empty,
+            Request.QueryString.Value ?? string.Empty);
+
         var response = await HasJoined(username, serverId, cancellationToken);
         return response is OkObjectResult
             ? LegacyText(LegacyCheckYes)
             : LegacyText(LegacyCheckNo);
     }
 
+    [HttpGet("/authserver/session/minecraft/profile/{profileId}")]
     [HttpGet("/session/minecraft/profile/{profileId}")]
     [HttpGet("/sessionserver/session/minecraft/profile/{profileId}")]
+    [HttpGet("/api/public/authserver/session/minecraft/profile/{profileId}")]
     [HttpGet("/api/public/sessionserver/session/minecraft/profile/{profileId}")]
+    [HttpGet("/api/public/yggdrasil/authserver/session/minecraft/profile/{profileId}")]
     [HttpGet("/api/public/yggdrasil/session/minecraft/profile/{profileId}")]
     [HttpGet("/api/public/yggdrasil/sessionserver/session/minecraft/profile/{profileId}")]
+    [HttpGet("/api/yggdrasil/authserver/session/minecraft/profile/{profileId}")]
     [HttpGet("/api/yggdrasil/sessionserver/session/minecraft/profile/{profileId}")]
     public async Task<IActionResult> Profile(
         string profileId,
