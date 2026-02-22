@@ -49,6 +49,12 @@
     <Setter Property="BoxShadow" Value="0 12 28 0 #040E1A88" />
   </Style>
 
+  <Style Selector="Border.accountCornerPanel">
+    <Setter Property="Padding" Value="14" />
+    <Setter Property="CornerRadius" Value="14" />
+    <Setter Property="BoxShadow" Value="0 14 28 0 #030C1B8A" />
+  </Style>
+
   <Style Selector="Border.heroPanel">
     <Setter Property="Padding" Value="18" />
     <Setter Property="CornerRadius" Value="18" />
@@ -131,6 +137,12 @@
 
   <Style Selector="Button.ghostButton:pointerover">
     <Setter Property="Background" Value="#22406D" />
+  </Style>
+
+  <Style Selector="Button.compactAccountButton">
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="Padding" Value="10,7" />
   </Style>
 
   <Style Selector="Button.iconButton">

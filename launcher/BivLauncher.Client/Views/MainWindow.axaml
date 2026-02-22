@@ -22,91 +22,8 @@
             Opacity="{Binding BrandingBackgroundOverlayOpacity}"
             IsVisible="{Binding HasBrandingBackgroundImage}" />
 
-    <Grid RowDefinitions="Auto,*" Margin="18">
-      <Border Classes="heroPanel"
-              Background="{Binding HeroBackgroundBrush}"
-              BorderBrush="{Binding HeroBorderBrush}">
-        <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto">
-          <TextBlock Classes="heroTitle"
-                     Foreground="{Binding PrimaryTextBrush}"
-                     Text="{Binding ProductName}" />
-          <TextBlock Grid.Row="1"
-                     Classes="subtle"
-                     Foreground="{Binding SecondaryTextBrush}"
-                     Text="{Binding Tagline}"
-                     Margin="0,6,0,0" />
-          <TextBlock Grid.Row="2"
-                     Classes="heroMeta"
-                     Foreground="{Binding SecondaryTextBrush}"
-                     Margin="0,8,0,0"
-                     Text="{Binding AuthStatusText}"
-                     TextWrapping="Wrap" />
-          <StackPanel Grid.Column="1" Grid.RowSpan="3" Spacing="8" VerticalAlignment="Top">
-            <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
-              <Button Classes="ghostButton"
-                      Content="{Binding RefreshButtonText}"
-                      Background="{Binding PrimaryButtonBackgroundBrush}"
-                      BorderBrush="{Binding PrimaryButtonBorderBrush}"
-                      Foreground="{Binding PrimaryButtonForegroundBrush}"
-                      Command="{Binding RefreshCommand}"
-                      IsVisible="{Binding IsLauncherReady}" />
-              <Button Classes="iconButton"
-                      Background="{Binding PrimaryButtonBackgroundBrush}"
-                      BorderBrush="{Binding PrimaryButtonBorderBrush}"
-                      Foreground="{Binding PrimaryButtonForegroundBrush}"
-                      Command="{Binding ToggleSettingsCommand}"
-                      IsVisible="{Binding IsLauncherReady}">
-                <TextBlock Text="&#xE713;" FontFamily="Segoe MDL2 Assets" />
-              </Button>
-            </StackPanel>
-
-            <StackPanel Orientation="Horizontal"
-                        Spacing="8"
-                        HorizontalAlignment="Right"
-                        IsVisible="{Binding IsLauncherReady}">
-              <ComboBox Width="220"
-                        Background="{Binding InputBackgroundBrush}"
-                        BorderBrush="{Binding InputBorderBrush}"
-                        Foreground="{Binding InputForegroundBrush}"
-                        ItemsSource="{Binding StoredPlayerAccounts}"
-                        SelectedItem="{Binding SelectedStoredAccount}">
-                <ComboBox.ItemTemplate>
-                  <DataTemplate>
-                    <TextBlock Text="{Binding Username}" />
-                  </DataTemplate>
-                </ComboBox.ItemTemplate>
-              </ComboBox>
-            </StackPanel>
-
-            <StackPanel Orientation="Horizontal"
-                        Spacing="8"
-                        HorizontalAlignment="Right"
-                        IsVisible="{Binding IsLauncherReady}">
-              <Button Classes="ghostButton"
-                      Content="{Binding AddAccountButtonText}"
-                      Background="{Binding PrimaryButtonBackgroundBrush}"
-                      BorderBrush="{Binding PrimaryButtonBorderBrush}"
-                      Foreground="{Binding PrimaryButtonForegroundBrush}"
-                      Command="{Binding AddAccountCommand}" />
-              <Button Classes="ghostButton"
-                      Content="{Binding DeleteAccountButtonText}"
-                      Background="{Binding PrimaryButtonBackgroundBrush}"
-                      BorderBrush="{Binding PrimaryButtonBorderBrush}"
-                      Foreground="{Binding PrimaryButtonForegroundBrush}"
-                      Command="{Binding DeleteAccountCommand}"
-                      IsVisible="{Binding HasStoredAccounts}" />
-              <Button Classes="ghostButton"
-                      Content="{Binding LogoutButtonText}"
-                      Background="{Binding PrimaryButtonBackgroundBrush}"
-                      BorderBrush="{Binding PrimaryButtonBorderBrush}"
-                      Foreground="{Binding PrimaryButtonForegroundBrush}"
-                      Command="{Binding LogoutCommand}" />
-            </StackPanel>
-          </StackPanel>
-        </Grid>
-      </Border>
-
-      <Grid Grid.Row="1" Margin="0,14,0,0">
+    <Grid Margin="18">
+      <Grid>
         <Border Classes="loginCard"
                 Width="{Binding LoginCardWidth}"
                 HorizontalAlignment="{Binding LoginCardHorizontalAlignment}"
@@ -287,7 +204,7 @@
             </Grid>
           </Border>
 
-          <Grid Grid.Column="1" RowDefinitions="Auto,*" RowSpacing="12">
+          <Grid Grid.Column="1" RowDefinitions="Auto,*,Auto" RowSpacing="12">
             <Border Classes="panel"
                     Background="{Binding PanelBackgroundBrush}"
                     BorderBrush="{Binding PanelBorderBrush}">
@@ -372,6 +289,67 @@
                   </DataTemplate>
                   </ListBox.ItemTemplate>
                 </ListBox>
+              </Grid>
+            </Border>
+
+            <Border Grid.Row="2"
+                    Classes="panel accountCornerPanel"
+                    Background="{Binding PanelBackgroundBrush}"
+                    BorderBrush="{Binding PanelBorderBrush}">
+              <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto" RowSpacing="8">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                  <Button Classes="ghostButton compactAccountButton"
+                          Content="{Binding RefreshButtonText}"
+                          Background="{Binding PrimaryButtonBackgroundBrush}"
+                          BorderBrush="{Binding PrimaryButtonBorderBrush}"
+                          Foreground="{Binding PrimaryButtonForegroundBrush}"
+                          Command="{Binding RefreshCommand}" />
+                  <Button Grid.Column="1"
+                          Classes="iconButton"
+                          Background="{Binding PrimaryButtonBackgroundBrush}"
+                          BorderBrush="{Binding PrimaryButtonBorderBrush}"
+                          Foreground="{Binding PrimaryButtonForegroundBrush}"
+                          Command="{Binding ToggleSettingsCommand}">
+                    <TextBlock Text="&#xE713;" FontFamily="Segoe MDL2 Assets" />
+                  </Button>
+                </Grid>
+
+                <ComboBox Grid.Row="1"
+                          Width="220"
+                          Background="{Binding InputBackgroundBrush}"
+                          BorderBrush="{Binding InputBorderBrush}"
+                          Foreground="{Binding InputForegroundBrush}"
+                          ItemsSource="{Binding StoredPlayerAccounts}"
+                          SelectedItem="{Binding SelectedStoredAccount}">
+                  <ComboBox.ItemTemplate>
+                    <DataTemplate>
+                      <TextBlock Text="{Binding Username}" />
+                    </DataTemplate>
+                  </ComboBox.ItemTemplate>
+                </ComboBox>
+
+                <Button Grid.Row="2"
+                        Classes="ghostButton compactAccountButton"
+                        Content="{Binding AddAccountButtonText}"
+                        Background="{Binding PrimaryButtonBackgroundBrush}"
+                        BorderBrush="{Binding PrimaryButtonBorderBrush}"
+                        Foreground="{Binding PrimaryButtonForegroundBrush}"
+                        Command="{Binding AddAccountCommand}" />
+                <Button Grid.Row="3"
+                        Classes="ghostButton compactAccountButton"
+                        Content="{Binding DeleteAccountButtonText}"
+                        Background="{Binding PrimaryButtonBackgroundBrush}"
+                        BorderBrush="{Binding PrimaryButtonBorderBrush}"
+                        Foreground="{Binding PrimaryButtonForegroundBrush}"
+                        Command="{Binding DeleteAccountCommand}"
+                        IsVisible="{Binding HasStoredAccounts}" />
+                <Button Grid.Row="4"
+                        Classes="ghostButton compactAccountButton"
+                        Content="{Binding LogoutButtonText}"
+                        Background="{Binding PrimaryButtonBackgroundBrush}"
+                        BorderBrush="{Binding PrimaryButtonBorderBrush}"
+                        Foreground="{Binding PrimaryButtonForegroundBrush}"
+                        Command="{Binding LogoutCommand}" />
               </Grid>
             </Border>
           </Grid>
