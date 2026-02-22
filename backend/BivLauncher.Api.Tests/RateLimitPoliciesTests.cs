@@ -44,7 +44,7 @@ public sealed class RateLimitPoliciesTests
         Assert.Equal(StatusCodes.Status429TooManyRequests, context.Response.StatusCode);
         Assert.Equal("application/json", context.Response.ContentType);
         Assert.False(context.Response.Headers.ContainsKey("Retry-After"));
-        Assert.Equal("{\"error\":\"Rate limit exceeded. Retry later.\"}", body);
+        Assert.Equal("{\"error\":\"TooManyRequests\",\"errorMessage\":\"Rate limit exceeded. Retry later.\"}", body);
     }
 
     [Fact]
@@ -62,6 +62,6 @@ public sealed class RateLimitPoliciesTests
         Assert.Equal("application/json", context.Response.ContentType);
         Assert.True(context.Response.Headers.TryGetValue("Retry-After", out var retryAfterValue));
         Assert.Equal("2", retryAfterValue.ToString());
-        Assert.Equal("{\"error\":\"Rate limit exceeded. Retry later.\",\"retryAfterSeconds\":2}", body);
+        Assert.Equal("{\"error\":\"TooManyRequests\",\"errorMessage\":\"Rate limit exceeded. Retry later.\",\"retryAfterSeconds\":2}", body);
     }
 }

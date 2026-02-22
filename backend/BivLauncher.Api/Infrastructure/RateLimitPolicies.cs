@@ -10,7 +10,7 @@ public static class RateLimitPolicies
     public const string PublicYggdrasilPolicy = "PublicYggdrasil";
     public const string AdminAuthPolicy = "AdminAuth";
 
-    private const string RateLimitError = "{\"error\":\"Rate limit exceeded. Retry later.\"}";
+    private const string RateLimitError = "{\"error\":\"TooManyRequests\",\"errorMessage\":\"Rate limit exceeded. Retry later.\"}";
 
     public static void Configure(RateLimiterOptions options)
     {
@@ -55,7 +55,7 @@ public static class RateLimitPolicies
                 factory: _ => new FixedWindowRateLimiterOptions
                 {
                     AutoReplenishment = true,
-                    PermitLimit = 600,
+                    PermitLimit = 10000,
                     QueueLimit = 0,
                     Window = TimeSpan.FromMinutes(1)
                 }));
@@ -95,7 +95,7 @@ public static class RateLimitPolicies
         var seconds = Math.Max(1, (int)Math.Ceiling(retryAfter.Value.TotalSeconds));
         context.Response.Headers["Retry-After"] = seconds.ToString();
         return context.Response.WriteAsync(
-            $"{{\"error\":\"Rate limit exceeded. Retry later.\",\"retryAfterSeconds\":{seconds}}}",
+            $"{{\"error\":\"TooManyRequests\",\"errorMessage\":\"Rate limit exceeded. Retry later.\",\"retryAfterSeconds\":{seconds}}}",
             cancellationToken);
     }
 }

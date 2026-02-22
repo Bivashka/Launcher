@@ -208,6 +208,7 @@ public sealed class PublicYggdrasilController(
     {
         if (request is null)
         {
+            logger.LogWarning("Yggdrasil join rejected: empty payload.");
             return YggdrasilError(
                 StatusCodes.Status400BadRequest,
                 IllegalArgument,
@@ -218,6 +219,7 @@ public sealed class PublicYggdrasilController(
         var serverId = (request.ServerId ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(serverId))
         {
+            logger.LogWarning("Yggdrasil join rejected: missing serverId.");
             return YggdrasilError(
                 StatusCodes.Status400BadRequest,
                 IllegalArgument,
@@ -228,6 +230,10 @@ public sealed class PublicYggdrasilController(
         var result = await ValidatePlayerAccessTokenAsync(request.AccessToken, cancellationToken);
         if (!result.Success || result.Account is null)
         {
+            logger.LogWarning(
+                "Yggdrasil join rejected: invalid token for serverId={ServerId}, reason={Reason}",
+                serverId,
+                result.ErrorMessage);
             return YggdrasilError(
                 StatusCodes.Status403Forbidden,
                 ForbiddenOperation,
@@ -248,6 +254,11 @@ public sealed class PublicYggdrasilController(
             ExpiresAtUtc: now.Add(JoinTicketLifetime));
 
         PruneExpiredTickets(now);
+        logger.LogInformation(
+            "Yggdrasil join accepted: username={Username}, serverId={ServerId}, profileId={ProfileId}",
+            account.Username,
+            serverId,
+            profile.Id);
         return NoContent();
     }
 
@@ -310,18 +321,30 @@ public sealed class PublicYggdrasilController(
         var normalizedServerId = (serverId ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(normalizedUsername) || string.IsNullOrWhiteSpace(normalizedServerId))
         {
+            logger.LogDebug(
+                "Yggdrasil hasJoined miss: missing query params username='{Username}' serverId='{ServerId}'",
+                normalizedUsername,
+                normalizedServerId);
             return NoContent();
         }
 
         var ticketKey = BuildTicketKey(normalizedUsername, normalizedServerId);
         if (!JoinTickets.TryGetValue(ticketKey, out var ticket))
         {
+            logger.LogWarning(
+                "Yggdrasil hasJoined miss: no join ticket username={Username}, serverId={ServerId}",
+                normalizedUsername,
+                normalizedServerId);
             return NoContent();
         }
 
         if (ticket.ExpiresAtUtc <= DateTime.UtcNow)
         {
             JoinTickets.TryRemove(ticketKey, out _);
+            logger.LogWarning(
+                "Yggdrasil hasJoined miss: expired ticket username={Username}, serverId={ServerId}",
+                normalizedUsername,
+                normalizedServerId);
             return NoContent();
         }
 
@@ -331,21 +354,38 @@ public sealed class PublicYggdrasilController(
         if (account is null)
         {
             JoinTickets.TryRemove(ticketKey, out _);
+            logger.LogWarning(
+                "Yggdrasil hasJoined miss: account not found for ticket username={Username}, serverId={ServerId}",
+                normalizedUsername,
+                normalizedServerId);
             return NoContent();
         }
 
         if (account.SessionVersion != ticket.SessionVersion)
         {
             JoinTickets.TryRemove(ticketKey, out _);
+            logger.LogWarning(
+                "Yggdrasil hasJoined miss: session version mismatch username={Username}, serverId={ServerId}",
+                normalizedUsername,
+                normalizedServerId);
             return NoContent();
         }
 
         if (!await IsAccountStateAllowedAsync(account, cancellationToken))
         {
             JoinTickets.TryRemove(ticketKey, out _);
+            logger.LogWarning(
+                "Yggdrasil hasJoined miss: account denied username={Username}, serverId={ServerId}",
+                normalizedUsername,
+                normalizedServerId);
             return NoContent();
         }
 
+        logger.LogInformation(
+            "Yggdrasil hasJoined hit: username={Username}, serverId={ServerId}, profileId={ProfileId}",
+            account.Username,
+            normalizedServerId,
+            ticket.ProfileId);
         return Ok(new
         {
             id = ticket.ProfileId,
