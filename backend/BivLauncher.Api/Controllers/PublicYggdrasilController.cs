@@ -33,9 +33,7 @@ public sealed class PublicYggdrasilController(
     private readonly TokenValidationParameters _tokenValidationParameters = BuildTokenValidationParameters(jwtOptionsAccessor.Value);
 
     [HttpGet("/api/public/yggdrasil")]
-    [HttpGet("/api/public/yggdrasil/")]
     [HttpGet("/api/yggdrasil")]
-    [HttpGet("/api/yggdrasil/")]
     public IActionResult Metadata()
     {
         try
