@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using System.Text.Json;
@@ -37,6 +38,7 @@ public sealed class PublicYggdrasilControllerTests
 
         var controller = new PublicYggdrasilController(
             fixture.DbContext,
+            BuildConfiguration(),
             Microsoft.Extensions.Options.Options.Create(options),
             NullLogger<PublicYggdrasilController>.Instance);
 
@@ -86,6 +88,7 @@ public sealed class PublicYggdrasilControllerTests
 
         var controller = new PublicYggdrasilController(
             fixture.DbContext,
+            BuildConfiguration(),
             Microsoft.Extensions.Options.Options.Create(options),
             NullLogger<PublicYggdrasilController>.Instance);
 
@@ -110,6 +113,7 @@ public sealed class PublicYggdrasilControllerTests
         var options = BuildJwtOptions();
         var controller = new PublicYggdrasilController(
             fixture.DbContext,
+            BuildConfiguration(),
             Microsoft.Extensions.Options.Options.Create(options),
             NullLogger<PublicYggdrasilController>.Instance);
 
@@ -118,6 +122,34 @@ public sealed class PublicYggdrasilControllerTests
         var payload = JsonSerializer.SerializeToElement(ok.Value);
         Assert.True(payload.TryGetProperty("id", out var idNode));
         Assert.Equal(JsonValueKind.Null, idNode.ValueKind);
+    }
+
+    [Fact]
+    public async Task Metadata_ReturnsYggdrasilDescriptor()
+    {
+        await using var fixture = await TestFixture.CreateAsync();
+        var controller = new PublicYggdrasilController(
+            fixture.DbContext,
+            BuildConfiguration(),
+            Microsoft.Extensions.Options.Options.Create(BuildJwtOptions()),
+            NullLogger<PublicYggdrasilController>.Instance)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext()
+            }
+        };
+        controller.ControllerContext.HttpContext.Request.Scheme = "http";
+        controller.ControllerContext.HttpContext.Request.Host = new HostString("95.217.99.17", 8080);
+
+        var response = controller.Metadata();
+        var ok = Assert.IsType<OkObjectResult>(response);
+        var payload = JsonSerializer.SerializeToElement(ok.Value);
+
+        Assert.True(payload.TryGetProperty("meta", out var metaNode));
+        Assert.Equal("BivLauncher Auth", metaNode.GetProperty("serverName").GetString());
+        Assert.True(payload.TryGetProperty("skinDomains", out var skinDomainsNode));
+        Assert.Equal(JsonValueKind.Array, skinDomainsNode.ValueKind);
     }
 
     private static JwtOptions BuildJwtOptions()
@@ -130,6 +162,17 @@ public sealed class PublicYggdrasilControllerTests
             ExpireMinutes = 60,
             PlayerExpireDays = 365
         };
+    }
+
+    private static IConfiguration BuildConfiguration()
+    {
+        return new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["PUBLIC_BASE_URL"] = "http://95.217.99.17:8080",
+                ["YGGDRASIL_SERVER_NAME"] = "BivLauncher Auth"
+            })
+            .Build();
     }
 
     private sealed class TestFixture : IAsyncDisposable

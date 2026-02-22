@@ -20,6 +20,7 @@ namespace BivLauncher.Api.Controllers;
 [EnableRateLimiting(RateLimitPolicies.PublicLoginPolicy)]
 public sealed class PublicYggdrasilController(
     AppDbContext dbContext,
+    IConfiguration configuration,
     IOptions<JwtOptions> jwtOptionsAccessor,
     ILogger<PublicYggdrasilController> logger) : ControllerBase
 {
@@ -30,6 +31,37 @@ public sealed class PublicYggdrasilController(
 
     private readonly JwtSecurityTokenHandler _jwtTokenHandler = new() { MapInboundClaims = false };
     private readonly TokenValidationParameters _tokenValidationParameters = BuildTokenValidationParameters(jwtOptionsAccessor.Value);
+
+    [HttpGet("/api/public/yggdrasil")]
+    [HttpGet("/api/public/yggdrasil/")]
+    [HttpGet("/api/yggdrasil")]
+    [HttpGet("/api/yggdrasil/")]
+    public IActionResult Metadata()
+    {
+        var publicBaseUrl = ResolvePublicBaseUrl(configuration, Request);
+        var hostName = ResolveHostName(publicBaseUrl, Request.Host.Host);
+        var signaturePublicKey = (configuration["YGGDRASIL_SIGNATURE_PUBLIC_KEY"] ?? string.Empty).Trim();
+        var metadata = new
+        {
+            meta = new
+            {
+                serverName = (configuration["YGGDRASIL_SERVER_NAME"] ?? "BivLauncher Auth").Trim(),
+                implementationName = "BivLauncher.Yggdrasil",
+                implementationVersion = "1.0.0",
+                links = new
+                {
+                    homepage = publicBaseUrl
+                }
+            },
+            skinDomains = string.IsNullOrWhiteSpace(hostName)
+                ? new[] { "localhost" }
+                : new[] { hostName, "localhost" },
+            signaturePublickey = signaturePublicKey
+        };
+
+        Response.Headers["X-Authlib-Injector-API-Location"] = $"{publicBaseUrl.TrimEnd('/')}/api/public/yggdrasil/";
+        return Ok(metadata);
+    }
 
     [HttpPost("/authenticate")]
     [HttpPost("/authserver/authenticate")]
@@ -419,6 +451,32 @@ public sealed class PublicYggdrasilController(
             ValidateLifetime = true,
             ClockSkew = TimeSpan.FromSeconds(30)
         };
+    }
+
+    private static string ResolvePublicBaseUrl(IConfiguration configuration, HttpRequest request)
+    {
+        var configuredUrl = (configuration["PUBLIC_BASE_URL"] ?? configuration["PublicBaseUrl"] ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(configuredUrl))
+        {
+            return configuredUrl.TrimEnd('/');
+        }
+
+        var scheme = string.IsNullOrWhiteSpace(request.Scheme) ? "http" : request.Scheme;
+        var host = request.Host.HasValue ? request.Host.Value : "localhost:8080";
+        return $"{scheme}://{host}";
+    }
+
+    private static string ResolveHostName(string publicBaseUrl, string requestHost)
+    {
+        if (Uri.TryCreate(publicBaseUrl, UriKind.Absolute, out var parsed) &&
+            !string.IsNullOrWhiteSpace(parsed.Host))
+        {
+            return parsed.Host.Trim().ToLowerInvariant();
+        }
+
+        return string.IsNullOrWhiteSpace(requestHost)
+            ? string.Empty
+            : requestHost.Trim().ToLowerInvariant();
     }
 
     private static string NormalizeClientToken(string? clientToken)
