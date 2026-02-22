@@ -38,29 +38,56 @@ public sealed class PublicYggdrasilController(
     [HttpGet("/api/yggdrasil/")]
     public IActionResult Metadata()
     {
-        var publicBaseUrl = ResolvePublicBaseUrl(configuration, Request);
-        var hostName = ResolveHostName(publicBaseUrl, Request.Host.Host);
-        var signaturePublicKey = (configuration["YGGDRASIL_SIGNATURE_PUBLIC_KEY"] ?? string.Empty).Trim();
-        var metadata = new
+        try
         {
-            meta = new
+            var publicBaseUrl = ResolvePublicBaseUrl(configuration, Request);
+            var hostName = ResolveHostName(publicBaseUrl, Request.Host.Host);
+            var signaturePublicKey = (configuration["YGGDRASIL_SIGNATURE_PUBLIC_KEY"] ?? string.Empty).Trim();
+            var apiLocation = BuildApiLocation(publicBaseUrl);
+            var metadata = new
             {
-                serverName = (configuration["YGGDRASIL_SERVER_NAME"] ?? "BivLauncher Auth").Trim(),
-                implementationName = "BivLauncher.Yggdrasil",
-                implementationVersion = "1.0.0",
-                links = new
+                meta = new
                 {
-                    homepage = publicBaseUrl
-                }
-            },
-            skinDomains = string.IsNullOrWhiteSpace(hostName)
-                ? new[] { "localhost" }
-                : new[] { hostName, "localhost" },
-            signaturePublickey = signaturePublicKey
-        };
+                    serverName = (configuration["YGGDRASIL_SERVER_NAME"] ?? "BivLauncher Auth").Trim(),
+                    implementationName = "BivLauncher.Yggdrasil",
+                    implementationVersion = "1.0.0",
+                    links = new
+                    {
+                        homepage = publicBaseUrl
+                    }
+                },
+                skinDomains = string.IsNullOrWhiteSpace(hostName)
+                    ? new[] { "localhost" }
+                    : new[] { hostName, "localhost" },
+                signaturePublickey = signaturePublicKey
+            };
 
-        Response.Headers["X-Authlib-Injector-API-Location"] = $"{publicBaseUrl.TrimEnd('/')}/api/public/yggdrasil/";
-        return Ok(metadata);
+            if (!string.IsNullOrWhiteSpace(apiLocation))
+            {
+                Response.Headers["X-Authlib-Injector-API-Location"] = apiLocation;
+            }
+
+            return Ok(metadata);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to generate Yggdrasil metadata payload. Returning fallback metadata.");
+            return Ok(new
+            {
+                meta = new
+                {
+                    serverName = "BivLauncher Auth",
+                    implementationName = "BivLauncher.Yggdrasil",
+                    implementationVersion = "1.0.0",
+                    links = new
+                    {
+                        homepage = string.Empty
+                    }
+                },
+                skinDomains = new[] { "localhost" },
+                signaturePublickey = string.Empty
+            });
+        }
     }
 
     [HttpPost("/authenticate")]
@@ -477,6 +504,16 @@ public sealed class PublicYggdrasilController(
         return string.IsNullOrWhiteSpace(requestHost)
             ? string.Empty
             : requestHost.Trim().ToLowerInvariant();
+    }
+
+    private static string BuildApiLocation(string publicBaseUrl)
+    {
+        if (string.IsNullOrWhiteSpace(publicBaseUrl))
+        {
+            return string.Empty;
+        }
+
+        return $"{publicBaseUrl.TrimEnd('/')}/api/public/yggdrasil/";
     }
 
     private static string NormalizeClientToken(string? clientToken)
