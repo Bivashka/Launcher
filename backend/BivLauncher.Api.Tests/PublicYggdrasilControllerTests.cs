@@ -150,6 +150,7 @@ public sealed class PublicYggdrasilControllerTests
         Assert.Equal("BivLauncher Auth", metaNode.GetProperty("serverName").GetString());
         Assert.True(payload.TryGetProperty("skinDomains", out var skinDomainsNode));
         Assert.Equal(JsonValueKind.Array, skinDomainsNode.ValueKind);
+        Assert.False(payload.TryGetProperty("signaturePublickey", out _));
     }
 
     private static JwtOptions BuildJwtOptions()

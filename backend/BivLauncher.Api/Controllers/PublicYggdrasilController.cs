@@ -42,9 +42,9 @@ public sealed class PublicYggdrasilController(
             var hostName = ResolveHostName(publicBaseUrl, Request.Host.Host);
             var signaturePublicKey = (configuration["YGGDRASIL_SIGNATURE_PUBLIC_KEY"] ?? string.Empty).Trim();
             var apiLocation = BuildApiLocation(publicBaseUrl);
-            var metadata = new
+            var metadata = new Dictionary<string, object?>
             {
-                meta = new
+                ["meta"] = new
                 {
                     serverName = (configuration["YGGDRASIL_SERVER_NAME"] ?? "BivLauncher Auth").Trim(),
                     implementationName = "BivLauncher.Yggdrasil",
@@ -54,11 +54,14 @@ public sealed class PublicYggdrasilController(
                         homepage = publicBaseUrl
                     }
                 },
-                skinDomains = string.IsNullOrWhiteSpace(hostName)
+                ["skinDomains"] = string.IsNullOrWhiteSpace(hostName)
                     ? new[] { "localhost" }
-                    : new[] { hostName, "localhost" },
-                signaturePublickey = signaturePublicKey
+                    : new[] { hostName, "localhost" }
             };
+            if (!string.IsNullOrWhiteSpace(signaturePublicKey))
+            {
+                metadata["signaturePublickey"] = signaturePublicKey;
+            }
 
             if (!string.IsNullOrWhiteSpace(apiLocation))
             {
@@ -82,8 +85,7 @@ public sealed class PublicYggdrasilController(
                         homepage = string.Empty
                     }
                 },
-                skinDomains = new[] { "localhost" },
-                signaturePublickey = string.Empty
+                skinDomains = new[] { "localhost" }
             });
         }
     }
