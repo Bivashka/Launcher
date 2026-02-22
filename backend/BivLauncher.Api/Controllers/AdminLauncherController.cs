@@ -51,6 +51,7 @@ public sealed class AdminLauncherController(
     private const int MaxLogLength = 4000;
     private const string ServerLauncherJarStorageKey = "uploads/assets/launcher.jar";
     private const string DefaultServerLauncherJarVersion = "1.2.7";
+    private const string DefaultServerLauncherBundledAuthlibVersion = "1.5.21";
     private const long DefaultServerLauncherJarMaxBytes = 32L * 1024 * 1024;
     private const string LegacySessionDomainSource = "authserver.mojang.com";
     private const string LegacySessionDomainTarget = "session.minecraft.net";
@@ -107,12 +108,35 @@ public sealed class AdminLauncherController(
             });
         }
 
+        var bundledAuthlibVersion = ResolveServerLauncherBundledAuthlibVersion(request?.AuthlibVersion);
+        if (!VersionPattern.IsMatch(bundledAuthlibVersion))
+        {
+            return BadRequest(new
+            {
+                error = "Bundled authlib version must match pattern ^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$."
+            });
+        }
+
+        var bundledAuthlibSourceUrl = ResolveServerLauncherBundledAuthlibSourceUrl(
+            bundledAuthlibVersion,
+            request?.AuthlibSourceUrl);
+        if (!Uri.TryCreate(bundledAuthlibSourceUrl, UriKind.Absolute, out var bundledAuthlibSourceUri) ||
+            (bundledAuthlibSourceUri.Scheme != Uri.UriSchemeHttps && bundledAuthlibSourceUri.Scheme != Uri.UriSchemeHttp))
+        {
+            return BadRequest(new
+            {
+                error = "Bundled authlib source URL must be an absolute http/https URL."
+            });
+        }
+
         var timeoutSeconds = ResolveServerLauncherJarDownloadTimeoutSeconds();
         var maxBytes = ResolveServerLauncherJarMaxBytes();
         var startedAt = DateTime.UtcNow;
         byte[] payload;
+        byte[] bundledAuthlibPayload;
         string contentType;
         int responseStatusCode;
+        int bundledAuthlibResponseStatusCode;
 
         try
         {
@@ -176,8 +200,69 @@ public sealed class AdminLauncherController(
             });
         }
 
+        try
+        {
+            using var client = httpClientFactory.CreateClient();
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+
+            using var response = await client.GetAsync(
+                bundledAuthlibSourceUri,
+                HttpCompletionOption.ResponseHeadersRead,
+                timeoutCts.Token);
+            bundledAuthlibResponseStatusCode = (int)response.StatusCode;
+            if (!response.IsSuccessStatusCode)
+            {
+                return BadRequest(new
+                {
+                    error = $"Bundled authlib download failed with HTTP {(int)response.StatusCode}.",
+                    bundledAuthlibSourceUrl
+                });
+            }
+
+            await using var stream = await response.Content.ReadAsStreamAsync(timeoutCts.Token);
+            bundledAuthlibPayload = await ReadWithSizeLimitAsync(stream, maxBytes, timeoutCts.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return StatusCode(StatusCodes.Status504GatewayTimeout, new
+            {
+                error = $"Bundled authlib download timed out after {timeoutSeconds} seconds.",
+                bundledAuthlibSourceUrl
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new
+            {
+                error = ex.Message,
+                bundledAuthlibSourceUrl
+            });
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to download bundled authlib from {SourceUrl}.", bundledAuthlibSourceUrl);
+            return StatusCode(StatusCodes.Status502BadGateway, new
+            {
+                error = "Failed to download bundled authlib from upstream source.",
+                bundledAuthlibSourceUrl
+            });
+        }
+
+        if (!LooksLikeJarArchive(bundledAuthlibPayload))
+        {
+            return BadRequest(new
+            {
+                error = "Downloaded bundled authlib is not a valid JAR/ZIP archive.",
+                bundledAuthlibSourceUrl
+            });
+        }
+
         var legacySessionPatchStats = PatchLegacySessionDomainMapping(payload);
         payload = legacySessionPatchStats.Payload;
+
+        var bundledAuthlibMergeStats = MergeBundledAuthlib(payload, bundledAuthlibPayload);
+        payload = bundledAuthlibMergeStats.Payload;
 
         await using (var uploadStream = new MemoryStream(payload, writable: false))
         {
@@ -202,6 +287,11 @@ public sealed class AdminLauncherController(
                 maxBytes,
                 downloadedSizeBytes = payload.LongLength,
                 upstreamStatusCode = responseStatusCode,
+                bundledAuthlibVersion,
+                bundledAuthlibSourceUrl,
+                bundledAuthlibUpstreamStatusCode = bundledAuthlibResponseStatusCode,
+                bundledAuthlibEntriesAdded = bundledAuthlibMergeStats.EntriesAdded,
+                bundledAuthlibBytesAdded = bundledAuthlibMergeStats.BytesAdded,
                 legacySessionPatchEnabled = true,
                 legacySessionPatchClassEntriesTouched = legacySessionPatchStats.ClassEntriesTouched,
                 legacySessionPatchStringReplacements = legacySessionPatchStats.StringReplacements,
@@ -223,6 +313,10 @@ public sealed class AdminLauncherController(
             sha256 = metadata?.Sha256 ?? string.Empty,
             sourceUrl,
             version = resolvedVersion,
+            bundledAuthlibVersion,
+            bundledAuthlibSourceUrl,
+            bundledAuthlibEntriesAdded = bundledAuthlibMergeStats.EntriesAdded,
+            bundledAuthlibBytesAdded = bundledAuthlibMergeStats.BytesAdded,
             legacySessionPatchEnabled = true,
             legacySessionPatchClassEntriesTouched = legacySessionPatchStats.ClassEntriesTouched,
             legacySessionPatchStringReplacements = legacySessionPatchStats.StringReplacements
@@ -752,6 +846,37 @@ public sealed class AdminLauncherController(
         return $"https://repo1.maven.org/maven2/org/glavo/hmcl/authlib-injector/{resolvedVersion}/authlib-injector-{resolvedVersion}.jar";
     }
 
+    private string ResolveServerLauncherBundledAuthlibVersion(string? requestVersion)
+    {
+        var explicitVersion = (requestVersion ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(explicitVersion))
+        {
+            return explicitVersion;
+        }
+
+        var configuredVersion = (configuration["LAUNCHER_SERVER_AUTHLIB_VERSION"] ?? string.Empty).Trim();
+        return string.IsNullOrWhiteSpace(configuredVersion)
+            ? DefaultServerLauncherBundledAuthlibVersion
+            : configuredVersion;
+    }
+
+    private string ResolveServerLauncherBundledAuthlibSourceUrl(string resolvedVersion, string? requestSourceUrl)
+    {
+        var explicitSourceUrl = (requestSourceUrl ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(explicitSourceUrl))
+        {
+            return explicitSourceUrl;
+        }
+
+        var configuredSourceUrl = (configuration["LAUNCHER_SERVER_AUTHLIB_URL"] ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(configuredSourceUrl))
+        {
+            return configuredSourceUrl;
+        }
+
+        return $"https://libraries.minecraft.net/com/mojang/authlib/{resolvedVersion}/authlib-{resolvedVersion}.jar";
+    }
+
     private int ResolveServerLauncherJarDownloadTimeoutSeconds()
     {
         var raw = configuration["LAUNCHER_SERVER_JAR_DOWNLOAD_TIMEOUT_SECONDS"];
@@ -977,6 +1102,81 @@ public sealed class AdminLauncherController(
         return new LegacySessionPatchStats(output.ToArray(), classEntriesTouched, stringReplacements);
     }
 
+    private static BundledAuthlibMergeStats MergeBundledAuthlib(byte[] launcherPayload, byte[] authlibPayload)
+    {
+        if (launcherPayload.Length <= 0 || authlibPayload.Length <= 0)
+        {
+            return new BundledAuthlibMergeStats(launcherPayload, 0, 0);
+        }
+
+        using var launcherStream = new MemoryStream(launcherPayload, writable: false);
+        using var authlibStream = new MemoryStream(authlibPayload, writable: false);
+        using var output = new MemoryStream(capacity: launcherPayload.Length + authlibPayload.Length);
+        var entriesAdded = 0;
+        var bytesAdded = 0L;
+        using (var launcherArchive = new ZipArchive(launcherStream, ZipArchiveMode.Read, leaveOpen: true))
+        using (var authlibArchive = new ZipArchive(authlibStream, ZipArchiveMode.Read, leaveOpen: true))
+        using (var outputArchive = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            var existingEntries = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var entry in launcherArchive.Entries)
+            {
+                existingEntries.Add(entry.FullName);
+                CopyZipEntry(entry, outputArchive);
+            }
+
+            foreach (var entry in authlibArchive.Entries)
+            {
+                if (!ShouldBundleAuthlibEntry(entry.FullName) || existingEntries.Contains(entry.FullName))
+                {
+                    continue;
+                }
+
+                existingEntries.Add(entry.FullName);
+                CopyZipEntry(entry, outputArchive);
+                entriesAdded++;
+                bytesAdded += entry.Length;
+            }
+        }
+
+        return new BundledAuthlibMergeStats(output.ToArray(), entriesAdded, bytesAdded);
+    }
+
+    private static bool ShouldBundleAuthlibEntry(string entryName)
+    {
+        if (string.IsNullOrWhiteSpace(entryName))
+        {
+            return false;
+        }
+
+        if (entryName.EndsWith("/", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (entryName.StartsWith("META-INF/", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return entryName.StartsWith("com/mojang/", StringComparison.Ordinal) ||
+               string.Equals(entryName, "yggdrasil_session_pubkey.der", StringComparison.Ordinal);
+    }
+
+    private static void CopyZipEntry(ZipArchiveEntry source, ZipArchive targetArchive)
+    {
+        var target = targetArchive.CreateEntry(source.FullName, CompressionLevel.Optimal);
+        target.LastWriteTime = source.LastWriteTime;
+        if (source.FullName.EndsWith("/", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        using var sourceStream = source.Open();
+        using var targetStream = target.Open();
+        sourceStream.CopyTo(targetStream);
+    }
+
     private static int ReplaceAsciiSequenceInPlace(byte[] payload, string source, string target)
     {
         if (payload.Length == 0 || string.IsNullOrEmpty(source) || string.IsNullOrEmpty(target))
@@ -1023,6 +1223,11 @@ public sealed class AdminLauncherController(
         byte[] Payload,
         int ClassEntriesTouched,
         int StringReplacements);
+
+    private sealed record BundledAuthlibMergeStats(
+        byte[] Payload,
+        int EntriesAdded,
+        long BytesAdded);
 
     private static string Truncate(string value, int maxLength)
     {
