@@ -2332,9 +2332,16 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private async Task<string> ValidatePlayerSessionBeforeLaunchAsync()
     {
-        if (!IsPlayerLoggedIn || string.IsNullOrWhiteSpace(_playerAuthToken))
+        if (!IsPlayerLoggedIn)
         {
             return string.Empty;
+        }
+
+        if (string.IsNullOrWhiteSpace(_playerAuthToken))
+        {
+            return _languageCode == "en"
+                ? "Player auth token is missing. Login is required."
+                : "Токен игрока отсутствует. Требуется повторный вход.";
         }
 
         var currentApiBaseUrl = NormalizeBaseUrl(ApiBaseUrl);

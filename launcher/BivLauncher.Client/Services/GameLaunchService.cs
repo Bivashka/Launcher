@@ -1178,10 +1178,16 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
             : settings.PlayerAuthUsername.Trim();
         var username = NormalizeLegacyUsername(rawUsername);
 
-        var sessionToken = settings.PlayerAuthToken.Trim();
+        var sessionToken = (settings.PlayerAuthToken ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(sessionToken))
         {
-            sessionToken = "0";
+            throw new InvalidOperationException("Player auth token is missing. Re-login is required.");
+        }
+
+        var externalId = (settings.PlayerAuthExternalId ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(externalId))
+        {
+            externalId = username;
         }
 
         if (usePositionalLegacyArgs)
@@ -1193,16 +1199,15 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
             // Pre-1.6 clients expect positional args: username, session, server, port.
             gameArgs.Insert(0, sessionToken);
             gameArgs.Insert(0, username);
+            EnsureArgumentWithValue(gameArgs, "--uuid", externalId);
 
             logService.LogInfo(
-                $"Legacy auth args prepared (positional): username={username}, sourceUsername={rawUsername}, sessionTokenLength={sessionToken.Length}.");
+                $"Legacy auth args prepared (positional): username={username}, sourceUsername={rawUsername}, sessionTokenLength={sessionToken.Length}, hasUuid={!string.IsNullOrWhiteSpace(externalId)}.");
             return;
         }
 
         EnsureArgumentWithValue(gameArgs, "--username", username);
         EnsureArgumentWithValue(gameArgs, "--session", sessionToken);
-
-        var externalId = settings.PlayerAuthExternalId.Trim();
         if (!string.IsNullOrWhiteSpace(externalId))
         {
             EnsureArgumentWithValue(gameArgs, "--uuid", externalId);
