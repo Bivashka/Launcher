@@ -1958,37 +1958,6 @@ public partial class MainWindowViewModel : ViewModelBase
                                !string.IsNullOrWhiteSpace(_playerAuthToken) &&
                                !string.IsNullOrWhiteSpace(PlayerLoggedInAs);
         var canAutoRestore = _allowAutoSessionRestore && (hasActiveSession || activeStoredAccount is not null);
-        var authRoles = hasActiveSession ? NormalizePlayerRoles(_playerAuthRoles) : [];
-        var legacyToken = !canAutoRestore
-            ? string.Empty
-            : hasActiveSession
-            ? _playerAuthToken
-            : (activeStoredAccount?.AuthToken ?? string.Empty);
-        var legacyTokenType = !canAutoRestore
-            ? "Bearer"
-            : hasActiveSession
-            ? _playerAuthTokenType
-            : (string.IsNullOrWhiteSpace(activeStoredAccount?.AuthTokenType) ? "Bearer" : activeStoredAccount!.AuthTokenType);
-        var legacyUsername = !canAutoRestore
-            ? string.Empty
-            : hasActiveSession
-            ? PlayerLoggedInAs.Trim()
-            : (activeStoredAccount?.Username ?? string.Empty);
-        var legacyExternalId = !canAutoRestore
-            ? string.Empty
-            : hasActiveSession
-            ? _playerAuthExternalId
-            : (activeStoredAccount?.ExternalId ?? string.Empty);
-        var legacyRoles = !canAutoRestore
-            ? []
-            : hasActiveSession
-            ? authRoles
-            : (activeStoredAccount is null ? [] : NormalizePlayerRoles(activeStoredAccount.Roles));
-        var legacyApiBaseUrl = !canAutoRestore
-            ? string.Empty
-            : hasActiveSession
-            ? _playerAuthApiBaseUrl
-            : NormalizeBaseUrlOrEmpty(activeStoredAccount?.ApiBaseUrl);
 
         return new LauncherSettings
         {
@@ -2010,12 +1979,14 @@ public partial class MainWindowViewModel : ViewModelBase
                 .ToList(),
             SelectedServerId = SelectedServer?.ServerId.ToString() ?? string.Empty,
             LastPlayerUsername = PlayerUsername.Trim(),
-            PlayerAuthToken = legacyToken,
-            PlayerAuthTokenType = legacyTokenType,
-            PlayerAuthUsername = legacyUsername,
-            PlayerAuthExternalId = legacyExternalId,
-            PlayerAuthRoles = legacyRoles,
-            PlayerAuthApiBaseUrl = legacyApiBaseUrl,
+            // Legacy single-account fields are intentionally cleared.
+            // Stored accounts + active username are the source of truth.
+            PlayerAuthToken = string.Empty,
+            PlayerAuthTokenType = "Bearer",
+            PlayerAuthUsername = string.Empty,
+            PlayerAuthExternalId = string.Empty,
+            PlayerAuthRoles = [],
+            PlayerAuthApiBaseUrl = string.Empty,
             PlayerAccounts = [.. storedAccounts.Select(account => new StoredPlayerAccount
             {
                 Username = account.Username,
@@ -2128,14 +2099,46 @@ public partial class MainWindowViewModel : ViewModelBase
                     ApiBaseUrl,
                     token,
                     string.IsNullOrWhiteSpace(account.AuthTokenType) ? "Bearer" : account.AuthTokenType);
+                var selectedUsername = (account.Username ?? string.Empty).Trim();
+                var sessionUsername = (session.Username ?? string.Empty).Trim();
+                var selectedExternalId = (account.ExternalId ?? string.Empty).Trim();
+                var sessionExternalId = (session.ExternalId ?? string.Empty).Trim();
+                var usernameMatches = string.Equals(
+                    selectedUsername,
+                    sessionUsername,
+                    StringComparison.OrdinalIgnoreCase);
+                var externalIdMatches = string.IsNullOrWhiteSpace(selectedExternalId) ||
+                                        string.IsNullOrWhiteSpace(sessionExternalId) ||
+                                        string.Equals(
+                                            selectedExternalId,
+                                            sessionExternalId,
+                                            StringComparison.OrdinalIgnoreCase);
+                if (!usernameMatches || !externalIdMatches)
+                {
+                    RemoveStoredAccount(selectedUsername);
+                    _allowAutoSessionRestore = false;
+                    IsPlayerLoggedIn = false;
+                    PlayerPassword = string.Empty;
+                    ResetTwoFactorState();
+                    ClearAuthenticatedPlayerSession();
+                    await PersistSettingsSnapshotAsync();
+                    StatusText = _languageCode == "en"
+                        ? "Saved account token belongs to another user. Login again."
+                        : "Токен сохранённого аккаунта принадлежит другому пользователю. Войдите снова.";
+                    _logService.LogInfo(
+                        $"Stored account mismatch on switch. Selected={selectedUsername}({selectedExternalId}), " +
+                        $"session={sessionUsername}({sessionExternalId}).");
+                    return;
+                }
+
                 SetAuthenticatedPlayerSession(
                     token,
                     account.AuthTokenType,
-                    session.Username,
-                    session.ExternalId,
+                    sessionUsername,
+                    sessionExternalId,
                     session.Roles,
                     currentApiBaseUrl);
-                await RefreshPlayerCosmeticsAsync(session.Username);
+                await RefreshPlayerCosmeticsAsync(sessionUsername);
                 await PersistSettingsSnapshotAsync();
                 StatusText = T("status.ready");
             }
@@ -2235,30 +2238,10 @@ public partial class MainWindowViewModel : ViewModelBase
     private void LoadStoredPlayerSessionState()
     {
         var knownAccounts = NormalizeStoredAccounts(_settings.PlayerAccounts);
-        if (knownAccounts.Count == 0 &&
-            !string.IsNullOrWhiteSpace(_settings.PlayerAuthUsername) &&
-            !string.IsNullOrWhiteSpace(_settings.PlayerAuthToken))
-        {
-            knownAccounts.Add(new StoredPlayerAccount
-            {
-                Username = _settings.PlayerAuthUsername.Trim(),
-                AuthToken = _settings.PlayerAuthToken.Trim(),
-                AuthTokenType = string.IsNullOrWhiteSpace(_settings.PlayerAuthTokenType)
-                    ? "Bearer"
-                    : _settings.PlayerAuthTokenType.Trim(),
-                ExternalId = string.IsNullOrWhiteSpace(_settings.PlayerAuthExternalId)
-                    ? _settings.PlayerAuthUsername.Trim()
-                    : _settings.PlayerAuthExternalId.Trim(),
-                Roles = NormalizePlayerRoles(_settings.PlayerAuthRoles),
-                ApiBaseUrl = NormalizeBaseUrlOrEmpty(_settings.PlayerAuthApiBaseUrl),
-                LastUsedAtUtc = DateTime.UtcNow
-            });
-        }
-
         SetStoredAccounts(knownAccounts);
 
         var autoRestoreAccount = ResolveStoredAccount(_settings.ActivePlayerAccountUsername)
-            ?? ResolveStoredAccount(_settings.PlayerAuthUsername);
+            ?? StoredPlayerAccounts.FirstOrDefault();
         SetSelectedStoredAccount(autoRestoreAccount ?? StoredPlayerAccounts.FirstOrDefault());
 
         if (autoRestoreAccount is null)
@@ -2326,24 +2309,7 @@ public partial class MainWindowViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            var fallbackUsername = string.IsNullOrWhiteSpace(_settings.PlayerAuthUsername)
-                ? (string.IsNullOrWhiteSpace(fallbackStoredUsername) ? PlayerUsername.Trim() : fallbackStoredUsername)
-                : _settings.PlayerAuthUsername.Trim();
-            if (string.IsNullOrWhiteSpace(fallbackUsername))
-            {
-                _logService.LogError($"Player session restore failed: {ex.Message}");
-                return;
-            }
-
-            SetAuthenticatedPlayerSession(
-                _playerAuthToken,
-                _playerAuthTokenType,
-                fallbackUsername,
-                _playerAuthExternalId,
-                _playerAuthRoles,
-                currentApiBaseUrl);
-
-            _logService.LogError($"Player session validation failed, restored cached session: {ex.Message}");
+            _logService.LogError($"Player session restore failed: {ex.Message}");
         }
     }
 
