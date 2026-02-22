@@ -2334,7 +2334,9 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         if (!IsPlayerLoggedIn)
         {
-            return string.Empty;
+            return _languageCode == "en"
+                ? "Login is required before launch."
+                : "Перед запуском требуется выполнить вход.";
         }
 
         if (string.IsNullOrWhiteSpace(_playerAuthToken))

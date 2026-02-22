@@ -1173,9 +1173,12 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
 
     private void EnsureLegacyAuthArguments(List<string> gameArgs, LauncherSettings settings, bool usePositionalLegacyArgs)
     {
-        var rawUsername = string.IsNullOrWhiteSpace(settings.PlayerAuthUsername)
-            ? settings.LastPlayerUsername.Trim()
-            : settings.PlayerAuthUsername.Trim();
+        var rawUsername = (settings.PlayerAuthUsername ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(rawUsername))
+        {
+            throw new InvalidOperationException("Player auth username is missing. Re-login is required.");
+        }
+
         var username = NormalizeLegacyUsername(rawUsername);
 
         var sessionToken = (settings.PlayerAuthToken ?? string.Empty).Trim();
