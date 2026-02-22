@@ -2160,6 +2160,7 @@ public partial class MainWindowViewModel : ViewModelBase
             IsPlayerLoggedIn = false;
             PlayerPassword = string.Empty;
             ResetTwoFactorState();
+            ClearAuthenticatedPlayerSession();
             StatusText = T("status.notLoggedIn");
             await PersistSettingsSnapshotAsync();
         });
@@ -2175,6 +2176,7 @@ public partial class MainWindowViewModel : ViewModelBase
         _allowAutoSessionRestore = false;
         IsPlayerLoggedIn = false;
         ResetTwoFactorState();
+        ClearAuthenticatedPlayerSession();
         PlayerPassword = string.Empty;
         PlayerUsername = string.Empty;
         SetSelectedStoredAccount(null);
@@ -2202,17 +2204,20 @@ public partial class MainWindowViewModel : ViewModelBase
                 return;
             }
 
-            var removingActiveAccount = IsPlayerLoggedIn &&
-                                        string.Equals(PlayerLoggedInAs, username, StringComparison.OrdinalIgnoreCase);
+            var removingCurrentSessionAccount = string.Equals(
+                PlayerLoggedInAs,
+                username,
+                StringComparison.OrdinalIgnoreCase);
 
             RemoveStoredAccount(username);
 
-            if (removingActiveAccount)
+            if (removingCurrentSessionAccount)
             {
                 _allowAutoSessionRestore = false;
                 IsPlayerLoggedIn = false;
                 PlayerPassword = string.Empty;
                 ResetTwoFactorState();
+                ClearAuthenticatedPlayerSession();
                 await PersistSettingsSnapshotAsync();
                 StatusText = _languageCode == "en"
                     ? "Selected account removed. Login again."

@@ -7,6 +7,8 @@ namespace BivLauncher.Client.Services;
 public sealed class SettingsService : ISettingsService
 {
     private const string DefaultProjectDirectoryName = "BivLauncher";
+    private const string PortableModeEnvVar = "BIVLAUNCHER_PORTABLE_MODE";
+    private const string PortableModeMarkerFileName = "portable-mode.flag";
     private static readonly string ApplicationDirectory = ResolveApplicationDirectory();
     private readonly object _syncRoot = new();
     private string _projectDirectoryName = DefaultProjectDirectoryName;
@@ -106,22 +108,53 @@ public sealed class SettingsService : ISettingsService
 
     private static string ResolveApplicationDirectory()
     {
+        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        var appDataDirectory = Path.Combine(appData, DefaultProjectDirectoryName);
         var portableDirectory = Path.Combine(AppContext.BaseDirectory, "launcher-data");
+
+        if (ShouldUsePortableMode() &&
+            TryEnsureWritableDirectory(portableDirectory))
+        {
+            return portableDirectory;
+        }
+
+        if (TryEnsureWritableDirectory(appDataDirectory))
+        {
+            return appDataDirectory;
+        }
+
         if (TryEnsureWritableDirectory(portableDirectory))
         {
             return portableDirectory;
         }
 
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        var fallbackDirectory = Path.Combine(appData, DefaultProjectDirectoryName);
-        if (TryEnsureWritableDirectory(fallbackDirectory))
-        {
-            return fallbackDirectory;
-        }
-
         var tempFallbackDirectory = Path.Combine(Path.GetTempPath(), DefaultProjectDirectoryName);
         Directory.CreateDirectory(tempFallbackDirectory);
         return tempFallbackDirectory;
+    }
+
+    private static bool ShouldUsePortableMode()
+    {
+        var envValue = Environment.GetEnvironmentVariable(PortableModeEnvVar);
+        if (!string.IsNullOrWhiteSpace(envValue))
+        {
+            return IsTruthy(envValue);
+        }
+
+        var markerPath = Path.Combine(AppContext.BaseDirectory, PortableModeMarkerFileName);
+        return File.Exists(markerPath);
+    }
+
+    private static bool IsTruthy(string value)
+    {
+        return value.Trim().ToLowerInvariant() switch
+        {
+            "1" => true,
+            "true" => true,
+            "yes" => true,
+            "on" => true,
+            _ => false
+        };
     }
 
     private static bool TryEnsureWritableDirectory(string path)
