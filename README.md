@@ -84,6 +84,10 @@ Note: API now reads Postgres connection from `DB_CONN` (in `.env`) as the primar
 - `POST /api/public/auth/login`
 - `GET /api/public/skins/{user}`
 - `GET /api/public/capes/{user}`
+- `POST /authserver/validate` (Yggdrasil compatibility alias set)
+- `POST /authserver/refresh` (Yggdrasil compatibility alias set)
+- `POST /session/minecraft/join` (Yggdrasil compatibility alias set)
+- `GET /session/minecraft/hasJoined` (Yggdrasil compatibility alias set)
 - `POST /api/admin/skins/{user}/upload`
 - `POST /api/admin/capes/{user}/upload`
 - `GET/PUT/DELETE /api/admin/discord-rpc/profile/{profileId}`
@@ -132,6 +136,10 @@ Note: API now reads Postgres connection from `DB_CONN` (in `.env`) as the primar
 - `POST /api/public/install-telemetry`
 - `GET /api/public/docs`
 - `GET /api/public/docs/{slug}`
+
+Yggdrasil notes:
+- Recommended base URL for server-side auth bridge config: `https://<your-host>/api/public/yggdrasil`
+- Compatibility aliases are exposed for both direct paths (`/authserver/*`, `/session/minecraft/*`) and prefixed path (`/api/public/yggdrasil/...`).
 
 ## Launcher MVP
 

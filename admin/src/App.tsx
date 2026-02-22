@@ -1346,6 +1346,7 @@ function App() {
     const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:'
     return `${protocol}//${window.location.hostname}:8080`
   }, [])
+  const yggdrasilBaseUrl = useMemo(() => `${apiBaseUrl.replace(/\/+$/, '')}/api/public/yggdrasil`, [apiBaseUrl])
   const currentOrigin = useMemo(() => window.location.origin, [])
 
   const [phase, setPhase] = useState<Phase>('loading')
@@ -5423,6 +5424,9 @@ function App() {
                     Upload your Java `launcher.jar` (Sashok-style server agent) for online-mode servers.
                     This project does not build that JAR automatically.
                   </small>
+                  <small>
+                    Yggdrasil base URL for server auth configuration: <code>{yggdrasilBaseUrl}</code>
+                  </small>
                   <div className="upload-row">
                     <input
                       type="file"
@@ -5444,6 +5448,13 @@ function App() {
                     >
                       Copy curl command
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => onCopyToClipboard(yggdrasilBaseUrl, 'yggdrasil base URL')}
+                      disabled={busy}
+                    >
+                      Copy yggdrasil URL
+                    </button>
                   </div>
                   <small>
                     Status: {serverLauncherJarStatus.exists ? 'uploaded' : 'not uploaded'}
@@ -5455,6 +5466,11 @@ function App() {
                     readOnly
                     value={serverLauncherJarStatus.publicUrl || ''}
                     placeholder="Public URL for launcher.jar"
+                  />
+                  <input
+                    readOnly
+                    value={yggdrasilBaseUrl}
+                    placeholder="Yggdrasil base URL"
                   />
                 </div>
                 )}
