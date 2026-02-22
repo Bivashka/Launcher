@@ -20,7 +20,8 @@ public sealed class PublicAuthController(
     IExternalAuthService externalAuthService,
     IHardwareFingerprintService hardwareFingerprintService,
     IJwtTokenService jwtTokenService,
-    ITwoFactorService twoFactorService) : ControllerBase
+    ITwoFactorService twoFactorService,
+    ILogger<PublicAuthController> logger) : ControllerBase
 {
     private static readonly ConcurrentDictionary<string, PendingTwoFactorChallenge> PendingTwoFactorChallenges = new(StringComparer.Ordinal);
     private static readonly TimeSpan PendingTwoFactorChallengeLifetime = TimeSpan.FromMinutes(3);
@@ -215,11 +216,55 @@ public sealed class PublicAuthController(
             var normalizedUsername = string.IsNullOrWhiteSpace(authResult.Username)
                 ? username
                 : authResult.Username.Trim();
+            if (string.IsNullOrWhiteSpace(normalizedExternalId) || string.IsNullOrWhiteSpace(normalizedUsername))
+            {
+                return Unauthorized(new { error = "Auth provider returned invalid identity payload." });
+            }
+
             roles = NormalizeRoles(authResult.Roles);
 
-            account = await dbContext.AuthAccounts.FirstOrDefaultAsync(
+            var accountByExternalId = await dbContext.AuthAccounts.FirstOrDefaultAsync(
                 x => x.ExternalId == normalizedExternalId,
                 cancellationToken);
+            var accountByUsername = await dbContext.AuthAccounts.FirstOrDefaultAsync(
+                x => x.Username == normalizedUsername,
+                cancellationToken);
+
+            if (accountByExternalId is not null &&
+                !string.Equals(
+                    accountByExternalId.Username,
+                    normalizedUsername,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                logger.LogWarning(
+                    "Auth identity mismatch by externalId. ExternalId={ExternalId}, existingUsername={ExistingUsername}, providerUsername={ProviderUsername}",
+                    normalizedExternalId,
+                    accountByExternalId.Username,
+                    normalizedUsername);
+                return Conflict(new
+                {
+                    error = "Auth provider identity mismatch: externalId is already linked to another username."
+                });
+            }
+
+            if (accountByUsername is not null &&
+                !string.Equals(
+                    accountByUsername.ExternalId,
+                    normalizedExternalId,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                logger.LogWarning(
+                    "Auth identity mismatch by username. Username={Username}, existingExternalId={ExistingExternalId}, providerExternalId={ProviderExternalId}",
+                    normalizedUsername,
+                    accountByUsername.ExternalId,
+                    normalizedExternalId);
+                return Conflict(new
+                {
+                    error = "Auth provider identity mismatch: username is already linked to another externalId."
+                });
+            }
+
+            account = accountByExternalId ?? accountByUsername;
 
             if (account is null)
             {
@@ -236,7 +281,16 @@ public sealed class PublicAuthController(
             }
             else
             {
-                account.Username = normalizedUsername;
+                if (string.Equals(account.Username, normalizedUsername, StringComparison.OrdinalIgnoreCase))
+                {
+                    account.Username = normalizedUsername;
+                }
+
+                if (string.Equals(account.ExternalId, normalizedExternalId, StringComparison.OrdinalIgnoreCase))
+                {
+                    account.ExternalId = normalizedExternalId;
+                }
+
                 account.Roles = string.Join(',', roles);
                 account.HwidHash = hwidHash;
                 account.DeviceUserName = deviceUserName;
