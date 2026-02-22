@@ -55,6 +55,9 @@ public partial class MainWindowViewModel : ViewModelBase
     private bool _installTelemetrySent;
     private bool _isAutomaticUpdateInProgress;
     private bool _allowAutoSessionRestore = true;
+    private bool _isUpdatingStoredAccountSelection;
+    private string _pendingTwoFactorUsername = string.Empty;
+    private string _pendingTwoFactorPassword = string.Empty;
     private string _playerAuthToken = string.Empty;
     private string _playerAuthTokenType = "Bearer";
     private string _playerAuthExternalId = string.Empty;
@@ -97,6 +100,7 @@ public partial class MainWindowViewModel : ViewModelBase
         SwitchAccountCommand = new AsyncRelayCommand(SwitchAccountAsync, CanSwitchAccount);
         LogoutCommand = new AsyncRelayCommand(LogoutAsync, CanLogout);
         AddAccountCommand = new RelayCommand(AddAccount, CanAddAccount);
+        DeleteAccountCommand = new AsyncRelayCommand(DeleteSelectedAccountAsync, CanDeleteAccount);
         SaveSettingsCommand = new AsyncRelayCommand(SaveSettingsAsync, CanOperate);
         VerifyFilesCommand = new AsyncRelayCommand(VerifyFilesAsync, CanVerifyOrLaunch);
         LaunchCommand = new AsyncRelayCommand(LaunchAsync, CanVerifyOrLaunch);
@@ -113,6 +117,7 @@ public partial class MainWindowViewModel : ViewModelBase
             OnPropertyChanged(nameof(HasStoredAccounts));
             OnPropertyChanged(nameof(ServerMonitoringText));
             SwitchAccountCommand.NotifyCanExecuteChanged();
+            DeleteAccountCommand.NotifyCanExecuteChanged();
         };
 
         _serverOnlineRefreshTimer = new DispatcherTimer
@@ -136,6 +141,7 @@ public partial class MainWindowViewModel : ViewModelBase
     public IAsyncRelayCommand SwitchAccountCommand { get; }
     public IAsyncRelayCommand LogoutCommand { get; }
     public IRelayCommand AddAccountCommand { get; }
+    public IAsyncRelayCommand DeleteAccountCommand { get; }
     public IAsyncRelayCommand SaveSettingsCommand { get; }
     public IAsyncRelayCommand VerifyFilesCommand { get; }
     public IAsyncRelayCommand LaunchCommand { get; }
@@ -399,6 +405,7 @@ public partial class MainWindowViewModel : ViewModelBase
     public string TwoFactorCodeLabelText => T("label.twoFactorCode");
     public string LoginButtonText => IsTwoFactorStepActive ? T("button.verifyTwoFactor") : T("button.login");
     public string AddAccountButtonText => _languageCode == "en" ? "Add account" : "Добавить аккаунт";
+    public string DeleteAccountButtonText => _languageCode == "en" ? "Remove account" : "Удалить аккаунт";
     public string LogoutButtonText => _languageCode == "en" ? "Logout" : "Выйти";
     public string SwitchAccountButtonText => _languageCode == "en" ? "Switch" : "Переключить";
     public string SavedAccountsLabelText => _languageCode == "en" ? "Saved accounts" : "Сохранённые аккаунты";
@@ -480,10 +487,7 @@ public partial class MainWindowViewModel : ViewModelBase
         JavaMode = NormalizeJavaMode(_settings.JavaMode);
         SyncSelectedJavaModeOption();
         PlayerUsername = _settings.LastPlayerUsername;
-        PlayerTwoFactorCode = string.Empty;
-        IsTwoFactorStepActive = false;
-        TwoFactorSetupSecret = string.Empty;
-        TwoFactorSetupUri = string.Empty;
+        ResetTwoFactorState();
         AuthStatusText = T("status.notLoggedIn");
         LoadStoredPlayerSessionState();
         await TryRestorePlayerSessionAsync();
@@ -500,6 +504,7 @@ public partial class MainWindowViewModel : ViewModelBase
         SwitchAccountCommand.NotifyCanExecuteChanged();
         LogoutCommand.NotifyCanExecuteChanged();
         AddAccountCommand.NotifyCanExecuteChanged();
+        DeleteAccountCommand.NotifyCanExecuteChanged();
         SaveSettingsCommand.NotifyCanExecuteChanged();
         VerifyFilesCommand.NotifyCanExecuteChanged();
         LaunchCommand.NotifyCanExecuteChanged();
@@ -587,6 +592,20 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         OnPropertyChanged(nameof(LoginButtonText));
         OnPropertyChanged(nameof(TwoFactorHintText));
+    }
+
+    partial void OnPlayerTwoFactorCodeChanged(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return;
+        }
+
+        var normalized = NormalizeTwoFactorCode(value);
+        if (!string.Equals(value, normalized, StringComparison.Ordinal))
+        {
+            PlayerTwoFactorCode = normalized;
+        }
     }
 
     partial void OnTwoFactorSetupSecretChanged(string value)
@@ -728,9 +747,28 @@ public partial class MainWindowViewModel : ViewModelBase
     partial void OnSelectedStoredAccountChanged(StoredPlayerAccount? value)
     {
         SwitchAccountCommand.NotifyCanExecuteChanged();
+        DeleteAccountCommand.NotifyCanExecuteChanged();
         if (!IsPlayerLoggedIn && value is not null && !string.IsNullOrWhiteSpace(value.Username))
         {
             PlayerUsername = value.Username.Trim();
+        }
+
+        if (_isUpdatingStoredAccountSelection ||
+            value is null ||
+            IsBusy ||
+            string.IsNullOrWhiteSpace(value.AuthToken))
+        {
+            return;
+        }
+
+        if (string.Equals(value.Username, PlayerLoggedInAs, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        if (SwitchAccountCommand.CanExecute(null))
+        {
+            _ = SwitchAccountCommand.ExecuteAsync(null);
         }
     }
 
@@ -783,6 +821,13 @@ public partial class MainWindowViewModel : ViewModelBase
     private bool CanAddAccount()
     {
         return !IsBusy && IsPlayerLoggedIn;
+    }
+
+    private bool CanDeleteAccount()
+    {
+        return !IsBusy &&
+               SelectedStoredAccount is not null &&
+               !string.IsNullOrWhiteSpace(SelectedStoredAccount.Username);
     }
 
     private void StartFileSyncProgress()
@@ -1989,15 +2034,27 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         await RunBusyAsync(async () =>
         {
-            var username = PlayerUsername.Trim();
+            var enteredUsername = PlayerUsername.Trim();
+            var enteredPassword = PlayerPassword;
+            var usePendingCredentials = IsTwoFactorStepActive &&
+                                        !string.IsNullOrWhiteSpace(_pendingTwoFactorUsername) &&
+                                        !string.IsNullOrWhiteSpace(_pendingTwoFactorPassword);
+            var username = usePendingCredentials ? _pendingTwoFactorUsername : enteredUsername;
+            var password = usePendingCredentials ? _pendingTwoFactorPassword : enteredPassword;
+            var normalizedTwoFactorCode = NormalizeTwoFactorCode(PlayerTwoFactorCode);
             if (string.IsNullOrWhiteSpace(username))
             {
                 throw new InvalidOperationException(T("validation.usernameRequired"));
             }
 
-            if (string.IsNullOrWhiteSpace(PlayerPassword))
+            if (string.IsNullOrWhiteSpace(password))
             {
                 throw new InvalidOperationException(T("validation.passwordRequired"));
+            }
+
+            if (IsTwoFactorStepActive && string.IsNullOrWhiteSpace(normalizedTwoFactorCode))
+            {
+                throw new InvalidOperationException(T("status.twoFactorRequired"));
             }
 
             AuthStatusText = T("status.authorizing");
@@ -2006,10 +2063,10 @@ public partial class MainWindowViewModel : ViewModelBase
             var response = await _launcherApiService.LoginAsync(ApiBaseUrl, new PublicAuthLoginRequest
             {
                 Username = username,
-                Password = PlayerPassword,
+                Password = password,
                 HwidFingerprint = ComputeHwidFingerprint(),
                 DeviceUserName = ComputeDeviceUserName(),
-                TwoFactorCode = PlayerTwoFactorCode.Trim()
+                TwoFactorCode = IsTwoFactorStepActive ? normalizedTwoFactorCode : string.Empty
             });
 
             if (response.RequiresTwoFactor)
@@ -2017,6 +2074,8 @@ public partial class MainWindowViewModel : ViewModelBase
                 IsTwoFactorStepActive = true;
                 TwoFactorSetupSecret = response.TwoFactorSecret.Trim();
                 TwoFactorSetupUri = response.TwoFactorProvisioningUri.Trim();
+                _pendingTwoFactorUsername = username;
+                _pendingTwoFactorPassword = password;
                 AuthStatusText = string.IsNullOrWhiteSpace(response.Message)
                     ? T("status.twoFactorRequired")
                     : response.Message.Trim();
@@ -2100,7 +2159,7 @@ public partial class MainWindowViewModel : ViewModelBase
             _allowAutoSessionRestore = false;
             IsPlayerLoggedIn = false;
             PlayerPassword = string.Empty;
-            PlayerTwoFactorCode = string.Empty;
+            ResetTwoFactorState();
             StatusText = T("status.notLoggedIn");
             await PersistSettingsSnapshotAsync();
         });
@@ -2115,14 +2174,57 @@ public partial class MainWindowViewModel : ViewModelBase
 
         _allowAutoSessionRestore = false;
         IsPlayerLoggedIn = false;
-        IsTwoFactorStepActive = false;
-        TwoFactorSetupSecret = string.Empty;
-        TwoFactorSetupUri = string.Empty;
-        PlayerTwoFactorCode = string.Empty;
+        ResetTwoFactorState();
         PlayerPassword = string.Empty;
         PlayerUsername = string.Empty;
-        SelectedStoredAccount = null;
+        SetSelectedStoredAccount(null);
         StatusText = _languageCode == "en" ? "Add another account." : "Добавьте новый аккаунт.";
+    }
+
+    private async Task DeleteSelectedAccountAsync()
+    {
+        if (SelectedStoredAccount is null)
+        {
+            return;
+        }
+
+        await RunBusyAsync(async () =>
+        {
+            var selectedAccount = SelectedStoredAccount;
+            if (selectedAccount is null)
+            {
+                return;
+            }
+
+            var username = selectedAccount.Username.Trim();
+            if (string.IsNullOrWhiteSpace(username))
+            {
+                return;
+            }
+
+            var removingActiveAccount = IsPlayerLoggedIn &&
+                                        string.Equals(PlayerLoggedInAs, username, StringComparison.OrdinalIgnoreCase);
+
+            RemoveStoredAccount(username);
+
+            if (removingActiveAccount)
+            {
+                _allowAutoSessionRestore = false;
+                IsPlayerLoggedIn = false;
+                PlayerPassword = string.Empty;
+                ResetTwoFactorState();
+                await PersistSettingsSnapshotAsync();
+                StatusText = _languageCode == "en"
+                    ? "Selected account removed. Login again."
+                    : "Выбранный аккаунт удалён. Войдите снова.";
+                return;
+            }
+
+            await PersistSettingsSnapshotAsync();
+            StatusText = _languageCode == "en"
+                ? $"Account {username} removed."
+                : $"Аккаунт {username} удалён.";
+        });
     }
 
     private void LoadStoredPlayerSessionState()
@@ -2152,7 +2254,7 @@ public partial class MainWindowViewModel : ViewModelBase
 
         var autoRestoreAccount = ResolveStoredAccount(_settings.ActivePlayerAccountUsername)
             ?? ResolveStoredAccount(_settings.PlayerAuthUsername);
-        SelectedStoredAccount = autoRestoreAccount ?? StoredPlayerAccounts.FirstOrDefault();
+        SetSelectedStoredAccount(autoRestoreAccount ?? StoredPlayerAccounts.FirstOrDefault());
 
         if (autoRestoreAccount is null)
         {
@@ -2312,14 +2414,11 @@ public partial class MainWindowViewModel : ViewModelBase
             ApiBaseUrl = _playerAuthApiBaseUrl,
             LastUsedAtUtc = DateTime.UtcNow
         });
-        SelectedStoredAccount = ResolveStoredAccount(normalizedUsername);
+        SetSelectedStoredAccount(ResolveStoredAccount(normalizedUsername));
 
         IsPlayerLoggedIn = true;
         IsSettingsOpen = false;
-        IsTwoFactorStepActive = false;
-        TwoFactorSetupSecret = string.Empty;
-        TwoFactorSetupUri = string.Empty;
-        PlayerTwoFactorCode = string.Empty;
+        ResetTwoFactorState();
         PlayerPassword = string.Empty;
         PlayerLoggedInAs = normalizedUsername;
         PlayerUsername = normalizedUsername;
@@ -2482,8 +2581,36 @@ public partial class MainWindowViewModel : ViewModelBase
         if (SelectedStoredAccount is not null &&
             string.Equals(SelectedStoredAccount.Username, username, StringComparison.OrdinalIgnoreCase))
         {
-            SelectedStoredAccount = StoredPlayerAccounts.FirstOrDefault();
+            SetSelectedStoredAccount(StoredPlayerAccounts.FirstOrDefault());
         }
+    }
+
+    private void SetSelectedStoredAccount(StoredPlayerAccount? account)
+    {
+        _isUpdatingStoredAccountSelection = true;
+        SelectedStoredAccount = account;
+        _isUpdatingStoredAccountSelection = false;
+    }
+
+    private void ResetTwoFactorState()
+    {
+        IsTwoFactorStepActive = false;
+        TwoFactorSetupSecret = string.Empty;
+        TwoFactorSetupUri = string.Empty;
+        PlayerTwoFactorCode = string.Empty;
+        _pendingTwoFactorUsername = string.Empty;
+        _pendingTwoFactorPassword = string.Empty;
+    }
+
+    private static string NormalizeTwoFactorCode(string? rawCode)
+    {
+        if (string.IsNullOrWhiteSpace(rawCode))
+        {
+            return string.Empty;
+        }
+
+        var digits = new string(rawCode.Where(char.IsDigit).Take(6).ToArray());
+        return digits;
     }
 
     private void OnLogLineAdded(string line)
@@ -2536,6 +2663,7 @@ public partial class MainWindowViewModel : ViewModelBase
         SwitchAccountCommand.NotifyCanExecuteChanged();
         LogoutCommand.NotifyCanExecuteChanged();
         AddAccountCommand.NotifyCanExecuteChanged();
+        DeleteAccountCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(IsLoginRequired));
         OnPropertyChanged(nameof(IsLauncherReady));
         OnPropertyChanged(nameof(ServerMonitoringText));
@@ -2546,10 +2674,7 @@ public partial class MainWindowViewModel : ViewModelBase
             _lastServerOnlineRefreshUtc = default;
             ClearAuthenticatedPlayerSession();
             IsSettingsOpen = false;
-            IsTwoFactorStepActive = false;
-            TwoFactorSetupSecret = string.Empty;
-            TwoFactorSetupUri = string.Empty;
-            PlayerTwoFactorCode = string.Empty;
+            ResetTwoFactorState();
             HasSkin = false;
             HasCape = false;
             AuthStatusText = T("status.notLoggedIn");
@@ -3557,6 +3682,7 @@ public partial class MainWindowViewModel : ViewModelBase
         OnPropertyChanged(nameof(TwoFactorCodeLabelText));
         OnPropertyChanged(nameof(LoginButtonText));
         OnPropertyChanged(nameof(AddAccountButtonText));
+        OnPropertyChanged(nameof(DeleteAccountButtonText));
         OnPropertyChanged(nameof(LogoutButtonText));
         OnPropertyChanged(nameof(SwitchAccountButtonText));
         OnPropertyChanged(nameof(SavedAccountsLabelText));

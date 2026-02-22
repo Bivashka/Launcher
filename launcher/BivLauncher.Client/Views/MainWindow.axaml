@@ -76,12 +76,6 @@
                   </DataTemplate>
                 </ComboBox.ItemTemplate>
               </ComboBox>
-              <Button Classes="ghostButton"
-                      Content="{Binding SwitchAccountButtonText}"
-                      Background="{Binding PrimaryButtonBackgroundBrush}"
-                      BorderBrush="{Binding PrimaryButtonBorderBrush}"
-                      Foreground="{Binding PrimaryButtonForegroundBrush}"
-                      Command="{Binding SwitchAccountCommand}" />
             </StackPanel>
 
             <StackPanel Orientation="Horizontal"
@@ -94,6 +88,13 @@
                       BorderBrush="{Binding PrimaryButtonBorderBrush}"
                       Foreground="{Binding PrimaryButtonForegroundBrush}"
                       Command="{Binding AddAccountCommand}" />
+              <Button Classes="ghostButton"
+                      Content="{Binding DeleteAccountButtonText}"
+                      Background="{Binding PrimaryButtonBackgroundBrush}"
+                      BorderBrush="{Binding PrimaryButtonBorderBrush}"
+                      Foreground="{Binding PrimaryButtonForegroundBrush}"
+                      Command="{Binding DeleteAccountCommand}"
+                      IsVisible="{Binding HasStoredAccounts}" />
               <Button Classes="ghostButton"
                       Content="{Binding LogoutButtonText}"
                       Background="{Binding PrimaryButtonBackgroundBrush}"
@@ -142,11 +143,11 @@
               </ComboBox.ItemTemplate>
             </ComboBox>
             <Button Grid.Row="4"
-                    Content="{Binding SwitchAccountButtonText}"
+                    Content="{Binding DeleteAccountButtonText}"
                     Background="{Binding PrimaryButtonBackgroundBrush}"
                     BorderBrush="{Binding PrimaryButtonBorderBrush}"
                     Foreground="{Binding PrimaryButtonForegroundBrush}"
-                    Command="{Binding SwitchAccountCommand}"
+                    Command="{Binding DeleteAccountCommand}"
                     IsVisible="{Binding HasStoredAccounts}" />
 
             <TextBlock Grid.Row="5"
@@ -182,6 +183,7 @@
                        IsVisible="{Binding IsTwoFactorStepActive}" />
             <TextBox Grid.Row="11"
                      Watermark="123456"
+                     MaxLength="6"
                      Background="{Binding InputBackgroundBrush}"
                      BorderBrush="{Binding InputBorderBrush}"
                      Foreground="{Binding InputForegroundBrush}"
@@ -202,7 +204,7 @@
           <Border Classes="featurePanel"
                   Background="{Binding PanelBackgroundBrush}"
                   BorderBrush="{Binding PanelBorderBrush}">
-            <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,*" RowSpacing="12">
+            <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,*" RowSpacing="12">
               <TextBlock Classes="sectionTitle"
                          Foreground="{Binding PrimaryTextBrush}"
                          Text="{Binding PlayButtonText}" />
@@ -212,11 +214,7 @@
                          Foreground="{Binding PrimaryTextBrush}"
                          Text="{Binding SelectedServer.DisplayName, TargetNullValue='No server selected'}"
                          TextWrapping="Wrap" />
-              <TextBlock Grid.Row="2"
-                         Classes="subtle"
-                         Foreground="{Binding SecondaryTextBrush}"
-                         Text="{Binding SelectedServer.RuntimeDisplay, TargetNullValue='-'}" />
-              <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="8">
+              <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8">
                 <Ellipse Width="10"
                          Height="10"
                          VerticalAlignment="Center"
@@ -225,7 +223,7 @@
                            Foreground="{Binding SecondaryTextBrush}"
                            Text="{Binding SelectedServer.OnlineStatusText, TargetNullValue='Проверка...'}" />
               </StackPanel>
-              <Grid Grid.Row="4"
+              <Grid Grid.Row="3"
                     ColumnDefinitions="Auto,*"
                     ColumnSpacing="10">
                 <TextBlock VerticalAlignment="Center"
@@ -239,13 +237,7 @@
                           ItemsSource="{Binding RouteOptions}"
                           SelectedItem="{Binding SelectedRouteOption}" />
               </Grid>
-              <TextBlock Grid.Row="5"
-                         Classes="subtle"
-                         Foreground="{Binding SecondaryTextBrush}"
-                         Text="{Binding AuthStatusText}"
-                         TextWrapping="Wrap" />
-
-              <Border Grid.Row="6"
+              <Border Grid.Row="4"
                       IsVisible="{Binding IsFileSyncInProgress}"
                       CornerRadius="12"
                       BorderThickness="1"
@@ -276,7 +268,7 @@
                 </StackPanel>
               </Border>
 
-              <StackPanel Grid.Row="7"
+              <StackPanel Grid.Row="5"
                           Orientation="Horizontal"
                           Spacing="10"
                           VerticalAlignment="Bottom">
@@ -328,14 +320,11 @@
                                 VerticalAlignment="Top">
                           <Image Source="{Binding Icon}" Stretch="UniformToFill" />
                         </Border>
-                        <Grid Grid.Column="1" RowDefinitions="Auto,Auto,Auto" RowSpacing="2">
+                        <Grid Grid.Column="1" RowDefinitions="Auto,Auto" RowSpacing="2">
                           <TextBlock Text="{Binding DisplayName}"
                                      FontWeight="SemiBold"
                                      TextWrapping="Wrap" />
-                          <TextBlock Grid.Row="1"
-                                     Opacity="0.82"
-                                     Text="{Binding RuntimeDisplay}" />
-                          <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="6">
+                          <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="6">
                             <Ellipse Width="8"
                                      Height="8"
                                      VerticalAlignment="Center"

@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using System.Collections.Concurrent;
 using System.Security.Claims;
 
 namespace BivLauncher.Api.Controllers;
@@ -21,6 +22,9 @@ public sealed class PublicAuthController(
     IJwtTokenService jwtTokenService,
     ITwoFactorService twoFactorService) : ControllerBase
 {
+    private static readonly ConcurrentDictionary<string, PendingTwoFactorChallenge> PendingTwoFactorChallenges = new(StringComparer.Ordinal);
+    private static readonly TimeSpan PendingTwoFactorChallengeLifetime = TimeSpan.FromMinutes(3);
+
     [Authorize]
     [HttpGet("session")]
     public async Task<ActionResult<PublicAuthSessionResponse>> Session(CancellationToken cancellationToken)
@@ -129,6 +133,8 @@ public sealed class PublicAuthController(
         }
 
         var now = DateTime.UtcNow;
+        var normalizedTwoFactorCode = NormalizeTwoFactorCode(request.TwoFactorCode);
+        var pendingTwoFactorChallengeKey = BuildPendingTwoFactorChallengeKey(username, hwidHash, deviceUserName);
 
         if (!string.IsNullOrWhiteSpace(hwidHash))
         {
@@ -164,54 +170,78 @@ public sealed class PublicAuthController(
             }
         }
 
-        var authResult = await externalAuthService.AuthenticateAsync(
-            username,
-            request.Password,
-            hwidHash,
-            cancellationToken);
-
-        if (!authResult.Success)
+        AuthAccount? account = null;
+        List<string> roles = [];
+        if (!string.IsNullOrWhiteSpace(normalizedTwoFactorCode) &&
+            TryGetPendingTwoFactorChallenge(pendingTwoFactorChallengeKey, out var pendingTwoFactorChallenge))
         {
-            return Unauthorized(new { error = authResult.ErrorMessage });
+            account = await dbContext.AuthAccounts.FirstOrDefaultAsync(
+                x => x.Id == pendingTwoFactorChallenge.AccountId,
+                cancellationToken);
+            if (account is null)
+            {
+                RemovePendingTwoFactorChallenge(pendingTwoFactorChallengeKey);
+            }
+            else
+            {
+                roles = NormalizeRoles(pendingTwoFactorChallenge.Roles);
+                account.HwidHash = hwidHash;
+                account.DeviceUserName = deviceUserName;
+                account.UpdatedAtUtc = now;
+            }
         }
-
-        if (authResult.Banned)
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, new { error = "Account is banned." });
-        }
-
-        var normalizedExternalId = string.IsNullOrWhiteSpace(authResult.ExternalId)
-            ? username
-            : authResult.ExternalId.Trim();
-        var normalizedUsername = string.IsNullOrWhiteSpace(authResult.Username)
-            ? username
-            : authResult.Username.Trim();
-        var roles = NormalizeRoles(authResult.Roles);
-
-        var account = await dbContext.AuthAccounts.FirstOrDefaultAsync(
-            x => x.ExternalId == normalizedExternalId,
-            cancellationToken);
 
         if (account is null)
         {
-            account = new AuthAccount
+            var authResult = await externalAuthService.AuthenticateAsync(
+                username,
+                request.Password,
+                hwidHash,
+                cancellationToken);
+
+            if (!authResult.Success)
             {
-                ExternalId = normalizedExternalId,
-                Username = normalizedUsername,
-                Roles = string.Join(',', roles),
-                Banned = false,
-                HwidHash = hwidHash,
-                DeviceUserName = deviceUserName
-            };
-            dbContext.AuthAccounts.Add(account);
-        }
-        else
-        {
-            account.Username = normalizedUsername;
-            account.Roles = string.Join(',', roles);
-            account.HwidHash = hwidHash;
-            account.DeviceUserName = deviceUserName;
-            account.UpdatedAtUtc = DateTime.UtcNow;
+                return Unauthorized(new { error = authResult.ErrorMessage });
+            }
+
+            if (authResult.Banned)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { error = "Account is banned." });
+            }
+
+            var normalizedExternalId = string.IsNullOrWhiteSpace(authResult.ExternalId)
+                ? username
+                : authResult.ExternalId.Trim();
+            var normalizedUsername = string.IsNullOrWhiteSpace(authResult.Username)
+                ? username
+                : authResult.Username.Trim();
+            roles = NormalizeRoles(authResult.Roles);
+
+            account = await dbContext.AuthAccounts.FirstOrDefaultAsync(
+                x => x.ExternalId == normalizedExternalId,
+                cancellationToken);
+
+            if (account is null)
+            {
+                account = new AuthAccount
+                {
+                    ExternalId = normalizedExternalId,
+                    Username = normalizedUsername,
+                    Roles = string.Join(',', roles),
+                    Banned = false,
+                    HwidHash = hwidHash,
+                    DeviceUserName = deviceUserName
+                };
+                dbContext.AuthAccounts.Add(account);
+            }
+            else
+            {
+                account.Username = normalizedUsername;
+                account.Roles = string.Join(',', roles);
+                account.HwidHash = hwidHash;
+                account.DeviceUserName = deviceUserName;
+                account.UpdatedAtUtc = now;
+            }
         }
 
         if (account.Banned)
@@ -240,13 +270,15 @@ public sealed class PublicAuthController(
         var requiresTwoFactor = isTwoFactorEnabled && account.TwoFactorRequired;
         if (requiresTwoFactor)
         {
-            var twoFactorResponse = await ValidateTwoFactorAsync(account, request.TwoFactorCode, cancellationToken);
+            var twoFactorResponse = await ValidateTwoFactorAsync(account, normalizedTwoFactorCode, cancellationToken);
             if (twoFactorResponse is not null)
             {
+                SetPendingTwoFactorChallenge(pendingTwoFactorChallengeKey, account.Id, roles);
                 return Ok(twoFactorResponse);
             }
         }
 
+        RemovePendingTwoFactorChallenge(pendingTwoFactorChallengeKey);
         await dbContext.SaveChangesAsync(cancellationToken);
 
         var token = jwtTokenService.CreatePlayerToken(account, roles);
@@ -328,6 +360,61 @@ public sealed class PublicAuthController(
             Message: message);
     }
 
+    private static string BuildPendingTwoFactorChallengeKey(string username, string hwidHash, string deviceUserName)
+    {
+        var normalizedUsername = (username ?? string.Empty).Trim().ToLowerInvariant();
+        var normalizedHwid = (hwidHash ?? string.Empty).Trim().ToLowerInvariant();
+        var normalizedDeviceUser = (deviceUserName ?? string.Empty).Trim().ToLowerInvariant();
+        return $"{normalizedUsername}|{normalizedHwid}|{normalizedDeviceUser}";
+    }
+
+    private static bool TryGetPendingTwoFactorChallenge(string key, out PendingTwoFactorChallenge challenge)
+    {
+        challenge = default!;
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return false;
+        }
+
+        if (!PendingTwoFactorChallenges.TryGetValue(key, out var stored))
+        {
+            return false;
+        }
+
+        if (stored.ExpiresAtUtc <= DateTime.UtcNow)
+        {
+            PendingTwoFactorChallenges.TryRemove(key, out _);
+            return false;
+        }
+
+        challenge = stored;
+        return true;
+    }
+
+    private static void SetPendingTwoFactorChallenge(string key, Guid accountId, IEnumerable<string> roles)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return;
+        }
+
+        var normalizedRoles = NormalizeRoles(roles);
+        PendingTwoFactorChallenges[key] = new PendingTwoFactorChallenge(
+            accountId,
+            normalizedRoles,
+            DateTime.UtcNow.Add(PendingTwoFactorChallengeLifetime));
+    }
+
+    private static void RemovePendingTwoFactorChallenge(string key)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return;
+        }
+
+        PendingTwoFactorChallenges.TryRemove(key, out _);
+    }
+
     private static string NormalizeTwoFactorCode(string? rawCode)
     {
         if (string.IsNullOrWhiteSpace(rawCode))
@@ -375,4 +462,9 @@ public sealed class PublicAuthController(
 
         return normalized;
     }
+
+    private sealed record PendingTwoFactorChallenge(
+        Guid AccountId,
+        List<string> Roles,
+        DateTime ExpiresAtUtc);
 }
