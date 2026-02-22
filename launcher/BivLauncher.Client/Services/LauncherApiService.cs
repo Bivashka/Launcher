@@ -22,7 +22,8 @@ public sealed class LauncherApiService : ILauncherApiService
 
     public async Task<BootstrapResponse> GetBootstrapAsync(string apiBaseUrl, CancellationToken cancellationToken = default)
     {
-        var uri = BuildUri(apiBaseUrl, "/api/public/bootstrap");
+        var cacheBust = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var uri = BuildUri(apiBaseUrl, $"/api/public/bootstrap?v={cacheBust}");
         using var response = await SendWithRetryAsync(
             () => new HttpRequestMessage(HttpMethod.Get, uri),
             cancellationToken);

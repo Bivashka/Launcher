@@ -29,8 +29,13 @@ public sealed class PublicController(
     private static readonly ConcurrentDictionary<Guid, SemaphoreSlim> ManifestBuildLocks = new();
 
     [HttpGet("bootstrap")]
+    [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
     public async Task<ActionResult<BootstrapResponse>> Bootstrap(CancellationToken cancellationToken)
     {
+        Response.Headers.CacheControl = "no-store, no-cache, must-revalidate";
+        Response.Headers.Pragma = "no-cache";
+        Response.Headers.Expires = "0";
+
         var profiles = await dbContext.Profiles
             .AsNoTracking()
             .Include(x => x.Servers.Where(server => server.Enabled))
