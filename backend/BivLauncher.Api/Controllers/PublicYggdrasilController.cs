@@ -346,7 +346,6 @@ public sealed class PublicYggdrasilController(
             return NoContent();
         }
 
-        JoinTickets.TryRemove(ticketKey, out _);
         return Ok(new
         {
             id = ticket.ProfileId,

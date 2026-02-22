@@ -64,6 +64,48 @@ public sealed class PublicYggdrasilControllerTests
     }
 
     [Fact]
+    public async Task HasJoined_CanBeCalledMultipleTimes_ForSameTicket()
+    {
+        await using var fixture = await TestFixture.CreateAsync();
+        var options = BuildJwtOptions();
+
+        var account = new AuthAccount
+        {
+            Username = "RepeatUser",
+            ExternalId = "repeat-42",
+            SessionVersion = 0,
+            Roles = "player"
+        };
+        fixture.DbContext.AuthAccounts.Add(account);
+        await fixture.DbContext.SaveChangesAsync();
+
+        var jwtTokenService = new JwtTokenService(Microsoft.Extensions.Options.Options.Create(options));
+        var token = jwtTokenService.CreatePlayerToken(account, ["player"]);
+
+        var controller = new PublicYggdrasilController(
+            fixture.DbContext,
+            BuildConfiguration(),
+            Microsoft.Extensions.Options.Options.Create(options),
+            NullLogger<PublicYggdrasilController>.Instance);
+
+        var joinResult = await controller.Join(
+            new PublicYggdrasilController.YggdrasilJoinRequest
+            {
+                AccessToken = $"token:{token}:ffffffffffffffffffffffffffffffff",
+                SelectedProfile = string.Empty,
+                ServerId = "repeat-server"
+            },
+            CancellationToken.None);
+        Assert.IsType<NoContentResult>(joinResult);
+
+        var firstCheck = await controller.HasJoined("RepeatUser", "repeat-server", CancellationToken.None);
+        var secondCheck = await controller.HasJoined("RepeatUser", "repeat-server", CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(firstCheck);
+        Assert.IsType<OkObjectResult>(secondCheck);
+    }
+
+    [Fact]
     public async Task Validate_WhenSessionVersionChanged_ReturnsForbidden()
     {
         await using var fixture = await TestFixture.CreateAsync();
