@@ -45,6 +45,10 @@ type ServerLauncherJarStatus = {
   contentType: string
   sha256: string
 }
+type ServerLauncherJarBuildRequest = {
+  version?: string
+  sourceUrl?: string
+}
 type RuntimeVerifyResponse = {
   key: string
   resolvedFromProfile: boolean
@@ -778,6 +782,7 @@ const defaultServerLauncherJarStatus: ServerLauncherJarStatus = {
   contentType: '',
   sha256: '',
 }
+const defaultServerLauncherJarBuildVersion = '1.2.7'
 
 const supportedLoaders = ['vanilla', 'forge', 'fabric', 'quilt', 'neoforge', 'liteloader'] as const
 const launcherRuntimeOptions = ['win-x64', 'win-arm64', 'linux-x64', 'osx-x64', 'osx-arm64'] as const
@@ -1443,6 +1448,7 @@ function App() {
   const [runtimeFile, setRuntimeFile] = useState<File | null>(null)
   const [serverLauncherJarFile, setServerLauncherJarFile] = useState<File | null>(null)
   const [serverLauncherJarStatus, setServerLauncherJarStatus] = useState<ServerLauncherJarStatus>(defaultServerLauncherJarStatus)
+  const [serverLauncherJarBuildVersion, setServerLauncherJarBuildVersion] = useState(defaultServerLauncherJarBuildVersion)
   const [runtimeVerifyKey, setRuntimeVerifyKey] = useState('')
   const [runtimeVerifyResult, setRuntimeVerifyResult] = useState<RuntimeVerifyResponse | null>(null)
   const [runtimeCleanupKeepLast, setRuntimeCleanupKeepLast] = useState(3)
@@ -3896,6 +3902,65 @@ function App() {
     }
   }
 
+  async function onBuildServerLauncherJar() {
+    if (!token) {
+      setError('Missing admin token')
+      return
+    }
+
+    const normalizedVersion = serverLauncherJarBuildVersion.trim()
+    if (normalizedVersion && !/^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$/.test(normalizedVersion)) {
+      setError('Server launcher.jar version must match pattern ^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$.')
+      return
+    }
+
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      const payload: ServerLauncherJarBuildRequest = {}
+      if (normalizedVersion) {
+        payload.version = normalizedVersion
+      }
+
+      const response = await fetch(`${apiBaseUrl}/api/admin/launcher/server-jar/build`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      })
+
+      if (!response.ok) {
+        const text = await response.text()
+        let parsedError = ''
+        if (text) {
+          try {
+            const parsed = JSON.parse(text) as ApiError
+            parsedError = parsed.error ?? parsed.detail ?? parsed.title ?? ''
+          } catch {
+            parsedError = text
+          }
+        }
+
+        throw new Error(parsedError || 'Unable to build server launcher.jar.')
+      }
+
+      const built = (await response.json()) as ServerLauncherJarStatus
+      setServerLauncherJarStatus({
+        ...defaultServerLauncherJarStatus,
+        ...built,
+      })
+      await fetchServerLauncherJarStatus(token)
+      setNotice('Server launcher.jar built from authlib-injector and uploaded.')
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : 'Unable to build server launcher.jar.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function onBuildLauncherAndDownload() {
     if (!token) {
       setError('Missing admin token')
@@ -4772,6 +4837,7 @@ function App() {
     setServerIconFile(null)
     setServerLauncherJarFile(null)
     setServerLauncherJarStatus(defaultServerLauncherJarStatus)
+    setServerLauncherJarBuildVersion(defaultServerLauncherJarBuildVersion)
     setCosmeticsUser('')
     setSkinFile(null)
     setCapeFile(null)
@@ -5422,11 +5488,21 @@ function App() {
                   <h4>Server launcher.jar</h4>
                   <small>
                     Upload your Java `launcher.jar` (Sashok-style server agent) for online-mode servers.
-                    This project does not build that JAR automatically.
+                    Use Build button to generate compatible `launcher.jar` from authlib-injector.
                   </small>
                   <small>
                     Yggdrasil base URL for server auth configuration: <code>{yggdrasilBaseUrl}</code>
                   </small>
+                  <div className="grid-inline">
+                    <input
+                      placeholder="authlib-injector version (default 1.2.7)"
+                      value={serverLauncherJarBuildVersion}
+                      onChange={(event) => setServerLauncherJarBuildVersion(event.target.value)}
+                    />
+                    <button type="button" onClick={onBuildServerLauncherJar} disabled={busy || !token}>
+                      Build launcher.jar
+                    </button>
+                  </div>
                   <div className="upload-row">
                     <input
                       type="file"

@@ -80,6 +80,7 @@ Note: API now reads Postgres connection from `DB_CONN` (in `.env`) as the primar
 - `GET /api/admin/profiles/{id}/builds`
 - `POST /api/admin/launcher/build`
 - `GET /api/admin/launcher/server-jar`
+- `POST /api/admin/launcher/server-jar/build`
 - `GET /api/public/manifest/{profileSlug}`
 - `POST /api/public/auth/login`
 - `GET /api/public/skins/{user}`
@@ -140,6 +141,7 @@ Note: API now reads Postgres connection from `DB_CONN` (in `.env`) as the primar
 Yggdrasil notes:
 - Recommended base URL for server-side auth bridge config: `https://<your-host>/api/public/yggdrasil`
 - Compatibility aliases are exposed for both direct paths (`/authserver/*`, `/session/minecraft/*`) and prefixed path (`/api/public/yggdrasil/...`).
+- Admin can auto-build a compatible server `launcher.jar` from authlib-injector (`POST /api/admin/launcher/server-jar/build`).
 
 ## Launcher MVP
 

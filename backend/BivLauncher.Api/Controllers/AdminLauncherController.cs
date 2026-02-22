@@ -15,6 +15,7 @@ namespace BivLauncher.Api.Controllers;
 public sealed class AdminLauncherController(
     IWebHostEnvironment environment,
     IConfiguration configuration,
+    IHttpClientFactory httpClientFactory,
     IObjectStorageService objectStorageService,
     IAssetUrlService assetUrlService,
     ILauncherUpdateConfigProvider launcherUpdateConfigProvider,
@@ -49,6 +50,8 @@ public sealed class AdminLauncherController(
     private static readonly Regex VersionPattern = new("^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$", RegexOptions.Compiled);
     private const int MaxLogLength = 4000;
     private const string ServerLauncherJarStorageKey = "uploads/assets/launcher.jar";
+    private const string DefaultServerLauncherJarVersion = "1.2.7";
+    private const long DefaultServerLauncherJarMaxBytes = 32L * 1024 * 1024;
 
     [HttpGet("server-jar")]
     public async Task<IActionResult> GetServerLauncherJarStatus(CancellationToken cancellationToken = default)
@@ -75,6 +78,143 @@ public sealed class AdminLauncherController(
             sizeBytes = metadata.SizeBytes,
             contentType = metadata.ContentType,
             sha256 = metadata.Sha256
+        });
+    }
+
+    [HttpPost("server-jar/build")]
+    public async Task<IActionResult> BuildServerLauncherJar(
+        [FromBody] ServerLauncherJarBuildRequest? request,
+        CancellationToken cancellationToken = default)
+    {
+        var resolvedVersion = ResolveServerLauncherJarVersion(request?.Version);
+        if (!VersionPattern.IsMatch(resolvedVersion))
+        {
+            return BadRequest(new
+            {
+                error = "Server launcher.jar version must match pattern ^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$."
+            });
+        }
+
+        var sourceUrl = ResolveServerLauncherJarSourceUrl(resolvedVersion, request?.SourceUrl);
+        if (!Uri.TryCreate(sourceUrl, UriKind.Absolute, out var sourceUri) ||
+            (sourceUri.Scheme != Uri.UriSchemeHttps && sourceUri.Scheme != Uri.UriSchemeHttp))
+        {
+            return BadRequest(new
+            {
+                error = "Server launcher.jar source URL must be an absolute http/https URL."
+            });
+        }
+
+        var timeoutSeconds = ResolveServerLauncherJarDownloadTimeoutSeconds();
+        var maxBytes = ResolveServerLauncherJarMaxBytes();
+        var startedAt = DateTime.UtcNow;
+        byte[] payload;
+        string contentType;
+        int responseStatusCode;
+
+        try
+        {
+            using var client = httpClientFactory.CreateClient();
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+
+            using var response = await client.GetAsync(
+                sourceUri,
+                HttpCompletionOption.ResponseHeadersRead,
+                timeoutCts.Token);
+            responseStatusCode = (int)response.StatusCode;
+            if (!response.IsSuccessStatusCode)
+            {
+                return BadRequest(new
+                {
+                    error = $"Server launcher.jar download failed with HTTP {(int)response.StatusCode}.",
+                    sourceUrl
+                });
+            }
+
+            contentType = string.IsNullOrWhiteSpace(response.Content.Headers.ContentType?.MediaType)
+                ? "application/java-archive"
+                : response.Content.Headers.ContentType!.MediaType!;
+
+            await using var stream = await response.Content.ReadAsStreamAsync(timeoutCts.Token);
+            payload = await ReadWithSizeLimitAsync(stream, maxBytes, timeoutCts.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return StatusCode(StatusCodes.Status504GatewayTimeout, new
+            {
+                error = $"Server launcher.jar download timed out after {timeoutSeconds} seconds.",
+                sourceUrl
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new
+            {
+                error = ex.Message,
+                sourceUrl
+            });
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to download server launcher.jar from {SourceUrl}.", sourceUrl);
+            return StatusCode(StatusCodes.Status502BadGateway, new
+            {
+                error = "Failed to download server launcher.jar from upstream source.",
+                sourceUrl
+            });
+        }
+
+        if (!LooksLikeJarArchive(payload))
+        {
+            return BadRequest(new
+            {
+                error = "Downloaded file is not a valid JAR/ZIP archive.",
+                sourceUrl
+            });
+        }
+
+        await using (var uploadStream = new MemoryStream(payload, writable: false))
+        {
+            await objectStorageService.UploadAsync(
+                ServerLauncherJarStorageKey,
+                uploadStream,
+                string.IsNullOrWhiteSpace(contentType) ? "application/java-archive" : contentType,
+                cancellationToken: cancellationToken);
+        }
+
+        var metadata = await objectStorageService.GetMetadataAsync(ServerLauncherJarStorageKey, cancellationToken);
+        await auditService.WriteAsync(
+            action: "launcher.server-jar.build",
+            actor: User.Identity?.Name ?? "admin",
+            entityType: "launcher",
+            entityId: ServerLauncherJarStorageKey,
+            details: new
+            {
+                sourceUrl,
+                version = resolvedVersion,
+                timeoutSeconds,
+                maxBytes,
+                downloadedSizeBytes = payload.LongLength,
+                upstreamStatusCode = responseStatusCode,
+                finishedAtUtc = DateTime.UtcNow,
+                durationMs = (long)(DateTime.UtcNow - startedAt).TotalMilliseconds,
+                storageSizeBytes = metadata?.SizeBytes ?? payload.LongLength,
+                storageContentType = metadata?.ContentType ?? contentType,
+                storageSha256 = metadata?.Sha256 ?? string.Empty
+            },
+            cancellationToken: cancellationToken);
+
+        return Ok(new
+        {
+            exists = true,
+            key = ServerLauncherJarStorageKey,
+            publicUrl = assetUrlService.BuildPublicUrl(ServerLauncherJarStorageKey),
+            sizeBytes = metadata?.SizeBytes ?? payload.LongLength,
+            contentType = metadata?.ContentType ?? contentType,
+            sha256 = metadata?.Sha256 ?? string.Empty,
+            sourceUrl,
+            version = resolvedVersion
         });
     }
 
@@ -570,6 +710,59 @@ public sealed class AdminLauncherController(
             : configuredUrl.Trim().TrimEnd('/');
     }
 
+    private string ResolveServerLauncherJarVersion(string? requestVersion)
+    {
+        var explicitVersion = (requestVersion ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(explicitVersion))
+        {
+            return explicitVersion;
+        }
+
+        var configuredVersion = (configuration["LAUNCHER_SERVER_JAR_VERSION"] ?? string.Empty).Trim();
+        return string.IsNullOrWhiteSpace(configuredVersion)
+            ? DefaultServerLauncherJarVersion
+            : configuredVersion;
+    }
+
+    private string ResolveServerLauncherJarSourceUrl(string resolvedVersion, string? requestSourceUrl)
+    {
+        var explicitSourceUrl = (requestSourceUrl ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(explicitSourceUrl))
+        {
+            return explicitSourceUrl;
+        }
+
+        var configuredSourceUrl = (configuration["LAUNCHER_SERVER_JAR_URL"] ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(configuredSourceUrl))
+        {
+            return configuredSourceUrl;
+        }
+
+        return $"https://repo1.maven.org/maven2/org/glavo/hmcl/authlib-injector/{resolvedVersion}/authlib-injector-{resolvedVersion}.jar";
+    }
+
+    private int ResolveServerLauncherJarDownloadTimeoutSeconds()
+    {
+        var raw = configuration["LAUNCHER_SERVER_JAR_DOWNLOAD_TIMEOUT_SECONDS"];
+        if (!int.TryParse(raw, out var seconds))
+        {
+            return 120;
+        }
+
+        return Math.Clamp(seconds, 15, 1800);
+    }
+
+    private long ResolveServerLauncherJarMaxBytes()
+    {
+        var raw = configuration["LAUNCHER_SERVER_JAR_MAX_BYTES"];
+        if (!long.TryParse(raw, out var maxBytes))
+        {
+            return DefaultServerLauncherJarMaxBytes;
+        }
+
+        return Math.Clamp(maxBytes, 256 * 1024, 256L * 1024 * 1024);
+    }
+
     private int ResolveTimeoutSeconds()
     {
         var configured = configuration["LAUNCHER_BUILD_TIMEOUT_SECONDS"];
@@ -678,6 +871,46 @@ public sealed class AdminLauncherController(
         }
 
         return DateTime.UtcNow.ToString("yyyy.MM.dd.HHmmss");
+    }
+
+    private static async Task<byte[]> ReadWithSizeLimitAsync(Stream source, long maxBytes, CancellationToken cancellationToken)
+    {
+        await using var buffer = new MemoryStream();
+        var chunk = new byte[81_920];
+        while (true)
+        {
+            var read = await source.ReadAsync(chunk.AsMemory(0, chunk.Length), cancellationToken);
+            if (read <= 0)
+            {
+                break;
+            }
+
+            buffer.Write(chunk, 0, read);
+            if (buffer.Length > maxBytes)
+            {
+                throw new InvalidOperationException($"Downloaded server launcher.jar exceeds size limit ({maxBytes} bytes).");
+            }
+        }
+
+        if (buffer.Length <= 0)
+        {
+            throw new InvalidOperationException("Downloaded server launcher.jar is empty.");
+        }
+
+        return buffer.ToArray();
+    }
+
+    private static bool LooksLikeJarArchive(byte[] payload)
+    {
+        if (payload.Length < 4)
+        {
+            return false;
+        }
+
+        return payload[0] == (byte)'P' &&
+               payload[1] == (byte)'K' &&
+               (payload[2] == 3 || payload[2] == 5 || payload[2] == 7) &&
+               (payload[3] == 4 || payload[3] == 6 || payload[3] == 8);
     }
 
     private static string Truncate(string value, int maxLength)
