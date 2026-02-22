@@ -4,6 +4,7 @@ using System.Text;
 using System.Globalization;
 using System.IO.Compression;
 using System.Security.Cryptography;
+using System.Net.Http;
 
 namespace BivLauncher.Client.Services;
 
@@ -24,6 +25,8 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
 
     private static readonly string[] LaunchArchiveExtensions = [".jar", ".jar2"];
     private static readonly string[] LaunchArchiveSearchPatterns = ["*.jar", "*.jar2"];
+    private const string DefaultClientAuthlibAssetPath = "/api/public/assets/uploads/assets/launcher.jar";
+    private const string LocalClientAuthlibRelativePath = ".bivlauncher/authlib-injector.jar";
 
     public async Task<LaunchResult> LaunchAsync(
         LauncherManifest manifest,
@@ -51,6 +54,7 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
 
         jvmArgs.Insert(0, $"-Xmx{settings.RamMb}M");
         jvmArgs.Insert(0, "-Xms1024M");
+        await TryAttachClientAuthlibAgentAsync(jvmArgs, settings, instanceDirectory, cancellationToken);
 
         var usePositionalLegacyArgs = ShouldUseLegacyPositionalArguments(route, manifest, instanceDirectory);
         var gameArgs = SplitArgs(manifest.GameArgsDefault).ToList();
@@ -1171,6 +1175,165 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
         }
 
         return args.Count;
+    }
+
+    private async Task TryAttachClientAuthlibAgentAsync(
+        IList<string> jvmArgs,
+        LauncherSettings settings,
+        string instanceDirectory,
+        CancellationToken cancellationToken)
+    {
+        var rawToken = (settings.PlayerAuthToken ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(rawToken))
+        {
+            return;
+        }
+
+        var apiBaseUrl = ResolvePlayerAuthApiBaseUrl(settings);
+        if (string.IsNullOrWhiteSpace(apiBaseUrl))
+        {
+            return;
+        }
+
+        var yggdrasilUrl = BuildYggdrasilBaseUrl(apiBaseUrl);
+        if (string.IsNullOrWhiteSpace(yggdrasilUrl))
+        {
+            return;
+        }
+
+        var agentPath = await ResolveClientAuthlibAgentPathAsync(apiBaseUrl, instanceDirectory, cancellationToken);
+        if (string.IsNullOrWhiteSpace(agentPath))
+        {
+            logService.LogInfo("WARN: Client authlib-injector is not available; continuing without -javaagent.");
+            return;
+        }
+
+        var insertionIndex = FindLaunchModeArgumentIndex(jvmArgs);
+        insertionIndex = EnsureJvmProperty(jvmArgs, "authlibinjector.noShowServerName", "true", insertionIndex);
+        _ = EnsureJavaAgent(jvmArgs, agentPath, yggdrasilUrl, insertionIndex);
+
+        logService.LogInfo($"Client authlib-injector enabled: {NormalizePath(agentPath)} -> {yggdrasilUrl}");
+    }
+
+    private async Task<string> ResolveClientAuthlibAgentPathAsync(
+        string apiBaseUrl,
+        string instanceDirectory,
+        CancellationToken cancellationToken)
+    {
+        var candidates = new[]
+        {
+            Path.Combine(instanceDirectory, "Launcher.jar"),
+            Path.Combine(instanceDirectory, "launcher.jar"),
+            Path.Combine(instanceDirectory, "libraries", "authlib-injector.jar"),
+            Path.Combine(instanceDirectory, "libraries", "Launcher.jar"),
+            Path.Combine(instanceDirectory, "libraries", "launcher.jar"),
+            Path.Combine(instanceDirectory, LocalClientAuthlibRelativePath)
+        };
+
+        foreach (var candidate in candidates)
+        {
+            if (TryValidateJarArchive(candidate, requireMainClass: false, out _))
+            {
+                return Path.GetFullPath(candidate);
+            }
+        }
+
+        var targetPath = Path.Combine(instanceDirectory, LocalClientAuthlibRelativePath);
+        var targetDirectory = Path.GetDirectoryName(targetPath);
+        if (!string.IsNullOrWhiteSpace(targetDirectory))
+        {
+            Directory.CreateDirectory(targetDirectory);
+        }
+
+        var downloadUrl = apiBaseUrl.TrimEnd('/') + DefaultClientAuthlibAssetPath;
+        try
+        {
+            using var httpClient = new HttpClient
+            {
+                Timeout = TimeSpan.FromSeconds(20)
+            };
+
+            using var response = await httpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                logService.LogInfo($"WARN: Client authlib-injector download failed: HTTP {(int)response.StatusCode} from {downloadUrl}");
+                return string.Empty;
+            }
+
+            await using var remoteStream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            await using var localStream = new FileStream(targetPath, FileMode.Create, FileAccess.Write, FileShare.None);
+            await remoteStream.CopyToAsync(localStream, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logService.LogInfo($"WARN: Client authlib-injector download failed: {ex.Message}");
+            return string.Empty;
+        }
+
+        if (!TryValidateJarArchive(targetPath, requireMainClass: false, out _))
+        {
+            try
+            {
+                File.Delete(targetPath);
+            }
+            catch
+            {
+            }
+
+            logService.LogInfo($"WARN: Downloaded client authlib-injector is not a valid JAR: {downloadUrl}");
+            return string.Empty;
+        }
+
+        return Path.GetFullPath(targetPath);
+    }
+
+    private static string ResolvePlayerAuthApiBaseUrl(LauncherSettings settings)
+    {
+        var apiBaseUrl = (settings.PlayerAuthApiBaseUrl ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(apiBaseUrl))
+        {
+            return apiBaseUrl.TrimEnd('/');
+        }
+
+        apiBaseUrl = (settings.ApiBaseUrl ?? string.Empty).Trim();
+        return string.IsNullOrWhiteSpace(apiBaseUrl)
+            ? string.Empty
+            : apiBaseUrl.TrimEnd('/');
+    }
+
+    private static string BuildYggdrasilBaseUrl(string apiBaseUrl)
+    {
+        var normalized = (apiBaseUrl ?? string.Empty).Trim().TrimEnd('/');
+        return string.IsNullOrWhiteSpace(normalized)
+            ? string.Empty
+            : normalized + "/api/public/yggdrasil";
+    }
+
+    private static int EnsureJavaAgent(IList<string> args, string agentJarPath, string yggdrasilUrl, int insertionIndex)
+    {
+        for (var i = args.Count - 1; i >= 0; i--)
+        {
+            if (!args[i].StartsWith("-javaagent:", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (i < insertionIndex)
+            {
+                insertionIndex--;
+            }
+
+            args.RemoveAt(i);
+        }
+
+        if (string.IsNullOrWhiteSpace(agentJarPath) || string.IsNullOrWhiteSpace(yggdrasilUrl))
+        {
+            return insertionIndex;
+        }
+
+        insertionIndex = Math.Clamp(insertionIndex, 0, args.Count);
+        args.Insert(insertionIndex, $"-javaagent:{agentJarPath}={yggdrasilUrl}");
+        return insertionIndex + 1;
     }
 
     private void EnsureLegacyLaunchwrapperDefaults(
