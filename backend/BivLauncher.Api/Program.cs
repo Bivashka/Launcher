@@ -356,6 +356,32 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors("AdminClient");
+app.Use(async (context, next) =>
+{
+    if (!IsYggdrasilPath(context.Request.Path))
+    {
+        await next();
+        return;
+    }
+
+    var startedAt = DateTime.UtcNow;
+    app.Logger.LogWarning(
+        "YGG REQ {Method} {Path}{Query} from {RemoteIp}",
+        context.Request.Method,
+        context.Request.Path.Value ?? string.Empty,
+        context.Request.QueryString.Value ?? string.Empty,
+        context.Connection.RemoteIpAddress?.ToString() ?? "unknown");
+
+    await next();
+
+    app.Logger.LogWarning(
+        "YGG RES {StatusCode} for {Method} {Path}{Query} in {ElapsedMs} ms",
+        context.Response.StatusCode,
+        context.Request.Method,
+        context.Request.Path.Value ?? string.Empty,
+        context.Request.QueryString.Value ?? string.Empty,
+        (DateTime.UtcNow - startedAt).TotalMilliseconds);
+});
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
@@ -364,3 +390,14 @@ app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapControllers();
 
 app.Run();
+
+static bool IsYggdrasilPath(PathString path)
+{
+    var value = path.Value ?? string.Empty;
+    return value.Contains("/yggdrasil", StringComparison.OrdinalIgnoreCase) ||
+           value.Contains("/authserver/", StringComparison.OrdinalIgnoreCase) ||
+           value.Contains("/sessionserver/", StringComparison.OrdinalIgnoreCase) ||
+           value.Contains("/session/minecraft/", StringComparison.OrdinalIgnoreCase) ||
+           value.EndsWith("/joinserver.jsp", StringComparison.OrdinalIgnoreCase) ||
+           value.EndsWith("/checkserver.jsp", StringComparison.OrdinalIgnoreCase);
+}
