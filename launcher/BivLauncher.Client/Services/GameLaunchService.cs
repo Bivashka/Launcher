@@ -1188,10 +1188,8 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
         }
 
         var externalId = (settings.PlayerAuthExternalId ?? string.Empty).Trim();
-        if (string.IsNullOrWhiteSpace(externalId))
-        {
-            externalId = username;
-        }
+        var legacyProfileId = ResolveLegacyProfileId(externalId, username);
+        var legacySessionToken = BuildLegacySessionToken(sessionToken, legacyProfileId);
 
         if (usePositionalLegacyArgs)
         {
@@ -1200,24 +1198,72 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
             RemoveArgWithValue(gameArgs, "--uuid");
 
             // Pre-1.6 clients expect positional args: username, session, server, port.
-            gameArgs.Insert(0, sessionToken);
+            gameArgs.Insert(0, legacySessionToken);
             gameArgs.Insert(0, username);
-            EnsureArgumentWithValue(gameArgs, "--uuid", externalId);
+            EnsureArgumentWithValue(gameArgs, "--uuid", legacyProfileId);
 
             logService.LogInfo(
-                $"Legacy auth args prepared (positional): username={username}, sourceUsername={rawUsername}, sessionTokenLength={sessionToken.Length}, hasUuid={!string.IsNullOrWhiteSpace(externalId)}.");
+                $"Legacy auth args prepared (positional): username={username}, sourceUsername={rawUsername}, sessionTokenLength={sessionToken.Length}, sessionMode=token-profile, hasUuid={!string.IsNullOrWhiteSpace(legacyProfileId)}.");
             return;
         }
 
         EnsureArgumentWithValue(gameArgs, "--username", username);
-        EnsureArgumentWithValue(gameArgs, "--session", sessionToken);
-        if (!string.IsNullOrWhiteSpace(externalId))
+        EnsureArgumentWithValue(gameArgs, "--session", legacySessionToken);
+        if (!string.IsNullOrWhiteSpace(legacyProfileId))
         {
-            EnsureArgumentWithValue(gameArgs, "--uuid", externalId);
+            EnsureArgumentWithValue(gameArgs, "--uuid", legacyProfileId);
         }
 
         logService.LogInfo(
-            $"Legacy auth args prepared: username={username}, sourceUsername={rawUsername}, sessionTokenLength={sessionToken.Length}, hasUuid={!string.IsNullOrWhiteSpace(externalId)}.");
+            $"Legacy auth args prepared: username={username}, sourceUsername={rawUsername}, sessionTokenLength={sessionToken.Length}, sessionMode=token-profile, hasUuid={!string.IsNullOrWhiteSpace(legacyProfileId)}.");
+    }
+
+    private static string BuildLegacySessionToken(string accessToken, string profileId)
+    {
+        var token = (accessToken ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return string.Empty;
+        }
+
+        if (token.StartsWith("token:", StringComparison.OrdinalIgnoreCase))
+        {
+            return token;
+        }
+
+        return string.IsNullOrWhiteSpace(profileId)
+            ? token
+            : $"token:{token}:{profileId}";
+    }
+
+    private static string ResolveLegacyProfileId(string externalId, string username)
+    {
+        var candidate = (externalId ?? string.Empty).Trim();
+        if (Guid.TryParse(candidate, out var parsedGuid))
+        {
+            return parsedGuid.ToString("N");
+        }
+
+        var hexOnly = new string(candidate.Where(IsHexChar).ToArray());
+        if (hexOnly.Length == 32)
+        {
+            return hexOnly.ToLowerInvariant();
+        }
+
+        // Legacy session bridges commonly expect a 32-hex profile id.
+        var source = "OfflinePlayer:" + (string.IsNullOrWhiteSpace(username) ? "Player" : username.Trim());
+        var hash = MD5.HashData(Encoding.UTF8.GetBytes(source));
+        hash[6] = (byte)((hash[6] & 0x0F) | 0x30);
+        hash[8] = (byte)((hash[8] & 0x3F) | 0x80);
+        var offlineGuid = new Guid(hash);
+        return offlineGuid.ToString("N");
+    }
+
+    private static bool IsHexChar(char ch)
+    {
+        return (ch >= '0' && ch <= '9') ||
+               (ch >= 'a' && ch <= 'f') ||
+               (ch >= 'A' && ch <= 'F');
     }
 
     private void EnsureLegacyRouteArguments(
