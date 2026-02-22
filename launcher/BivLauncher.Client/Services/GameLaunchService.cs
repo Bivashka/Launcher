@@ -165,6 +165,7 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
                 }
 
                 EnsureLegacyAuthArguments(gameArgs, settings, usePositionalLegacyArgs);
+                EnsureLegacyBridgeJvmProperties(startInfo.ArgumentList, settings);
                 EnsureLegacyRouteArguments(gameArgs, route, disableAutoRouteArgs, usePositionalLegacyArgs);
                 EnsureLegacyLaunchwrapperDefaults(gameArgs, route, manifest, instanceDirectory, resolvedClasspathForCompatibility);
             }
@@ -1097,6 +1098,33 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
         insertionIndex = EnsureJvmProperty(jvmArgs, "org.lwjgl.librarypath", nativesDirectory, insertionIndex);
         _ = EnsureJvmProperty(jvmArgs, "net.java.games.input.librarypath", nativesDirectory, insertionIndex);
         logService.LogInfo($"Legacy JVM native paths configured: {nativesDirectory}");
+    }
+
+    private void EnsureLegacyBridgeJvmProperties(IList<string> jvmArgs, LauncherSettings settings)
+    {
+        var rawUsername = (settings.PlayerAuthUsername ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(rawUsername))
+        {
+            return;
+        }
+
+        var username = NormalizeLegacyUsername(rawUsername);
+        var token = (settings.PlayerAuthToken ?? string.Empty).Trim();
+        var externalId = (settings.PlayerAuthExternalId ?? string.Empty).Trim();
+        var profileId = ResolveLegacyProfileId(externalId, username);
+        var sessionToken = string.IsNullOrWhiteSpace(token)
+            ? string.Empty
+            : BuildLegacySessionToken(token, profileId);
+
+        var insertionIndex = FindLaunchModeArgumentIndex(jvmArgs);
+        insertionIndex = EnsureJvmProperty(jvmArgs, "biv.auth.username", username, insertionIndex);
+        insertionIndex = EnsureJvmProperty(jvmArgs, "biv.auth.uuid", profileId, insertionIndex);
+        insertionIndex = EnsureJvmProperty(jvmArgs, "biv.auth.externalId", externalId, insertionIndex);
+        insertionIndex = EnsureJvmProperty(jvmArgs, "biv.auth.token", token, insertionIndex);
+        _ = EnsureJvmProperty(jvmArgs, "biv.auth.session", sessionToken, insertionIndex);
+
+        logService.LogInfo(
+            $"Legacy bridge JVM auth properties prepared: username={username}, tokenLength={token.Length}, profileIdLength={profileId.Length}, hasSession={!string.IsNullOrWhiteSpace(sessionToken)}.");
     }
 
     private static int EnsureJvmProperty(IList<string> args, string propertyName, string value, int insertionIndex)

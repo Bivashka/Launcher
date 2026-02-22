@@ -765,10 +765,18 @@ public sealed class BuildPipelineService(
 
         var artifactPath = ResolveGeneratedArtifactPath(existingRelativePaths, LegacyBridgeCompatArtifactPath);
         var compatJarBytes = BuildLegacyBridgeCompatJar(requiredMethods);
+        var methodSignaturePreview = string.Join(
+            ", ",
+            requiredMethods
+                .OrderBy(x => x.Name, StringComparer.Ordinal)
+                .ThenBy(x => x.Descriptor, StringComparer.Ordinal)
+                .Take(16)
+                .Select(x => $"{x.Name}{x.Descriptor}"));
         logger.LogWarning(
-            "Generated LegacyBridge compatibility artifact '{ArtifactPath}' with {MethodCount} method signature(s).",
+            "Generated LegacyBridge compatibility artifact '{ArtifactPath}' with {MethodCount} method signature(s): {MethodSignatures}",
             artifactPath,
-            requiredMethods.Count);
+            requiredMethods.Count,
+            methodSignaturePreview);
 
         return new GeneratedManifestFile(
             Path: artifactPath,
@@ -1088,11 +1096,39 @@ public sealed class BuildPipelineService(
         var ctorNameIndex = pool.AddUtf8("<init>");
         var ctorDescriptorIndex = pool.AddUtf8("()V");
         var objectCtorMethodRefIndex = pool.AddMethodRef("java/lang/Object", "<init>", "()V");
+        var systemGetPropertyMethodRefIndex = pool.AddMethodRef(
+            "java/lang/System",
+            "getProperty",
+            "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;");
+        var collectionsEmptyMapMethodRefIndex = pool.AddMethodRef(
+            "java/util/Collections",
+            "emptyMap",
+            "()Ljava/util/Map;");
+        var collectionsEmptyListMethodRefIndex = pool.AddMethodRef(
+            "java/util/Collections",
+            "emptyList",
+            "()Ljava/util/List;");
+        var collectionsEmptySetMethodRefIndex = pool.AddMethodRef(
+            "java/util/Collections",
+            "emptySet",
+            "()Ljava/util/Set;");
+        var optionalEmptyMethodRefIndex = pool.AddMethodRef(
+            "java/util/Optional",
+            "empty",
+            "()Ljava/util/Optional;");
+
+        var emptyStringConstantIndex = pool.AddStringConstant(string.Empty);
+        var legacyUsernameKeyIndex = pool.AddStringConstant("biv.auth.username");
+        var legacyTokenKeyIndex = pool.AddStringConstant("biv.auth.token");
+        var legacySessionKeyIndex = pool.AddStringConstant("biv.auth.session");
+        var legacyUuidKeyIndex = pool.AddStringConstant("biv.auth.uuid");
+        var legacyExternalIdKeyIndex = pool.AddStringConstant("biv.auth.externalId");
 
         var methodIndices = requiredMethods
             .OrderBy(x => x.Name, StringComparer.Ordinal)
             .ThenBy(x => x.Descriptor, StringComparer.Ordinal)
             .Select(x => new MethodIndex(
+                Name: x.Name,
                 NameIndex: pool.AddUtf8(x.Name),
                 DescriptorIndex: pool.AddUtf8(x.Descriptor),
                 Descriptor: x.Descriptor))
@@ -1125,7 +1161,20 @@ public sealed class BuildPipelineService(
 
         foreach (var method in methodIndices)
         {
-            var (stubCode, maxStack) = BuildStubCodeForDescriptor(method.Descriptor);
+            var (stubCode, maxStack) = BuildStubCodeForMethod(
+                method.Name,
+                method.Descriptor,
+                emptyStringConstantIndex,
+                systemGetPropertyMethodRefIndex,
+                collectionsEmptyMapMethodRefIndex,
+                collectionsEmptyListMethodRefIndex,
+                collectionsEmptySetMethodRefIndex,
+                optionalEmptyMethodRefIndex,
+                legacyUsernameKeyIndex,
+                legacyTokenKeyIndex,
+                legacySessionKeyIndex,
+                legacyUuidKeyIndex,
+                legacyExternalIdKeyIndex);
             var maxLocals = checked((ushort)GetMethodParameterSlotCount(method.Descriptor));
             WriteMethod(
                 stream,
@@ -1140,6 +1189,146 @@ public sealed class BuildPipelineService(
 
         WriteU2(stream, 0);
         return stream.ToArray();
+    }
+
+    private static (byte[] Code, ushort MaxStack) BuildStubCodeForMethod(
+        string methodName,
+        string descriptor,
+        ushort emptyStringConstantIndex,
+        ushort systemGetPropertyMethodRefIndex,
+        ushort collectionsEmptyMapMethodRefIndex,
+        ushort collectionsEmptyListMethodRefIndex,
+        ushort collectionsEmptySetMethodRefIndex,
+        ushort optionalEmptyMethodRefIndex,
+        ushort legacyUsernameKeyIndex,
+        ushort legacyTokenKeyIndex,
+        ushort legacySessionKeyIndex,
+        ushort legacyUuidKeyIndex,
+        ushort legacyExternalIdKeyIndex)
+    {
+        var returnDescriptor = GetMethodReturnDescriptor(descriptor);
+        switch (returnDescriptor)
+        {
+            case "Ljava/lang/String;":
+            {
+                var propertyKeyIndex = ResolveLegacyBridgePropertyKeyIndex(
+                    methodName,
+                    legacyUsernameKeyIndex,
+                    legacyTokenKeyIndex,
+                    legacySessionKeyIndex,
+                    legacyUuidKeyIndex,
+                    legacyExternalIdKeyIndex);
+                return (BuildGetPropertyStringCode(
+                        propertyKeyIndex,
+                        emptyStringConstantIndex,
+                        systemGetPropertyMethodRefIndex),
+                    2);
+            }
+            case "Ljava/util/Map;":
+                return (BuildInvokeStaticObjectReturnCode(collectionsEmptyMapMethodRefIndex), 1);
+            case "Ljava/util/List;":
+            case "Ljava/util/Collection;":
+                return (BuildInvokeStaticObjectReturnCode(collectionsEmptyListMethodRefIndex), 1);
+            case "Ljava/util/Set;":
+                return (BuildInvokeStaticObjectReturnCode(collectionsEmptySetMethodRefIndex), 1);
+            case "Ljava/util/Optional;":
+                return (BuildInvokeStaticObjectReturnCode(optionalEmptyMethodRefIndex), 1);
+            case "Ljava/lang/Object;":
+                return (BuildLdcStringReturnCode(emptyStringConstantIndex), 1);
+            default:
+            {
+                if (returnDescriptor.StartsWith("L", StringComparison.Ordinal) ||
+                    returnDescriptor.StartsWith("[", StringComparison.Ordinal))
+                {
+                    return ([0x01, 0xB0], 1);
+                }
+
+                return BuildStubCodeForDescriptor(descriptor);
+            }
+        }
+    }
+
+    private static string GetMethodReturnDescriptor(string descriptor)
+    {
+        if (string.IsNullOrWhiteSpace(descriptor))
+        {
+            return "Ljava/lang/Object;";
+        }
+
+        var closeParen = descriptor.IndexOf(')');
+        if (closeParen < 0 || closeParen + 1 >= descriptor.Length)
+        {
+            return "Ljava/lang/Object;";
+        }
+
+        return descriptor[(closeParen + 1)..];
+    }
+
+    private static ushort ResolveLegacyBridgePropertyKeyIndex(
+        string methodName,
+        ushort legacyUsernameKeyIndex,
+        ushort legacyTokenKeyIndex,
+        ushort legacySessionKeyIndex,
+        ushort legacyUuidKeyIndex,
+        ushort legacyExternalIdKeyIndex)
+    {
+        var normalized = (methodName ?? string.Empty).Trim().ToLowerInvariant();
+        if (normalized.Contains("session", StringComparison.Ordinal))
+        {
+            return legacySessionKeyIndex;
+        }
+
+        if (normalized.Contains("access", StringComparison.Ordinal) ||
+            normalized.Contains("token", StringComparison.Ordinal))
+        {
+            return legacyTokenKeyIndex;
+        }
+
+        if (normalized.Contains("external", StringComparison.Ordinal))
+        {
+            return legacyExternalIdKeyIndex;
+        }
+
+        if (normalized.Contains("uuid", StringComparison.Ordinal) ||
+            normalized.Contains("profile", StringComparison.Ordinal) ||
+            normalized.Contains("id", StringComparison.Ordinal))
+        {
+            return legacyUuidKeyIndex;
+        }
+
+        return legacyUsernameKeyIndex;
+    }
+
+    private static byte[] BuildGetPropertyStringCode(
+        ushort propertyKeyIndex,
+        ushort emptyStringConstantIndex,
+        ushort systemGetPropertyMethodRefIndex)
+    {
+        return
+        [
+            0x13, (byte)(propertyKeyIndex >> 8), (byte)(propertyKeyIndex & 0xFF),
+            0x13, (byte)(emptyStringConstantIndex >> 8), (byte)(emptyStringConstantIndex & 0xFF),
+            0xB8, (byte)(systemGetPropertyMethodRefIndex >> 8), (byte)(systemGetPropertyMethodRefIndex & 0xFF),
+            0xB0
+        ];
+    }
+
+    private static byte[] BuildInvokeStaticObjectReturnCode(ushort methodRefIndex)
+    {
+        return
+        [
+            0xB8, (byte)(methodRefIndex >> 8), (byte)(methodRefIndex & 0xFF),
+            0xB0
+        ];
+    }
+
+    private static byte[] BuildLdcStringReturnCode(ushort stringConstantIndex)
+    {
+        return
+        [
+            0x13, (byte)(stringConstantIndex >> 8), (byte)(stringConstantIndex & 0xFF),
+            0xB0
+        ];
     }
 
     private static byte[] BuildConstructorCode(ushort objectCtorMethodRefIndex)
@@ -1320,6 +1509,7 @@ public sealed class BuildPipelineService(
         string Descriptor);
 
     private sealed record MethodIndex(
+        string Name,
         ushort NameIndex,
         ushort DescriptorIndex,
         string Descriptor);
@@ -1328,6 +1518,7 @@ public sealed class BuildPipelineService(
     {
         private readonly List<ConstantPoolEntry> _entries = [];
         private readonly Dictionary<string, ushort> _utf8 = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, ushort> _strings = new(StringComparer.Ordinal);
         private readonly Dictionary<string, ushort> _classes = new(StringComparer.Ordinal);
         private readonly Dictionary<(string Name, string Descriptor), ushort> _nameAndTypes = [];
         private readonly Dictionary<(string Class, string Name, string Descriptor), ushort> _methodRefs = [];
@@ -1356,6 +1547,19 @@ public sealed class BuildPipelineService(
             var nameIndex = AddUtf8(internalName);
             index = AddEntry(new ConstantPoolEntry(7, string.Empty, nameIndex, 0));
             _classes[internalName] = index;
+            return index;
+        }
+
+        public ushort AddStringConstant(string value)
+        {
+            if (_strings.TryGetValue(value, out var index))
+            {
+                return index;
+            }
+
+            var utf8Index = AddUtf8(value);
+            index = AddEntry(new ConstantPoolEntry(8, string.Empty, utf8Index, 0));
+            _strings[value] = index;
             return index;
         }
 
@@ -1404,6 +1608,7 @@ public sealed class BuildPipelineService(
                         break;
                     }
                     case 7:
+                    case 8:
                         WriteU2(stream, entry.FirstIndex);
                         break;
                     case 10:
