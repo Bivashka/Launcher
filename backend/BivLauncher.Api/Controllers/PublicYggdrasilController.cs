@@ -17,7 +17,7 @@ using System.Text;
 namespace BivLauncher.Api.Controllers;
 
 [ApiController]
-[EnableRateLimiting(RateLimitPolicies.PublicLoginPolicy)]
+[EnableRateLimiting(RateLimitPolicies.PublicYggdrasilPolicy)]
 public sealed class PublicYggdrasilController(
     AppDbContext dbContext,
     IConfiguration configuration,
@@ -26,6 +26,11 @@ public sealed class PublicYggdrasilController(
 {
     private const string ForbiddenOperation = "ForbiddenOperationException";
     private const string IllegalArgument = "IllegalArgumentException";
+    private const string LegacyJoinOk = "OK";
+    private const string LegacyJoinBadLogin = "Bad login";
+    private const string LegacyJoinBadRequest = "Bad request";
+    private const string LegacyCheckYes = "YES";
+    private const string LegacyCheckNo = "NO";
     private static readonly ConcurrentDictionary<string, JoinTicket> JoinTickets = new(StringComparer.Ordinal);
     private static readonly TimeSpan JoinTicketLifetime = TimeSpan.FromMinutes(3);
 
@@ -126,7 +131,7 @@ public sealed class PublicYggdrasilController(
                 cause: result.Cause);
         }
 
-        return Ok(new { });
+        return NoContent();
     }
 
     [HttpPost("/refresh")]
@@ -177,7 +182,7 @@ public sealed class PublicYggdrasilController(
     [HttpPost("/api/yggdrasil/authserver/invalidate")]
     public IActionResult Invalidate()
     {
-        return Ok(new { });
+        return NoContent();
     }
 
     [HttpPost("/signout")]
@@ -188,7 +193,7 @@ public sealed class PublicYggdrasilController(
     [HttpPost("/api/yggdrasil/authserver/signout")]
     public IActionResult SignOutEndpoint()
     {
-        return Ok(new { });
+        return NoContent();
     }
 
     [HttpPost("/session/minecraft/join")]
@@ -243,7 +248,51 @@ public sealed class PublicYggdrasilController(
             ExpiresAtUtc: now.Add(JoinTicketLifetime));
 
         PruneExpiredTickets(now);
-        return Ok(new { });
+        return NoContent();
+    }
+
+    [HttpGet("/game/joinserver.jsp")]
+    [HttpPost("/game/joinserver.jsp")]
+    [HttpGet("/joinserver.jsp")]
+    [HttpPost("/joinserver.jsp")]
+    public async Task<IActionResult> LegacyJoinServer(CancellationToken cancellationToken)
+    {
+        var accessToken = await ReadLegacyParameterAsync(cancellationToken, "sessionId", "accessToken");
+        var serverId = await ReadLegacyParameterAsync(cancellationToken, "serverId");
+        var selectedProfile = await ReadLegacyParameterAsync(cancellationToken, "selectedProfile");
+
+        if (string.IsNullOrWhiteSpace(accessToken) || string.IsNullOrWhiteSpace(serverId))
+        {
+            return LegacyText(LegacyJoinBadRequest);
+        }
+
+        var response = await Join(
+            new YggdrasilJoinRequest
+            {
+                AccessToken = accessToken,
+                SelectedProfile = selectedProfile,
+                ServerId = serverId
+            },
+            cancellationToken);
+
+        if (response is StatusCodeResult statusCodeResult &&
+            statusCodeResult.StatusCode == StatusCodes.Status204NoContent)
+        {
+            return LegacyText(LegacyJoinOk);
+        }
+
+        if (response is OkObjectResult)
+        {
+            return LegacyText(LegacyJoinOk);
+        }
+
+        if (response is ObjectResult objectResult &&
+            objectResult.StatusCode == StatusCodes.Status400BadRequest)
+        {
+            return LegacyText(LegacyJoinBadRequest);
+        }
+
+        return LegacyText(LegacyJoinBadLogin);
     }
 
     [HttpGet("/session/minecraft/hasJoined")]
@@ -261,19 +310,19 @@ public sealed class PublicYggdrasilController(
         var normalizedServerId = (serverId ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(normalizedUsername) || string.IsNullOrWhiteSpace(normalizedServerId))
         {
-            return Ok(new { id = (string?)null });
+            return NoContent();
         }
 
         var ticketKey = BuildTicketKey(normalizedUsername, normalizedServerId);
         if (!JoinTickets.TryGetValue(ticketKey, out var ticket))
         {
-            return Ok(new { id = (string?)null });
+            return NoContent();
         }
 
         if (ticket.ExpiresAtUtc <= DateTime.UtcNow)
         {
             JoinTickets.TryRemove(ticketKey, out _);
-            return Ok(new { id = (string?)null });
+            return NoContent();
         }
 
         var account = await dbContext.AuthAccounts
@@ -282,19 +331,19 @@ public sealed class PublicYggdrasilController(
         if (account is null)
         {
             JoinTickets.TryRemove(ticketKey, out _);
-            return Ok(new { id = (string?)null });
+            return NoContent();
         }
 
         if (account.SessionVersion != ticket.SessionVersion)
         {
             JoinTickets.TryRemove(ticketKey, out _);
-            return Ok(new { id = (string?)null });
+            return NoContent();
         }
 
         if (!await IsAccountStateAllowedAsync(account, cancellationToken))
         {
             JoinTickets.TryRemove(ticketKey, out _);
-            return Ok(new { id = (string?)null });
+            return NoContent();
         }
 
         JoinTickets.TryRemove(ticketKey, out _);
@@ -304,6 +353,19 @@ public sealed class PublicYggdrasilController(
             name = account.Username,
             properties = Array.Empty<object>()
         });
+    }
+
+    [HttpGet("/game/checkserver.jsp")]
+    [HttpGet("/checkserver.jsp")]
+    public async Task<IActionResult> LegacyCheckServer(
+        [FromQuery(Name = "user")] string? username,
+        [FromQuery] string? serverId,
+        CancellationToken cancellationToken)
+    {
+        var response = await HasJoined(username, serverId, cancellationToken);
+        return response is OkObjectResult
+            ? LegacyText(LegacyCheckYes)
+            : LegacyText(LegacyCheckNo);
     }
 
     [HttpGet("/session/minecraft/profile/{profileId}")]
@@ -670,6 +732,51 @@ public sealed class PublicYggdrasilController(
         }
 
         return candidates;
+    }
+
+    private async Task<string> ReadLegacyParameterAsync(CancellationToken cancellationToken, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            var queryValue = (Request.Query[key].ToString() ?? string.Empty).Trim();
+            if (!string.IsNullOrWhiteSpace(queryValue))
+            {
+                return queryValue;
+            }
+        }
+
+        if (!Request.HasFormContentType)
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            var form = await Request.ReadFormAsync(cancellationToken);
+            foreach (var key in keys)
+            {
+                var formValue = (form[key].ToString() ?? string.Empty).Trim();
+                if (!string.IsNullOrWhiteSpace(formValue))
+                {
+                    return formValue;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "Failed to read legacy joinserver/checkserver form payload.");
+        }
+
+        return string.Empty;
+    }
+
+    private static ContentResult LegacyText(string payload)
+    {
+        return new ContentResult
+        {
+            ContentType = "text/plain; charset=utf-8",
+            Content = payload
+        };
     }
 
     private IActionResult YggdrasilError(

@@ -50,7 +50,7 @@ public sealed class PublicYggdrasilControllerTests
                 ServerId = "server-hash-1"
             },
             CancellationToken.None);
-        Assert.IsType<OkObjectResult>(joinResult);
+        Assert.IsType<NoContentResult>(joinResult);
 
         var hasJoinedResult = await controller.HasJoined("Bivashka", "server-hash-1", CancellationToken.None);
         var ok = Assert.IsType<OkObjectResult>(hasJoinedResult);
@@ -107,7 +107,7 @@ public sealed class PublicYggdrasilControllerTests
     }
 
     [Fact]
-    public async Task HasJoined_WithoutJoin_ReturnsNullId()
+    public async Task HasJoined_WithoutJoin_ReturnsNoContent()
     {
         await using var fixture = await TestFixture.CreateAsync();
         var options = BuildJwtOptions();
@@ -118,10 +118,50 @@ public sealed class PublicYggdrasilControllerTests
             NullLogger<PublicYggdrasilController>.Instance);
 
         var response = await controller.HasJoined("MissingUser", "missing-server", CancellationToken.None);
-        var ok = Assert.IsType<OkObjectResult>(response);
-        var payload = JsonSerializer.SerializeToElement(ok.Value);
-        Assert.True(payload.TryGetProperty("id", out var idNode));
-        Assert.Equal(JsonValueKind.Null, idNode.ValueKind);
+        Assert.IsType<NoContentResult>(response);
+    }
+
+    [Fact]
+    public async Task LegacyJoinAndCheckServer_ReturnsYes()
+    {
+        await using var fixture = await TestFixture.CreateAsync();
+        var options = BuildJwtOptions();
+
+        var account = new AuthAccount
+        {
+            Username = "LegacyUser",
+            ExternalId = "legacy-account",
+            SessionVersion = 0,
+            Roles = "player"
+        };
+        fixture.DbContext.AuthAccounts.Add(account);
+        await fixture.DbContext.SaveChangesAsync();
+
+        var token = new JwtTokenService(Microsoft.Extensions.Options.Options.Create(options))
+            .CreatePlayerToken(account, ["player"]);
+
+        var controller = new PublicYggdrasilController(
+            fixture.DbContext,
+            BuildConfiguration(),
+            Microsoft.Extensions.Options.Options.Create(options),
+            NullLogger<PublicYggdrasilController>.Instance)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext()
+            }
+        };
+
+        controller.ControllerContext.HttpContext.Request.QueryString =
+            new QueryString($"?sessionId={Uri.EscapeDataString($"token:{token}:ffffffffffffffffffffffffffffffff")}&serverId=legacy-server");
+
+        var legacyJoin = await controller.LegacyJoinServer(CancellationToken.None);
+        var joinPayload = Assert.IsType<ContentResult>(legacyJoin);
+        Assert.Equal("OK", joinPayload.Content);
+
+        var legacyCheck = await controller.LegacyCheckServer("LegacyUser", "legacy-server", CancellationToken.None);
+        var checkPayload = Assert.IsType<ContentResult>(legacyCheck);
+        Assert.Equal("YES", checkPayload.Content);
     }
 
     [Fact]
