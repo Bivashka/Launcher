@@ -27,6 +27,7 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
     private static readonly string[] LaunchArchiveSearchPatterns = ["*.jar", "*.jar2"];
     private const string DefaultClientAuthlibAssetPath = "/api/public/assets/uploads/assets/launcher.jar";
     private const string LocalClientAuthlibRelativePath = ".bivlauncher/authlib-injector.jar";
+    private const string LegacySessionDomainCompatibilityMarker = "session.minecraft.net";
 
     public async Task<LaunchResult> LaunchAsync(
         LauncherManifest manifest,
@@ -54,9 +55,13 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
 
         jvmArgs.Insert(0, $"-Xmx{settings.RamMb}M");
         jvmArgs.Insert(0, "-Xms1024M");
-        await TryAttachClientAuthlibAgentAsync(jvmArgs, settings, instanceDirectory, cancellationToken);
-
         var usePositionalLegacyArgs = ShouldUseLegacyPositionalArguments(route, manifest, instanceDirectory);
+        await TryAttachClientAuthlibAgentAsync(
+            jvmArgs,
+            settings,
+            instanceDirectory,
+            requireLegacySessionDomainCompatibility: usePositionalLegacyArgs,
+            cancellationToken);
         logService.LogInfo(
             $"Legacy positional mode: {usePositionalLegacyArgs} (routeMcVersion='{route.McVersion}', manifestMcVersion='{manifest.McVersion}').");
         var gameArgs = SplitArgs(manifest.GameArgsDefault).ToList();
@@ -1183,6 +1188,7 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
         IList<string> jvmArgs,
         LauncherSettings settings,
         string instanceDirectory,
+        bool requireLegacySessionDomainCompatibility,
         CancellationToken cancellationToken)
     {
         var rawToken = (settings.PlayerAuthToken ?? string.Empty).Trim();
@@ -1203,9 +1209,19 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
             return;
         }
 
-        var agentPath = await ResolveClientAuthlibAgentPathAsync(apiBaseUrl, instanceDirectory, cancellationToken);
+        var agentPath = await ResolveClientAuthlibAgentPathAsync(
+            apiBaseUrl,
+            instanceDirectory,
+            requireLegacySessionDomainCompatibility,
+            cancellationToken);
         if (string.IsNullOrWhiteSpace(agentPath))
         {
+            if (requireLegacySessionDomainCompatibility)
+            {
+                throw new InvalidOperationException(
+                    $"Legacy authlib-injector compatibility is required ({LegacySessionDomainCompatibilityMarker}) but a compatible launcher.jar is unavailable.");
+            }
+
             logService.LogInfo("WARN: Client authlib-injector is not available; continuing without -javaagent.");
             return;
         }
@@ -1214,37 +1230,26 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
         insertionIndex = EnsureJvmProperty(jvmArgs, "authlibinjector.noShowServerName", "true", insertionIndex);
         _ = EnsureJavaAgent(jvmArgs, agentPath, yggdrasilUrl, insertionIndex);
 
-        logService.LogInfo($"Client authlib-injector enabled: {NormalizePath(agentPath)} -> {yggdrasilUrl}");
+        logService.LogInfo(
+            $"Client authlib-injector enabled: {NormalizePath(agentPath)} -> {yggdrasilUrl} (requireLegacyCompat={requireLegacySessionDomainCompatibility}).");
     }
 
     private async Task<string> ResolveClientAuthlibAgentPathAsync(
         string apiBaseUrl,
         string instanceDirectory,
+        bool requireLegacySessionDomainCompatibility,
         CancellationToken cancellationToken)
     {
-        var candidates = new[]
-        {
-            Path.Combine(instanceDirectory, "Launcher.jar"),
-            Path.Combine(instanceDirectory, "launcher.jar"),
-            Path.Combine(instanceDirectory, "libraries", "authlib-injector.jar"),
-            Path.Combine(instanceDirectory, "libraries", "Launcher.jar"),
-            Path.Combine(instanceDirectory, "libraries", "launcher.jar"),
-            Path.Combine(instanceDirectory, LocalClientAuthlibRelativePath)
-        };
-
-        foreach (var candidate in candidates)
-        {
-            if (TryValidateJarArchive(candidate, requireMainClass: false, out _))
-            {
-                return Path.GetFullPath(candidate);
-            }
-        }
-
         var targetPath = Path.Combine(instanceDirectory, LocalClientAuthlibRelativePath);
         var targetDirectory = Path.GetDirectoryName(targetPath);
         if (!string.IsNullOrWhiteSpace(targetDirectory))
         {
             Directory.CreateDirectory(targetDirectory);
+        }
+
+        if (TryValidateAuthlibAgentJar(targetPath, requireLegacySessionDomainCompatibility, out _))
+        {
+            return Path.GetFullPath(targetPath);
         }
 
         var downloadUrl = apiBaseUrl.TrimEnd('/') + DefaultClientAuthlibAssetPath;
@@ -1269,10 +1274,14 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
         catch (Exception ex)
         {
             logService.LogInfo($"WARN: Client authlib-injector download failed: {ex.Message}");
-            return string.Empty;
         }
 
-        if (!TryValidateJarArchive(targetPath, requireMainClass: false, out _))
+        if (TryValidateAuthlibAgentJar(targetPath, requireLegacySessionDomainCompatibility, out var downloadedValidationError))
+        {
+            return Path.GetFullPath(targetPath);
+        }
+
+        if (File.Exists(targetPath))
         {
             try
             {
@@ -1281,12 +1290,123 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
             catch
             {
             }
-
-            logService.LogInfo($"WARN: Downloaded client authlib-injector is not a valid JAR: {downloadUrl}");
-            return string.Empty;
         }
 
-        return Path.GetFullPath(targetPath);
+        if (!string.IsNullOrWhiteSpace(downloadedValidationError))
+        {
+            logService.LogInfo($"WARN: Downloaded client authlib-injector is incompatible: {downloadedValidationError}. Source: {downloadUrl}");
+        }
+
+        var fallbackCandidates = new[]
+        {
+            Path.Combine(instanceDirectory, "Launcher.jar"),
+            Path.Combine(instanceDirectory, "launcher.jar"),
+            Path.Combine(instanceDirectory, "libraries", "authlib-injector.jar"),
+            Path.Combine(instanceDirectory, "libraries", "Launcher.jar"),
+            Path.Combine(instanceDirectory, "libraries", "launcher.jar")
+        };
+
+        foreach (var candidate in fallbackCandidates)
+        {
+            if (TryValidateAuthlibAgentJar(candidate, requireLegacySessionDomainCompatibility, out _))
+            {
+                return Path.GetFullPath(candidate);
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private bool TryValidateAuthlibAgentJar(
+        string jarPath,
+        bool requireLegacySessionDomainCompatibility,
+        out string validationError)
+    {
+        validationError = string.Empty;
+        if (!TryValidateJarArchive(jarPath, requireMainClass: false, out var jarError))
+        {
+            validationError = string.IsNullOrWhiteSpace(jarError) ? "invalid jar archive" : jarError;
+            return false;
+        }
+
+        if (!requireLegacySessionDomainCompatibility)
+        {
+            return true;
+        }
+
+        if (HasLegacySessionDomainCompatibility(jarPath))
+        {
+            return true;
+        }
+
+        validationError = $"missing '{LegacySessionDomainCompatibilityMarker}' mapping";
+        return false;
+    }
+
+    private static bool HasLegacySessionDomainCompatibility(string jarPath)
+    {
+        if (string.IsNullOrWhiteSpace(jarPath) || !File.Exists(jarPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var stream = new FileStream(jarPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using var archive = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: false);
+            var marker = Encoding.ASCII.GetBytes(LegacySessionDomainCompatibilityMarker);
+            foreach (var entry in archive.Entries)
+            {
+                if (!entry.FullName.EndsWith(".class", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                using var entryStream = entry.Open();
+                using var memory = new MemoryStream();
+                entryStream.CopyTo(memory);
+                if (ContainsByteSequence(memory.ToArray(), marker))
+                {
+                    return true;
+                }
+            }
+        }
+        catch
+        {
+            return false;
+        }
+
+        return false;
+    }
+
+    private static bool ContainsByteSequence(byte[] haystack, byte[] needle)
+    {
+        if (haystack.Length == 0 || needle.Length == 0 || haystack.Length < needle.Length)
+        {
+            return false;
+        }
+
+        for (var index = 0; index <= haystack.Length - needle.Length; index++)
+        {
+            var matched = true;
+            for (var offset = 0; offset < needle.Length; offset++)
+            {
+                if (haystack[index + offset] == needle[offset])
+                {
+                    continue;
+                }
+
+                matched = false;
+                break;
+            }
+
+            if (matched)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static string ResolvePlayerAuthApiBaseUrl(LauncherSettings settings)
