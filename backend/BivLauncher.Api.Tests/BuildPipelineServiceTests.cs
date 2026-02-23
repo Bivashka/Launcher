@@ -8,6 +8,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging.Abstractions;
+using System.Reflection;
 using System.Text.Json;
 using Xunit;
 
@@ -15,6 +16,30 @@ namespace BivLauncher.Api.Tests;
 
 public sealed class BuildPipelineServiceTests
 {
+    [Fact]
+    public void ResolveLegacyBridgePropertyKeyIndex_UnknownMethod_PrefersSessionKey()
+    {
+        var result = InvokeLegacyBridgePropertyResolver("a", 10, 20, 30, 40, 50);
+        Assert.Equal((ushort)30, result);
+    }
+
+    [Fact]
+    public void ResolveLegacyBridgePropertyKeyIndex_UsernameMethod_UsesUsernameKey()
+    {
+        var result = InvokeLegacyBridgePropertyResolver("getUsername", 10, 20, 30, 40, 50);
+        Assert.Equal((ushort)10, result);
+    }
+
+    [Fact]
+    public void ResolveLegacyBridgePropertyKeyIndex_SessionAndTokenMethods_UseExpectedKeys()
+    {
+        var sessionResult = InvokeLegacyBridgePropertyResolver("getSessionId", 10, 20, 30, 40, 50);
+        var tokenResult = InvokeLegacyBridgePropertyResolver("getAccessToken", 10, 20, 30, 40, 50);
+
+        Assert.Equal((ushort)30, sessionResult);
+        Assert.Equal((ushort)20, tokenResult);
+    }
+
     [Fact]
     public async Task RebuildProfileAsync_WhenSourceFileDisappears_SkipsMissingFileAndCompletes()
     {
@@ -154,6 +179,27 @@ public sealed class BuildPipelineServiceTests
             var hash = sha.ComputeHash(data);
             return Convert.ToHexString(hash).ToLowerInvariant();
         }
+    }
+
+    private static ushort InvokeLegacyBridgePropertyResolver(
+        string methodName,
+        ushort usernameKey,
+        ushort tokenKey,
+        ushort sessionKey,
+        ushort uuidKey,
+        ushort externalIdKey)
+    {
+        var resolver = typeof(BuildPipelineService).GetMethod(
+            "ResolveLegacyBridgePropertyKeyIndex",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(resolver);
+
+        var raw = resolver!.Invoke(
+            null,
+            [methodName, usernameKey, tokenKey, sessionKey, uuidKey, externalIdKey]);
+        Assert.NotNull(raw);
+
+        return (ushort)raw!;
     }
 
     private sealed class TestWebHostEnvironment(string contentRootPath) : IWebHostEnvironment

@@ -1279,7 +1279,8 @@ public sealed class BuildPipelineService(
         }
 
         if (normalized.Contains("access", StringComparison.Ordinal) ||
-            normalized.Contains("token", StringComparison.Ordinal))
+            normalized.Contains("token", StringComparison.Ordinal) ||
+            normalized.Contains("auth", StringComparison.Ordinal))
         {
             return legacyTokenKeyIndex;
         }
@@ -1291,12 +1292,23 @@ public sealed class BuildPipelineService(
 
         if (normalized.Contains("uuid", StringComparison.Ordinal) ||
             normalized.Contains("profile", StringComparison.Ordinal) ||
+            normalized.Contains("guid", StringComparison.Ordinal) ||
             normalized.Contains("id", StringComparison.Ordinal))
         {
             return legacyUuidKeyIndex;
         }
 
-        return legacyUsernameKeyIndex;
+        if (normalized.Contains("user", StringComparison.Ordinal) ||
+            normalized.Contains("name", StringComparison.Ordinal) ||
+            normalized.Contains("nick", StringComparison.Ordinal) ||
+            normalized.Contains("login", StringComparison.Ordinal))
+        {
+            return legacyUsernameKeyIndex;
+        }
+
+        // Some legacy launchwrapper forks call obfuscated LegacyBridge methods (for example: "a", "b", "c").
+        // For auth flow safety we default unknown string getters to session value, not username.
+        return legacySessionKeyIndex;
     }
 
     private static byte[] BuildGetPropertyStringCode(
