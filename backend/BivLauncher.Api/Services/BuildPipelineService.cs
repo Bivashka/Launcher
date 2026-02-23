@@ -1123,6 +1123,7 @@ public sealed class BuildPipelineService(
         var legacySessionKeyIndex = pool.AddStringConstant("biv.auth.session");
         var legacyUuidKeyIndex = pool.AddStringConstant("biv.auth.uuid");
         var legacyExternalIdKeyIndex = pool.AddStringConstant("biv.auth.externalId");
+        var legacyYggdrasilKeyIndex = pool.AddStringConstant("biv.auth.yggdrasil");
 
         var methodIndices = requiredMethods
             .OrderBy(x => x.Name, StringComparer.Ordinal)
@@ -1174,7 +1175,8 @@ public sealed class BuildPipelineService(
                 legacyTokenKeyIndex,
                 legacySessionKeyIndex,
                 legacyUuidKeyIndex,
-                legacyExternalIdKeyIndex);
+                legacyExternalIdKeyIndex,
+                legacyYggdrasilKeyIndex);
             var maxLocals = checked((ushort)GetMethodParameterSlotCount(method.Descriptor));
             WriteMethod(
                 stream,
@@ -1204,7 +1206,8 @@ public sealed class BuildPipelineService(
         ushort legacyTokenKeyIndex,
         ushort legacySessionKeyIndex,
         ushort legacyUuidKeyIndex,
-        ushort legacyExternalIdKeyIndex)
+        ushort legacyExternalIdKeyIndex,
+        ushort legacyYggdrasilKeyIndex)
     {
         var returnDescriptor = GetMethodReturnDescriptor(descriptor);
         switch (returnDescriptor)
@@ -1217,7 +1220,8 @@ public sealed class BuildPipelineService(
                     legacyTokenKeyIndex,
                     legacySessionKeyIndex,
                     legacyUuidKeyIndex,
-                    legacyExternalIdKeyIndex);
+                    legacyExternalIdKeyIndex,
+                    legacyYggdrasilKeyIndex);
                 return (BuildGetPropertyStringCode(
                         propertyKeyIndex,
                         emptyStringConstantIndex,
@@ -1270,9 +1274,24 @@ public sealed class BuildPipelineService(
         ushort legacyTokenKeyIndex,
         ushort legacySessionKeyIndex,
         ushort legacyUuidKeyIndex,
-        ushort legacyExternalIdKeyIndex)
+        ushort legacyExternalIdKeyIndex,
+        ushort legacyYggdrasilKeyIndex)
     {
         var normalized = (methodName ?? string.Empty).Trim().ToLowerInvariant();
+        if (normalized.Contains("yggdrasil", StringComparison.Ordinal) ||
+            normalized.Contains("authserver", StringComparison.Ordinal) ||
+            normalized.Contains("sessionserver", StringComparison.Ordinal) ||
+            normalized.Contains("joinserver", StringComparison.Ordinal) ||
+            normalized.Contains("checkserver", StringComparison.Ordinal) ||
+            normalized.Contains("endpoint", StringComparison.Ordinal) ||
+            normalized.Contains("baseurl", StringComparison.Ordinal) ||
+            normalized.Contains("url", StringComparison.Ordinal) ||
+            normalized.Contains("host", StringComparison.Ordinal) ||
+            normalized.Contains("server", StringComparison.Ordinal))
+        {
+            return legacyYggdrasilKeyIndex;
+        }
+
         if (normalized.Contains("session", StringComparison.Ordinal))
         {
             return legacySessionKeyIndex;
@@ -1307,8 +1326,8 @@ public sealed class BuildPipelineService(
         }
 
         // Some legacy launchwrapper forks call obfuscated LegacyBridge methods (for example: "a", "b", "c").
-        // For auth flow safety we default unknown string getters to session value, not username.
-        return legacySessionKeyIndex;
+        // For auth flow safety we default unknown string getters to Yggdrasil endpoint.
+        return legacyYggdrasilKeyIndex;
     }
 
     private static byte[] BuildGetPropertyStringCode(

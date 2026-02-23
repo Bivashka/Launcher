@@ -1126,16 +1126,19 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
         var sessionToken = string.IsNullOrWhiteSpace(token)
             ? string.Empty
             : BuildLegacySessionToken(token, profileId);
+        var apiBaseUrl = ResolvePlayerAuthApiBaseUrl(settings);
+        var yggdrasilUrl = BuildYggdrasilBaseUrl(apiBaseUrl);
 
         var insertionIndex = FindLaunchModeArgumentIndex(jvmArgs);
         insertionIndex = EnsureJvmProperty(jvmArgs, "biv.auth.username", username, insertionIndex);
         insertionIndex = EnsureJvmProperty(jvmArgs, "biv.auth.uuid", profileId, insertionIndex);
         insertionIndex = EnsureJvmProperty(jvmArgs, "biv.auth.externalId", externalId, insertionIndex);
         insertionIndex = EnsureJvmProperty(jvmArgs, "biv.auth.token", token, insertionIndex);
-        _ = EnsureJvmProperty(jvmArgs, "biv.auth.session", sessionToken, insertionIndex);
+        insertionIndex = EnsureJvmProperty(jvmArgs, "biv.auth.session", sessionToken, insertionIndex);
+        _ = EnsureJvmProperty(jvmArgs, "biv.auth.yggdrasil", yggdrasilUrl, insertionIndex);
 
         logService.LogInfo(
-            $"Legacy bridge JVM auth properties prepared: username={username}, tokenLength={token.Length}, profileIdLength={profileId.Length}, hasSession={!string.IsNullOrWhiteSpace(sessionToken)}.");
+            $"Legacy bridge JVM auth properties prepared: username={username}, tokenLength={token.Length}, profileIdLength={profileId.Length}, hasSession={!string.IsNullOrWhiteSpace(sessionToken)}, hasYggdrasil={!string.IsNullOrWhiteSpace(yggdrasilUrl)}.");
     }
 
     private static int EnsureJvmProperty(IList<string> args, string propertyName, string value, int insertionIndex)
