@@ -351,10 +351,12 @@ public sealed class PublicYggdrasilController(
     [HttpGet("/api/yggdrasil/sessionserver/session/minecraft/hasJoined")]
     public async Task<IActionResult> HasJoined(
         [FromQuery] string? username,
-        [FromQuery(Name = "user")] string? legacyUsername,
         [FromQuery] string? serverId,
         CancellationToken cancellationToken)
     {
+        var legacyUsername = HttpContext is null
+            ? string.Empty
+            : (Request.Query["user"].ToString() ?? string.Empty).Trim();
         var normalizedUsername = NormalizeUsername(
             string.IsNullOrWhiteSpace(username)
                 ? legacyUsername
@@ -435,18 +437,6 @@ public sealed class PublicYggdrasilController(
         });
     }
 
-    public Task<IActionResult> HasJoined(
-        string? username,
-        string? serverId,
-        CancellationToken cancellationToken)
-    {
-        return HasJoined(
-            username: username,
-            legacyUsername: null,
-            serverId: serverId,
-            cancellationToken: cancellationToken);
-    }
-
     [HttpGet("/game/checkserver.jsp")]
     [HttpGet("/checkserver.jsp")]
     [HttpGet("/authserver/game/checkserver.jsp")]
@@ -475,11 +465,7 @@ public sealed class PublicYggdrasilController(
             Request.Path.Value ?? string.Empty,
             Request.QueryString.Value ?? string.Empty);
 
-        var response = await HasJoined(
-            username: null,
-            legacyUsername: username,
-            serverId: serverId,
-            cancellationToken: cancellationToken);
+        var response = await HasJoined(username, serverId, cancellationToken);
         return response is OkObjectResult
             ? LegacyText(LegacyCheckYes)
             : LegacyText(LegacyCheckNo);
