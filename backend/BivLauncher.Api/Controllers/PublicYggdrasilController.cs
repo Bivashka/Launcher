@@ -210,7 +210,19 @@ public sealed class PublicYggdrasilController(
         [FromBody] YggdrasilJoinRequest? request,
         CancellationToken cancellationToken)
     {
-        if (request is null)
+        var accessToken = (request?.AccessToken ?? string.Empty).Trim();
+        var serverId = (request?.ServerId ?? string.Empty).Trim();
+        if (HttpContext is not null && string.IsNullOrWhiteSpace(accessToken))
+        {
+            accessToken = await ReadLegacyParameterAsync(cancellationToken, "sessionId", "accessToken");
+        }
+
+        if (HttpContext is not null && string.IsNullOrWhiteSpace(serverId))
+        {
+            serverId = await ReadLegacyParameterAsync(cancellationToken, "serverId");
+        }
+
+        if (string.IsNullOrWhiteSpace(accessToken) || string.IsNullOrWhiteSpace(serverId))
         {
             logger.LogWarning("Yggdrasil join rejected: empty payload.");
             return YggdrasilError(
@@ -220,18 +232,7 @@ public sealed class PublicYggdrasilController(
                 cause: string.Empty);
         }
 
-        var serverId = (request.ServerId ?? string.Empty).Trim();
-        if (string.IsNullOrWhiteSpace(serverId))
-        {
-            logger.LogWarning("Yggdrasil join rejected: missing serverId.");
-            return YggdrasilError(
-                StatusCodes.Status400BadRequest,
-                IllegalArgument,
-                "serverId is required.",
-                cause: string.Empty);
-        }
-
-        var result = await ValidatePlayerAccessTokenAsync(request.AccessToken, cancellationToken);
+        var result = await ValidatePlayerAccessTokenAsync(accessToken, cancellationToken);
         if (!result.Success || result.Account is null)
         {
             logger.LogWarning(
@@ -309,21 +310,12 @@ public sealed class PublicYggdrasilController(
             Request.Path.Value ?? string.Empty,
             Request.QueryString.Value ?? string.Empty);
 
-        var accessToken = await ReadLegacyParameterAsync(cancellationToken, "sessionId", "accessToken");
-        var serverId = await ReadLegacyParameterAsync(cancellationToken, "serverId");
-        var selectedProfile = await ReadLegacyParameterAsync(cancellationToken, "selectedProfile");
-
-        if (string.IsNullOrWhiteSpace(accessToken) || string.IsNullOrWhiteSpace(serverId))
-        {
-            return LegacyText(LegacyJoinBadRequest);
-        }
-
         var response = await Join(
             new YggdrasilJoinRequest
             {
-                AccessToken = accessToken,
-                SelectedProfile = selectedProfile,
-                ServerId = serverId
+                AccessToken = await ReadLegacyParameterAsync(cancellationToken, "sessionId", "accessToken"),
+                SelectedProfile = await ReadLegacyParameterAsync(cancellationToken, "selectedProfile"),
+                ServerId = await ReadLegacyParameterAsync(cancellationToken, "serverId")
             },
             cancellationToken);
 
@@ -359,10 +351,14 @@ public sealed class PublicYggdrasilController(
     [HttpGet("/api/yggdrasil/sessionserver/session/minecraft/hasJoined")]
     public async Task<IActionResult> HasJoined(
         [FromQuery] string? username,
+        [FromQuery(Name = "user")] string? legacyUsername,
         [FromQuery] string? serverId,
         CancellationToken cancellationToken)
     {
-        var normalizedUsername = NormalizeUsername(username);
+        var normalizedUsername = NormalizeUsername(
+            string.IsNullOrWhiteSpace(username)
+                ? legacyUsername
+                : username);
         var normalizedServerId = (serverId ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(normalizedUsername) || string.IsNullOrWhiteSpace(normalizedServerId))
         {
@@ -439,6 +435,18 @@ public sealed class PublicYggdrasilController(
         });
     }
 
+    public Task<IActionResult> HasJoined(
+        string? username,
+        string? serverId,
+        CancellationToken cancellationToken)
+    {
+        return HasJoined(
+            username: username,
+            legacyUsername: null,
+            serverId: serverId,
+            cancellationToken: cancellationToken);
+    }
+
     [HttpGet("/game/checkserver.jsp")]
     [HttpGet("/checkserver.jsp")]
     [HttpGet("/authserver/game/checkserver.jsp")]
@@ -467,7 +475,11 @@ public sealed class PublicYggdrasilController(
             Request.Path.Value ?? string.Empty,
             Request.QueryString.Value ?? string.Empty);
 
-        var response = await HasJoined(username, serverId, cancellationToken);
+        var response = await HasJoined(
+            username: null,
+            legacyUsername: username,
+            serverId: serverId,
+            cancellationToken: cancellationToken);
         return response is OkObjectResult
             ? LegacyText(LegacyCheckYes)
             : LegacyText(LegacyCheckNo);
