@@ -57,6 +57,8 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
         await TryAttachClientAuthlibAgentAsync(jvmArgs, settings, instanceDirectory, cancellationToken);
 
         var usePositionalLegacyArgs = ShouldUseLegacyPositionalArguments(route, manifest, instanceDirectory);
+        logService.LogInfo(
+            $"Legacy positional mode: {usePositionalLegacyArgs} (routeMcVersion='{route.McVersion}', manifestMcVersion='{manifest.McVersion}').");
         var gameArgs = SplitArgs(manifest.GameArgsDefault).ToList();
         var forceAutoRouteArgs = StripControlFlag(gameArgs, "--bl-force-route");
         var disableAutoRouteArgs = StripControlFlag(gameArgs, "--bl-no-route");
@@ -1382,27 +1384,24 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
         var legacyProfileId = ResolveLegacyProfileId(externalId, username);
         var legacySessionToken = BuildLegacySessionToken(sessionToken, legacyProfileId);
 
-        if (usePositionalLegacyArgs)
-        {
-            RemoveArgWithValue(gameArgs, "--username");
-            RemoveArgWithValue(gameArgs, "--session");
-            RemoveArgWithValue(gameArgs, "--uuid");
-
-            // Pre-1.6 clients expect positional args: username, session, server, port.
-            gameArgs.Insert(0, legacySessionToken);
-            gameArgs.Insert(0, username);
-            EnsureArgumentWithValue(gameArgs, "--uuid", legacyProfileId);
-
-            logService.LogInfo(
-                $"Legacy auth args prepared (positional): username={username}, sourceUsername={rawUsername}, sessionTokenLength={sessionToken.Length}, sessionMode=token-profile, hasUuid={!string.IsNullOrWhiteSpace(legacyProfileId)}.");
-            return;
-        }
-
+        // Always keep named args as fallback. Some launchwrapper forks
+        // ignore positional auth arguments even on old modpacks.
         EnsureArgumentWithValue(gameArgs, "--username", username);
         EnsureArgumentWithValue(gameArgs, "--session", legacySessionToken);
         if (!string.IsNullOrWhiteSpace(legacyProfileId))
         {
             EnsureArgumentWithValue(gameArgs, "--uuid", legacyProfileId);
+        }
+
+        if (usePositionalLegacyArgs)
+        {
+            // Pre-1.6 clients expect positional args: username, session, server, port.
+            gameArgs.Insert(0, legacySessionToken);
+            gameArgs.Insert(0, username);
+
+            logService.LogInfo(
+                $"Legacy auth args prepared (hybrid positional+named): username={username}, sourceUsername={rawUsername}, sessionTokenLength={sessionToken.Length}, sessionMode=token-profile, hasUuid={!string.IsNullOrWhiteSpace(legacyProfileId)}.");
+            return;
         }
 
         logService.LogInfo(
@@ -1463,11 +1462,15 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
         bool routeArgsExplicitlyDisabled,
         bool usePositionalLegacyArgs)
     {
+        // Keep named route args as fallback even when positional mode is active.
+        if (!routeArgsExplicitlyDisabled)
+        {
+            EnsureArgumentWithValue(gameArgs, "--server", route.Address.Trim());
+            EnsureArgumentWithValue(gameArgs, "--port", route.Port.ToString(CultureInfo.InvariantCulture));
+        }
+
         if (usePositionalLegacyArgs)
         {
-            RemoveArgWithValue(gameArgs, "--server");
-            RemoveArgWithValue(gameArgs, "--port");
-
             var positionalServer = route.Address.Trim();
             var positionalPort = route.Port.ToString(CultureInfo.InvariantCulture);
             if (routeArgsExplicitlyDisabled)
