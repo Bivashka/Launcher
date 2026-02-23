@@ -1506,18 +1506,26 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
         LauncherManifest manifest,
         string instanceDirectory)
     {
-        var resolvedVersion = ResolveLegacyVersion(route, manifest, instanceDirectory);
-        if (string.IsNullOrWhiteSpace(resolvedVersion))
-        {
-            return false;
-        }
+        var routeVersion = NormalizeVersion(route.McVersion);
+        var manifestVersion = NormalizeVersion(manifest.McVersion);
 
-        if (string.Equals(resolvedVersion, "legacy", StringComparison.OrdinalIgnoreCase))
+        // Treat "legacy" only as an explicit opt-in from route/manifest metadata.
+        // Unknown version must not force positional args because it breaks 1.6+ clients.
+        if (string.Equals(routeVersion, "legacy", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(manifestVersion, "legacy", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
 
-        if (!TryParseMajorMinorVersion(resolvedVersion, out var major, out var minor))
+        var inferredVersion = TryInferVersionFromDeobfMap(instanceDirectory);
+        var resolvedVersion = !string.IsNullOrWhiteSpace(routeVersion)
+            ? routeVersion
+            : !string.IsNullOrWhiteSpace(manifestVersion)
+                ? manifestVersion
+                : inferredVersion;
+
+        if (string.IsNullOrWhiteSpace(resolvedVersion) ||
+            !TryParseMajorMinorVersion(resolvedVersion, out var major, out var minor))
         {
             return false;
         }

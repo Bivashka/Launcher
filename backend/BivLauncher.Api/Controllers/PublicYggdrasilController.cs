@@ -197,15 +197,25 @@ public sealed class PublicYggdrasilController(
     }
 
     [HttpPost("/authserver/session/minecraft/join")]
+    [HttpPost("/authserver/minecraft/join")]
     [HttpPost("/session/minecraft/join")]
     [HttpPost("/sessionserver/session/minecraft/join")]
+    [HttpPost("/sessionserver/minecraft/join")]
     [HttpPost("/api/public/authserver/session/minecraft/join")]
+    [HttpPost("/api/public/authserver/minecraft/join")]
     [HttpPost("/api/public/sessionserver/session/minecraft/join")]
+    [HttpPost("/api/public/sessionserver/minecraft/join")]
     [HttpPost("/api/public/yggdrasil/authserver/session/minecraft/join")]
+    [HttpPost("/api/public/yggdrasil/authserver/minecraft/join")]
+    [HttpPost("/api/public/yggdrasil/minecraft/join")]
     [HttpPost("/api/public/yggdrasil/session/minecraft/join")]
     [HttpPost("/api/public/yggdrasil/sessionserver/session/minecraft/join")]
+    [HttpPost("/api/public/yggdrasil/sessionserver/minecraft/join")]
     [HttpPost("/api/yggdrasil/authserver/session/minecraft/join")]
+    [HttpPost("/api/yggdrasil/authserver/minecraft/join")]
+    [HttpPost("/api/yggdrasil/minecraft/join")]
     [HttpPost("/api/yggdrasil/sessionserver/session/minecraft/join")]
+    [HttpPost("/api/yggdrasil/sessionserver/minecraft/join")]
     public async Task<IActionResult> Join(
         [FromBody] YggdrasilJoinRequest? request,
         CancellationToken cancellationToken)
@@ -291,6 +301,10 @@ public sealed class PublicYggdrasilController(
     [HttpPost("/api/public/yggdrasil/authserver/game/joinserver.jsp")]
     [HttpGet("/api/public/yggdrasil/authserver/joinserver.jsp")]
     [HttpPost("/api/public/yggdrasil/authserver/joinserver.jsp")]
+    [HttpGet("/api/public/yggdrasil/game/joinserver.jsp")]
+    [HttpPost("/api/public/yggdrasil/game/joinserver.jsp")]
+    [HttpGet("/api/public/yggdrasil/joinserver.jsp")]
+    [HttpPost("/api/public/yggdrasil/joinserver.jsp")]
     [HttpGet("/api/public/yggdrasil/sessionserver/game/joinserver.jsp")]
     [HttpPost("/api/public/yggdrasil/sessionserver/game/joinserver.jsp")]
     [HttpGet("/api/public/yggdrasil/sessionserver/joinserver.jsp")]
@@ -299,6 +313,10 @@ public sealed class PublicYggdrasilController(
     [HttpPost("/api/yggdrasil/authserver/game/joinserver.jsp")]
     [HttpGet("/api/yggdrasil/authserver/joinserver.jsp")]
     [HttpPost("/api/yggdrasil/authserver/joinserver.jsp")]
+    [HttpGet("/api/yggdrasil/game/joinserver.jsp")]
+    [HttpPost("/api/yggdrasil/game/joinserver.jsp")]
+    [HttpGet("/api/yggdrasil/joinserver.jsp")]
+    [HttpPost("/api/yggdrasil/joinserver.jsp")]
     [HttpGet("/api/yggdrasil/sessionserver/game/joinserver.jsp")]
     [HttpPost("/api/yggdrasil/sessionserver/game/joinserver.jsp")]
     [HttpGet("/api/yggdrasil/sessionserver/joinserver.jsp")]
@@ -340,15 +358,25 @@ public sealed class PublicYggdrasilController(
     }
 
     [HttpGet("/authserver/session/minecraft/hasJoined")]
+    [HttpGet("/authserver/minecraft/hasJoined")]
     [HttpGet("/session/minecraft/hasJoined")]
     [HttpGet("/sessionserver/session/minecraft/hasJoined")]
+    [HttpGet("/sessionserver/minecraft/hasJoined")]
     [HttpGet("/api/public/authserver/session/minecraft/hasJoined")]
+    [HttpGet("/api/public/authserver/minecraft/hasJoined")]
     [HttpGet("/api/public/sessionserver/session/minecraft/hasJoined")]
+    [HttpGet("/api/public/sessionserver/minecraft/hasJoined")]
     [HttpGet("/api/public/yggdrasil/authserver/session/minecraft/hasJoined")]
+    [HttpGet("/api/public/yggdrasil/authserver/minecraft/hasJoined")]
+    [HttpGet("/api/public/yggdrasil/minecraft/hasJoined")]
     [HttpGet("/api/public/yggdrasil/session/minecraft/hasJoined")]
     [HttpGet("/api/public/yggdrasil/sessionserver/session/minecraft/hasJoined")]
+    [HttpGet("/api/public/yggdrasil/sessionserver/minecraft/hasJoined")]
     [HttpGet("/api/yggdrasil/authserver/session/minecraft/hasJoined")]
+    [HttpGet("/api/yggdrasil/authserver/minecraft/hasJoined")]
+    [HttpGet("/api/yggdrasil/minecraft/hasJoined")]
     [HttpGet("/api/yggdrasil/sessionserver/session/minecraft/hasJoined")]
+    [HttpGet("/api/yggdrasil/sessionserver/minecraft/hasJoined")]
     public async Task<IActionResult> HasJoined(
         [FromQuery] string? username,
         [FromQuery] string? serverId,
@@ -449,10 +477,14 @@ public sealed class PublicYggdrasilController(
     [HttpGet("/api/public/sessionserver/checkserver.jsp")]
     [HttpGet("/api/public/yggdrasil/authserver/game/checkserver.jsp")]
     [HttpGet("/api/public/yggdrasil/authserver/checkserver.jsp")]
+    [HttpGet("/api/public/yggdrasil/game/checkserver.jsp")]
+    [HttpGet("/api/public/yggdrasil/checkserver.jsp")]
     [HttpGet("/api/public/yggdrasil/sessionserver/game/checkserver.jsp")]
     [HttpGet("/api/public/yggdrasil/sessionserver/checkserver.jsp")]
     [HttpGet("/api/yggdrasil/authserver/game/checkserver.jsp")]
     [HttpGet("/api/yggdrasil/authserver/checkserver.jsp")]
+    [HttpGet("/api/yggdrasil/game/checkserver.jsp")]
+    [HttpGet("/api/yggdrasil/checkserver.jsp")]
     [HttpGet("/api/yggdrasil/sessionserver/game/checkserver.jsp")]
     [HttpGet("/api/yggdrasil/sessionserver/checkserver.jsp")]
     public async Task<IActionResult> LegacyCheckServer(
@@ -472,15 +504,25 @@ public sealed class PublicYggdrasilController(
     }
 
     [HttpGet("/authserver/session/minecraft/profile/{profileId}")]
+    [HttpGet("/authserver/minecraft/profile/{profileId}")]
     [HttpGet("/session/minecraft/profile/{profileId}")]
     [HttpGet("/sessionserver/session/minecraft/profile/{profileId}")]
+    [HttpGet("/sessionserver/minecraft/profile/{profileId}")]
     [HttpGet("/api/public/authserver/session/minecraft/profile/{profileId}")]
+    [HttpGet("/api/public/authserver/minecraft/profile/{profileId}")]
     [HttpGet("/api/public/sessionserver/session/minecraft/profile/{profileId}")]
+    [HttpGet("/api/public/sessionserver/minecraft/profile/{profileId}")]
     [HttpGet("/api/public/yggdrasil/authserver/session/minecraft/profile/{profileId}")]
+    [HttpGet("/api/public/yggdrasil/authserver/minecraft/profile/{profileId}")]
+    [HttpGet("/api/public/yggdrasil/minecraft/profile/{profileId}")]
     [HttpGet("/api/public/yggdrasil/session/minecraft/profile/{profileId}")]
     [HttpGet("/api/public/yggdrasil/sessionserver/session/minecraft/profile/{profileId}")]
+    [HttpGet("/api/public/yggdrasil/sessionserver/minecraft/profile/{profileId}")]
     [HttpGet("/api/yggdrasil/authserver/session/minecraft/profile/{profileId}")]
+    [HttpGet("/api/yggdrasil/authserver/minecraft/profile/{profileId}")]
+    [HttpGet("/api/yggdrasil/minecraft/profile/{profileId}")]
     [HttpGet("/api/yggdrasil/sessionserver/session/minecraft/profile/{profileId}")]
+    [HttpGet("/api/yggdrasil/sessionserver/minecraft/profile/{profileId}")]
     public async Task<IActionResult> Profile(
         string profileId,
         CancellationToken cancellationToken)
@@ -708,17 +750,122 @@ public sealed class PublicYggdrasilController(
 
         if (!normalized.StartsWith("token:", StringComparison.OrdinalIgnoreCase))
         {
+            if (TryExtractJwtFromColonSeparated(normalized, out var jwtFromRaw))
+            {
+                return jwtFromRaw;
+            }
+
             return normalized;
         }
 
-        var payload = normalized["token:".Length..];
-        var separatorIndex = payload.IndexOf(':');
-        if (separatorIndex < 0)
+        var payload = normalized["token:".Length..].Trim();
+        if (string.IsNullOrWhiteSpace(payload))
+        {
+            return string.Empty;
+        }
+
+        if (TryExtractJwtFromColonSeparated(payload, out var jwtFromTokenPayload))
+        {
+            return jwtFromTokenPayload;
+        }
+
+        var parts = payload
+            .Split(':', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        if (parts.Length == 1)
         {
             return payload.Trim();
         }
 
-        return payload[..separatorIndex].Trim();
+        var firstPart = parts[0];
+        var secondPart = parts[1];
+
+        if (LooksLikeProfileId(firstPart) && !LooksLikeProfileId(secondPart))
+        {
+            return secondPart;
+        }
+
+        if (LooksLikeProfileId(secondPart) && !LooksLikeProfileId(firstPart))
+        {
+            return firstPart;
+        }
+
+        return firstPart;
+    }
+
+    private static bool TryExtractJwtFromColonSeparated(string payload, out string jwt)
+    {
+        jwt = string.Empty;
+        if (string.IsNullOrWhiteSpace(payload))
+        {
+            return false;
+        }
+
+        var parts = payload
+            .Split(':', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length == 0)
+        {
+            return false;
+        }
+
+        foreach (var part in parts)
+        {
+            if (!LooksLikeJwt(part))
+            {
+                continue;
+            }
+
+            jwt = part;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool LooksLikeJwt(string token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return false;
+        }
+
+        var segments = token.Split('.');
+        if (segments.Length != 3)
+        {
+            return false;
+        }
+
+        foreach (var segment in segments)
+        {
+            if (string.IsNullOrWhiteSpace(segment))
+            {
+                return false;
+            }
+
+            foreach (var ch in segment)
+            {
+                var isBase64Url = (ch >= 'a' && ch <= 'z') ||
+                                  (ch >= 'A' && ch <= 'Z') ||
+                                  (ch >= '0' && ch <= '9') ||
+                                  ch is '-' or '_';
+                if (!isBase64Url)
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    private static bool LooksLikeProfileId(string value)
+    {
+        var normalized = NormalizeProfileId(value);
+        return !string.IsNullOrWhiteSpace(normalized);
     }
 
     private static string NormalizeUsername(string? username)

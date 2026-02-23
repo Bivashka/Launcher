@@ -64,6 +64,45 @@ public sealed class PublicYggdrasilControllerTests
     }
 
     [Fact]
+    public async Task Join_AcceptsLegacyTokenFormat_WhenProfileIdPrecedesJwt()
+    {
+        await using var fixture = await TestFixture.CreateAsync();
+        var options = BuildJwtOptions();
+
+        var account = new AuthAccount
+        {
+            Username = "LegacyTokenUser",
+            ExternalId = "legacy-token-42",
+            SessionVersion = 3,
+            Roles = "player"
+        };
+        fixture.DbContext.AuthAccounts.Add(account);
+        await fixture.DbContext.SaveChangesAsync();
+
+        var jwtTokenService = new JwtTokenService(Microsoft.Extensions.Options.Options.Create(options));
+        var token = jwtTokenService.CreatePlayerToken(account, ["player"]);
+
+        var controller = new PublicYggdrasilController(
+            fixture.DbContext,
+            BuildConfiguration(),
+            Microsoft.Extensions.Options.Options.Create(options),
+            NullLogger<PublicYggdrasilController>.Instance);
+
+        var joinResult = await controller.Join(
+            new PublicYggdrasilController.YggdrasilJoinRequest
+            {
+                AccessToken = $"token:ffffffffffffffffffffffffffffffff:{token}",
+                SelectedProfile = string.Empty,
+                ServerId = "legacy-token-server"
+            },
+            CancellationToken.None);
+        Assert.IsType<NoContentResult>(joinResult);
+
+        var hasJoinedResult = await controller.HasJoined("LegacyTokenUser", "legacy-token-server", CancellationToken.None);
+        Assert.IsType<OkObjectResult>(hasJoinedResult);
+    }
+
+    [Fact]
     public async Task HasJoined_CanBeCalledMultipleTimes_ForSameTicket()
     {
         await using var fixture = await TestFixture.CreateAsync();
