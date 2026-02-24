@@ -55,7 +55,10 @@ public sealed class AdminLauncherController(
     private const long DefaultServerLauncherJarMaxBytes = 32L * 1024 * 1024;
     private const string LegacySessionDomainSource = "authserver.mojang.com";
     private const string LegacySessionDomainTarget = "session.minecraft.net";
-    private const string LegacyBridgeInternalName = "com/mojang/authlib/yggdrasil/LegacyBridge";
+    private const string LegacyBridgeSourceInternalName = "com/mojang/authlib/yggdrasil/LegacyBridge";
+    private const string LegacyBridgeSourceClassEntry = LegacyBridgeSourceInternalName + ".class";
+    // Keep same UTF-8 length as LegacyBridge so we can patch class constant pools in place.
+    private const string LegacyBridgeInternalName = "com/mojang/authlib/yggdrasil/LegacyBridg3";
     private const string LegacyBridgeClassEntry = LegacyBridgeInternalName + ".class";
 
     [HttpGet("server-jar")]
@@ -265,6 +268,8 @@ public sealed class AdminLauncherController(
 
         var bundledAuthlibMergeStats = MergeBundledAuthlib(payload, bundledAuthlibPayload);
         payload = bundledAuthlibMergeStats.Payload;
+        var legacyBridgeOwnerPatchStats = PatchLegacyBridgeOwnerMapping(payload);
+        payload = legacyBridgeOwnerPatchStats.Payload;
         var legacyBridgePatchStats = EnsureLegacyBridgeCompatibilityClass(payload);
         payload = legacyBridgePatchStats.Payload;
 
@@ -296,6 +301,8 @@ public sealed class AdminLauncherController(
                 bundledAuthlibUpstreamStatusCode = bundledAuthlibResponseStatusCode,
                 bundledAuthlibEntriesAdded = bundledAuthlibMergeStats.EntriesAdded,
                 bundledAuthlibBytesAdded = bundledAuthlibMergeStats.BytesAdded,
+                legacyBridgeOwnerPatchClassEntriesTouched = legacyBridgeOwnerPatchStats.ClassEntriesTouched,
+                legacyBridgeOwnerPatchStringReplacements = legacyBridgeOwnerPatchStats.StringReplacements,
                 legacyBridgeCompatAdded = legacyBridgePatchStats.Added,
                 legacyBridgeCompatAlreadyPresent = legacyBridgePatchStats.AlreadyPresent,
                 legacySessionPatchEnabled = true,
@@ -323,6 +330,8 @@ public sealed class AdminLauncherController(
             bundledAuthlibSourceUrl,
             bundledAuthlibEntriesAdded = bundledAuthlibMergeStats.EntriesAdded,
             bundledAuthlibBytesAdded = bundledAuthlibMergeStats.BytesAdded,
+            legacyBridgeOwnerPatchClassEntriesTouched = legacyBridgeOwnerPatchStats.ClassEntriesTouched,
+            legacyBridgeOwnerPatchStringReplacements = legacyBridgeOwnerPatchStats.StringReplacements,
             legacyBridgeCompatAdded = legacyBridgePatchStats.Added,
             legacyBridgeCompatAlreadyPresent = legacyBridgePatchStats.AlreadyPresent,
             legacySessionPatchEnabled = true,
@@ -1110,6 +1119,64 @@ public sealed class AdminLauncherController(
         return new LegacySessionPatchStats(output.ToArray(), classEntriesTouched, stringReplacements);
     }
 
+    private static LegacySessionPatchStats PatchLegacyBridgeOwnerMapping(byte[] payload)
+    {
+        if (payload.Length <= 0)
+        {
+            return new LegacySessionPatchStats(payload, 0, 0);
+        }
+
+        if (LegacyBridgeSourceInternalName.Length != LegacyBridgeInternalName.Length)
+        {
+            return new LegacySessionPatchStats(payload, 0, 0);
+        }
+
+        using var input = new MemoryStream(payload, writable: false);
+        using var output = new MemoryStream(capacity: payload.Length + 1024);
+        var classEntriesTouched = 0;
+        var stringReplacements = 0;
+        using (var inputArchive = new ZipArchive(input, ZipArchiveMode.Read, leaveOpen: true))
+        using (var outputArchive = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            foreach (var entry in inputArchive.Entries)
+            {
+                var target = outputArchive.CreateEntry(entry.FullName, CompressionLevel.Optimal);
+                target.LastWriteTime = entry.LastWriteTime;
+
+                using var sourceStream = entry.Open();
+                using var destinationStream = target.Open();
+                if (!entry.FullName.EndsWith(".class", StringComparison.OrdinalIgnoreCase))
+                {
+                    sourceStream.CopyTo(destinationStream);
+                    continue;
+                }
+
+                using var classBuffer = new MemoryStream();
+                sourceStream.CopyTo(classBuffer);
+                var classBytes = classBuffer.ToArray();
+                if (classBytes.Length <= 0)
+                {
+                    continue;
+                }
+
+                var replacements = ReplaceAsciiSequenceInPlace(
+                    classBytes,
+                    LegacyBridgeSourceInternalName,
+                    LegacyBridgeInternalName);
+
+                if (replacements > 0)
+                {
+                    classEntriesTouched++;
+                    stringReplacements += replacements;
+                }
+
+                destinationStream.Write(classBytes, 0, classBytes.Length);
+            }
+        }
+
+        return new LegacySessionPatchStats(output.ToArray(), classEntriesTouched, stringReplacements);
+    }
+
     private static BundledAuthlibMergeStats MergeBundledAuthlib(byte[] launcherPayload, byte[] authlibPayload)
     {
         if (launcherPayload.Length <= 0 || authlibPayload.Length <= 0)
@@ -1167,10 +1234,11 @@ public sealed class AdminLauncherController(
         {
             foreach (var entry in inputArchive.Entries)
             {
-                if (string.Equals(entry.FullName, LegacyBridgeClassEntry, StringComparison.Ordinal))
+                if (string.Equals(entry.FullName, LegacyBridgeClassEntry, StringComparison.Ordinal) ||
+                    string.Equals(entry.FullName, LegacyBridgeSourceClassEntry, StringComparison.Ordinal))
                 {
                     alreadyPresent = true;
-                    // Drop any existing LegacyBridge entry and write a fresh compatibility class below.
+                    // Drop existing bridge entries and write a fresh compatibility class below.
                     continue;
                 }
 
