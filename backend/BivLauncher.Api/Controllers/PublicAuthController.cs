@@ -17,12 +17,16 @@ namespace BivLauncher.Api.Controllers;
 [Route("api/public/auth")]
 public sealed class PublicAuthController(
     AppDbContext dbContext,
+    IConfiguration configuration,
     IExternalAuthService externalAuthService,
     IHardwareFingerprintService hardwareFingerprintService,
     IJwtTokenService jwtTokenService,
     ITwoFactorService twoFactorService,
     ILogger<PublicAuthController> logger) : ControllerBase
 {
+    private const string LauncherClientHeaderName = "X-BivLauncher-Client";
+    private const string LauncherClientHeaderPrefix = "BivLauncher.Client/";
+    private const string LauncherProofHeaderName = "X-BivLauncher-Proof";
     private static readonly ConcurrentDictionary<string, PendingTwoFactorChallenge> PendingTwoFactorChallenges = new(StringComparer.Ordinal);
     private static readonly TimeSpan PendingTwoFactorChallengeLifetime = TimeSpan.FromMinutes(3);
 
@@ -121,6 +125,11 @@ public sealed class PublicAuthController(
         [FromBody] PublicAuthLoginRequest request,
         CancellationToken cancellationToken)
     {
+        if (!IsLauncherClientAllowed(out var launcherError))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { error = launcherError });
+        }
+
         var username = request.Username.Trim();
         var deviceUserName = NormalizeDeviceUserName(request.DeviceUserName);
         var hwidHash = hardwareFingerprintService.NormalizeLegacyHash(request.HwidHash);
@@ -412,6 +421,45 @@ public sealed class PublicAuthController(
             TwoFactorProvisioningUri: provisioningUri,
             TwoFactorSecret: secret,
             Message: message);
+    }
+
+    private bool IsLauncherClientAllowed(out string error)
+    {
+        error = string.Empty;
+        if (!Request.Headers.TryGetValue(LauncherClientHeaderName, out var launcherClientHeaderValues))
+        {
+            error = "Launcher client verification failed (missing client header).";
+            return false;
+        }
+
+        var launcherClientHeader = launcherClientHeaderValues.ToString().Trim();
+        if (string.IsNullOrWhiteSpace(launcherClientHeader) ||
+            !launcherClientHeader.StartsWith(LauncherClientHeaderPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            error = "Launcher client verification failed (invalid client header).";
+            return false;
+        }
+
+        var requiredProof = (configuration["LAUNCHER_CLIENT_PROOF"] ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(requiredProof))
+        {
+            return true;
+        }
+
+        if (!Request.Headers.TryGetValue(LauncherProofHeaderName, out var launcherProofValues))
+        {
+            error = "Launcher client verification failed (missing proof header).";
+            return false;
+        }
+
+        var launcherProof = launcherProofValues.ToString().Trim();
+        if (!string.Equals(launcherProof, requiredProof, StringComparison.Ordinal))
+        {
+            error = "Launcher client verification failed (proof mismatch).";
+            return false;
+        }
+
+        return true;
     }
 
     private static string BuildPendingTwoFactorChallengeKey(string username, string hwidHash, string deviceUserName)

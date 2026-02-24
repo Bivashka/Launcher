@@ -670,6 +670,12 @@ public sealed class AdminLauncherController(
             startInfo.ArgumentList.Add($"/p:BivLauncherApiBaseUrl={launcherApiBaseUrl}");
         }
 
+        var launcherClientProof = ResolveLauncherClientProof();
+        if (!string.IsNullOrWhiteSpace(launcherClientProof))
+        {
+            startInfo.ArgumentList.Add($"/p:BivLauncherClientProof={launcherClientProof}");
+        }
+
         return new Process
         {
             StartInfo = startInfo
@@ -836,6 +842,11 @@ public sealed class AdminLauncherController(
         return string.IsNullOrWhiteSpace(configuredUrl)
             ? string.Empty
             : configuredUrl.Trim().TrimEnd('/');
+    }
+
+    private string ResolveLauncherClientProof()
+    {
+        return (configuration["LAUNCHER_CLIENT_PROOF"] ?? string.Empty).Trim();
     }
 
     private string ResolveServerLauncherJarVersion(string? requestVersion)

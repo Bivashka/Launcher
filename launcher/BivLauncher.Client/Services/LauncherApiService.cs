@@ -1,6 +1,7 @@
 using BivLauncher.Client.Models;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 
@@ -9,6 +10,9 @@ namespace BivLauncher.Client.Services;
 public sealed class LauncherApiService : ILauncherApiService
 {
     private const int MaxRetryAttempts = 3;
+    private const string LauncherClientHeaderName = "X-BivLauncher-Client";
+    private const string LauncherProofHeaderName = "X-BivLauncher-Proof";
+    private const string LauncherClientProofMetadataKey = "BivLauncher.ClientProof";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -19,6 +23,18 @@ public sealed class LauncherApiService : ILauncherApiService
     {
         Timeout = TimeSpan.FromMinutes(5)
     };
+
+    public LauncherApiService()
+    {
+        _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(BuildUserAgentValue());
+        _httpClient.DefaultRequestHeaders.TryAddWithoutValidation(LauncherClientHeaderName, BuildClientHeaderValue());
+
+        var launcherProof = ResolveAssemblyMetadata(LauncherClientProofMetadataKey);
+        if (!string.IsNullOrWhiteSpace(launcherProof))
+        {
+            _httpClient.DefaultRequestHeaders.TryAddWithoutValidation(LauncherProofHeaderName, launcherProof);
+        }
+    }
 
     public async Task<BootstrapResponse> GetBootstrapAsync(string apiBaseUrl, CancellationToken cancellationToken = default)
     {
@@ -366,5 +382,47 @@ public sealed class LauncherApiService : ILauncherApiService
         }
 
         return null;
+    }
+
+    private static string BuildUserAgentValue()
+    {
+        var version = ResolveLauncherVersion();
+        return $"BivLauncher.Client/{version}";
+    }
+
+    private static string BuildClientHeaderValue()
+    {
+        var version = ResolveLauncherVersion();
+        return $"BivLauncher.Client/{version}";
+    }
+
+    private static string ResolveLauncherVersion()
+    {
+        var informationalVersion = Assembly.GetExecutingAssembly()
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+            ?.InformationalVersion
+            ?.Trim();
+        if (!string.IsNullOrWhiteSpace(informationalVersion))
+        {
+            return informationalVersion;
+        }
+
+        var assemblyVersion = Assembly.GetExecutingAssembly().GetName().Version;
+        return assemblyVersion is null
+            ? "0.0.0"
+            : $"{assemblyVersion.Major}.{assemblyVersion.Minor}.{assemblyVersion.Build}";
+    }
+
+    private static string ResolveAssemblyMetadata(string key)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return string.Empty;
+        }
+
+        var attribute = Assembly.GetExecutingAssembly()
+            .GetCustomAttributes<AssemblyMetadataAttribute>()
+            .FirstOrDefault(item => string.Equals(item.Key, key, StringComparison.OrdinalIgnoreCase));
+        return (attribute?.Value ?? string.Empty).Trim();
     }
 }
