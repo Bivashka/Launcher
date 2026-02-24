@@ -55,6 +55,8 @@ public sealed class AdminLauncherController(
     private const long DefaultServerLauncherJarMaxBytes = 32L * 1024 * 1024;
     private const string LegacySessionDomainSource = "authserver.mojang.com";
     private const string LegacySessionDomainTarget = "session.minecraft.net";
+    private const string JarManifestEntry = "META-INF/MANIFEST.MF";
+    private const string ServerAgentBootClassPathValue = "launcher.jar authlib-injector.jar";
     private const string LegacyBridgeSourceInternalName = "com/mojang/authlib/yggdrasil/LegacyBridge";
     private const string LegacyBridgeSourceClassEntry = LegacyBridgeSourceInternalName + ".class";
     // Keep same UTF-8 length as LegacyBridge so we can patch class constant pools in place.
@@ -268,6 +270,8 @@ public sealed class AdminLauncherController(
 
         var bundledAuthlibMergeStats = MergeBundledAuthlib(payload, bundledAuthlibPayload);
         payload = bundledAuthlibMergeStats.Payload;
+        var agentManifestPatchStats = PatchServerAgentManifest(payload);
+        payload = agentManifestPatchStats.Payload;
         var legacyBridgeOwnerPatchStats = PatchLegacyBridgeOwnerMapping(payload);
         payload = legacyBridgeOwnerPatchStats.Payload;
         var legacyBridgePatchStats = EnsureLegacyBridgeCompatibilityClass(payload);
@@ -301,6 +305,7 @@ public sealed class AdminLauncherController(
                 bundledAuthlibUpstreamStatusCode = bundledAuthlibResponseStatusCode,
                 bundledAuthlibEntriesAdded = bundledAuthlibMergeStats.EntriesAdded,
                 bundledAuthlibBytesAdded = bundledAuthlibMergeStats.BytesAdded,
+                serverAgentManifestPatched = agentManifestPatchStats.Patched,
                 legacyBridgeOwnerPatchClassEntriesTouched = legacyBridgeOwnerPatchStats.ClassEntriesTouched,
                 legacyBridgeOwnerPatchStringReplacements = legacyBridgeOwnerPatchStats.StringReplacements,
                 legacyBridgeCompatAdded = legacyBridgePatchStats.Added,
@@ -330,6 +335,7 @@ public sealed class AdminLauncherController(
             bundledAuthlibSourceUrl,
             bundledAuthlibEntriesAdded = bundledAuthlibMergeStats.EntriesAdded,
             bundledAuthlibBytesAdded = bundledAuthlibMergeStats.BytesAdded,
+            serverAgentManifestPatched = agentManifestPatchStats.Patched,
             legacyBridgeOwnerPatchClassEntriesTouched = legacyBridgeOwnerPatchStats.ClassEntriesTouched,
             legacyBridgeOwnerPatchStringReplacements = legacyBridgeOwnerPatchStats.StringReplacements,
             legacyBridgeCompatAdded = legacyBridgePatchStats.Added,
@@ -1177,6 +1183,129 @@ public sealed class AdminLauncherController(
         return new LegacySessionPatchStats(output.ToArray(), classEntriesTouched, stringReplacements);
     }
 
+    private static AgentManifestPatchStats PatchServerAgentManifest(byte[] payload)
+    {
+        if (payload.Length <= 0)
+        {
+            return new AgentManifestPatchStats(payload, false);
+        }
+
+        using var input = new MemoryStream(payload, writable: false);
+        using var output = new MemoryStream(capacity: payload.Length + 1024);
+        var patched = false;
+        var manifestFound = false;
+
+        using (var inputArchive = new ZipArchive(input, ZipArchiveMode.Read, leaveOpen: true))
+        using (var outputArchive = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            foreach (var entry in inputArchive.Entries)
+            {
+                if (!string.Equals(entry.FullName, JarManifestEntry, StringComparison.OrdinalIgnoreCase))
+                {
+                    CopyZipEntry(entry, outputArchive);
+                    continue;
+                }
+
+                manifestFound = true;
+                var target = outputArchive.CreateEntry(entry.FullName, CompressionLevel.Optimal);
+                target.LastWriteTime = entry.LastWriteTime;
+
+                using var sourceStream = entry.Open();
+                using var reader = new StreamReader(sourceStream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+                var sourceManifest = reader.ReadToEnd();
+                var patchedManifest = EnsureServerAgentBootClassPathInManifest(sourceManifest);
+                patched = !string.Equals(sourceManifest, patchedManifest, StringComparison.Ordinal);
+
+                using var destinationStream = target.Open();
+                using var writer = new StreamWriter(destinationStream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+                writer.NewLine = "\r\n";
+                writer.Write(patchedManifest);
+                writer.Flush();
+            }
+
+            if (!manifestFound)
+            {
+                var manifestEntry = outputArchive.CreateEntry(JarManifestEntry, CompressionLevel.Optimal);
+                using var stream = manifestEntry.Open();
+                using var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+                writer.NewLine = "\r\n";
+                writer.Write(EnsureServerAgentBootClassPathInManifest("Manifest-Version: 1.0\r\n"));
+                writer.Flush();
+                patched = true;
+            }
+        }
+
+        return new AgentManifestPatchStats(output.ToArray(), patched);
+    }
+
+    private static string EnsureServerAgentBootClassPathInManifest(string manifestText)
+    {
+        var normalized = (manifestText ?? string.Empty)
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n');
+
+        var allLines = normalized.Split('\n').ToList();
+        if (allLines.Count == 0)
+        {
+            allLines.Add("Manifest-Version: 1.0");
+        }
+
+        var mainSectionEnd = allLines.FindIndex(string.IsNullOrEmpty);
+        if (mainSectionEnd < 0)
+        {
+            mainSectionEnd = allLines.Count;
+        }
+
+        var mainLines = allLines.Take(mainSectionEnd).ToList();
+        if (!mainLines.Any(line => line.StartsWith("Manifest-Version:", StringComparison.OrdinalIgnoreCase)))
+        {
+            mainLines.Insert(0, "Manifest-Version: 1.0");
+        }
+
+        var cleanedMainLines = new List<string>();
+        var skipContinuation = false;
+        foreach (var line in mainLines)
+        {
+            if (skipContinuation)
+            {
+                if (line.StartsWith(" ", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                skipContinuation = false;
+            }
+
+            if (line.StartsWith("Boot-Class-Path:", StringComparison.OrdinalIgnoreCase))
+            {
+                skipContinuation = true;
+                continue;
+            }
+
+            cleanedMainLines.Add(line);
+        }
+
+        cleanedMainLines.Add($"Boot-Class-Path: {ServerAgentBootClassPathValue}");
+
+        var resultLines = new List<string>(cleanedMainLines.Count + allLines.Count + 2);
+        resultLines.AddRange(cleanedMainLines);
+        resultLines.Add(string.Empty);
+
+        if (mainSectionEnd < allLines.Count)
+        {
+            var tail = allLines.Skip(mainSectionEnd + 1).ToList();
+            while (tail.Count > 0 && string.IsNullOrEmpty(tail[^1]))
+            {
+                tail.RemoveAt(tail.Count - 1);
+            }
+
+            resultLines.AddRange(tail);
+        }
+
+        resultLines.Add(string.Empty);
+        return string.Join("\r\n", resultLines);
+    }
+
     private static BundledAuthlibMergeStats MergeBundledAuthlib(byte[] launcherPayload, byte[] authlibPayload)
     {
         if (launcherPayload.Length <= 0 || authlibPayload.Length <= 0)
@@ -1519,6 +1648,10 @@ public sealed class AdminLauncherController(
         byte[] Payload,
         int ClassEntriesTouched,
         int StringReplacements);
+
+    private sealed record AgentManifestPatchStats(
+        byte[] Payload,
+        bool Patched);
 
     private sealed record LegacyBridgeCompatPatchStats(
         byte[] Payload,
