@@ -1183,6 +1183,11 @@ HWID_HMAC_VALUE="$(read_env_value "HWID_HMAC_SALT" "")"
 ensure_secret_value "JWT_SECRET" "$JWT_SECRET_VALUE" "change_me_to_a_long_random_secret" "change-me" "64"
 ensure_secret_value "HWID_HMAC_SALT" "$HWID_HMAC_VALUE" "change_me_hwid_salt" "change-me" "64"
 
+# Keep key visible in existing env files after upgrades.
+if ! grep -qE '^LAUNCHER_CLIENT_PROOF=' "$ENV_FILE" 2>/dev/null; then
+  write_env_value "LAUNCHER_CLIENT_PROOF" ""
+fi
+
 if [ "$DRY_RUN" = "1" ]; then
   append_check_result "meta" "Port pre-check" "local-listen-ports" "skipped(dry-run)"
 elif [ "$SKIP_PORT_CHECK" = "1" ]; then
