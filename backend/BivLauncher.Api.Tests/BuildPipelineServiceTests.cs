@@ -48,6 +48,23 @@ public sealed class BuildPipelineServiceTests
     }
 
     [Fact]
+    public void IsLegacyJoinServerMethod_CanonicalAndObfuscatedSignatures_AreDetected()
+    {
+        Assert.True(InvokeLegacyJoinServerMatcher("joinServer", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;"));
+        Assert.True(InvokeLegacyJoinServerMatcher("a", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;"));
+        Assert.False(InvokeLegacyJoinServerMatcher("getUsername", "(Ljava/lang/String;)Ljava/lang/String;"));
+    }
+
+    [Fact]
+    public void IsLegacyTextureLookupMethod_CanonicalAndObfuscatedSignatures_AreDetected()
+    {
+        Assert.True(InvokeLegacyTextureMatcher("getSkinURL", "(Ljava/lang/String;)Ljava/lang/String;"));
+        Assert.True(InvokeLegacyTextureMatcher("getCloakURL", "(Ljava/lang/String;)Ljava/lang/String;"));
+        Assert.True(InvokeLegacyTextureMatcher("a", "(Ljava/lang/String;)Ljava/lang/String;"));
+        Assert.False(InvokeLegacyTextureMatcher("joinServer", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;"));
+    }
+
+    [Fact]
     public async Task RebuildProfileAsync_WhenSourceFileDisappears_SkipsMissingFileAndCompletes()
     {
         await using var fixture = await TestFixture.CreateAsync();
@@ -208,6 +225,32 @@ public sealed class BuildPipelineServiceTests
         Assert.NotNull(raw);
 
         return (ushort)raw!;
+    }
+
+    private static bool InvokeLegacyJoinServerMatcher(string methodName, string descriptor)
+    {
+        var matcher = typeof(BuildPipelineService).GetMethod(
+            "IsLegacyJoinServerMethod",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(matcher);
+
+        var raw = matcher!.Invoke(null, [methodName, descriptor]);
+        Assert.NotNull(raw);
+
+        return (bool)raw!;
+    }
+
+    private static bool InvokeLegacyTextureMatcher(string methodName, string descriptor)
+    {
+        var matcher = typeof(BuildPipelineService).GetMethod(
+            "IsLegacyTextureLookupMethod",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(matcher);
+
+        var raw = matcher!.Invoke(null, [methodName, descriptor]);
+        Assert.NotNull(raw);
+
+        return (bool)raw!;
     }
 
     private sealed class TestWebHostEnvironment(string contentRootPath) : IWebHostEnvironment

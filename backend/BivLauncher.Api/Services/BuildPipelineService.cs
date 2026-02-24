@@ -1118,6 +1118,7 @@ public sealed class BuildPipelineService(
             "()Ljava/util/Optional;");
 
         var emptyStringConstantIndex = pool.AddStringConstant(string.Empty);
+        var okStringConstantIndex = pool.AddStringConstant("ok");
         var legacyUsernameKeyIndex = pool.AddStringConstant("biv.auth.username");
         var legacyTokenKeyIndex = pool.AddStringConstant("biv.auth.token");
         var legacySessionKeyIndex = pool.AddStringConstant("biv.auth.session");
@@ -1166,6 +1167,7 @@ public sealed class BuildPipelineService(
                 method.Name,
                 method.Descriptor,
                 emptyStringConstantIndex,
+                okStringConstantIndex,
                 systemGetPropertyMethodRefIndex,
                 collectionsEmptyMapMethodRefIndex,
                 collectionsEmptyListMethodRefIndex,
@@ -1197,6 +1199,7 @@ public sealed class BuildPipelineService(
         string methodName,
         string descriptor,
         ushort emptyStringConstantIndex,
+        ushort okStringConstantIndex,
         ushort systemGetPropertyMethodRefIndex,
         ushort collectionsEmptyMapMethodRefIndex,
         ushort collectionsEmptyListMethodRefIndex,
@@ -1214,6 +1217,17 @@ public sealed class BuildPipelineService(
         {
             case "Ljava/lang/String;":
             {
+                if (TryBuildLegacyBridgeStringSpecialCaseCode(
+                        methodName,
+                        descriptor,
+                        emptyStringConstantIndex,
+                        okStringConstantIndex,
+                        out var specialCaseCode,
+                        out var specialCaseMaxStack))
+                {
+                    return (specialCaseCode, specialCaseMaxStack);
+                }
+
                 var propertyKeyIndex = ResolveLegacyBridgePropertyKeyIndex(
                     methodName,
                     legacyUsernameKeyIndex,
@@ -1250,6 +1264,84 @@ public sealed class BuildPipelineService(
                 return BuildStubCodeForDescriptor(descriptor);
             }
         }
+    }
+
+    private static bool TryBuildLegacyBridgeStringSpecialCaseCode(
+        string methodName,
+        string descriptor,
+        ushort emptyStringConstantIndex,
+        ushort okStringConstantIndex,
+        out byte[] code,
+        out ushort maxStack)
+    {
+        if (IsLegacyJoinServerMethod(methodName, descriptor))
+        {
+            code = BuildLdcStringReturnCode(okStringConstantIndex);
+            maxStack = 1;
+            return true;
+        }
+
+        if (IsLegacyTextureLookupMethod(methodName, descriptor))
+        {
+            code = BuildLdcStringReturnCode(emptyStringConstantIndex);
+            maxStack = 1;
+            return true;
+        }
+
+        code = [];
+        maxStack = 0;
+        return false;
+    }
+
+    private static bool IsLegacyJoinServerMethod(string methodName, string descriptor)
+    {
+        if (!string.Equals(
+                descriptor,
+                "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+                StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var normalized = (methodName ?? string.Empty).Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return true;
+        }
+
+        if (normalized.Contains("joinserver", StringComparison.Ordinal) ||
+            normalized.Contains("join", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        // Some legacy forks obfuscate this method to one-letter names (for example: "a").
+        return normalized.Length <= 2;
+    }
+
+    private static bool IsLegacyTextureLookupMethod(string methodName, string descriptor)
+    {
+        if (!string.Equals(descriptor, "(Ljava/lang/String;)Ljava/lang/String;", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var normalized = (methodName ?? string.Empty).Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return false;
+        }
+
+        if (normalized.Contains("skin", StringComparison.Ordinal) ||
+            normalized.Contains("cloak", StringComparison.Ordinal) ||
+            normalized.Contains("cape", StringComparison.Ordinal) ||
+            normalized.Contains("texture", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        // Legacy obfuscation often rewrites these lookups to tiny names.
+        return normalized.Length <= 2;
     }
 
     private static string GetMethodReturnDescriptor(string descriptor)
