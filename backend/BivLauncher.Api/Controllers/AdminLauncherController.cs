@@ -55,6 +55,8 @@ public sealed class AdminLauncherController(
     private const long DefaultServerLauncherJarMaxBytes = 32L * 1024 * 1024;
     private const string LegacySessionDomainSource = "authserver.mojang.com";
     private const string LegacySessionDomainTarget = "session.minecraft.net";
+    private const string LegacyBridgeInternalName = "com/mojang/authlib/yggdrasil/LegacyBridge";
+    private const string LegacyBridgeClassEntry = LegacyBridgeInternalName + ".class";
 
     [HttpGet("server-jar")]
     public async Task<IActionResult> GetServerLauncherJarStatus(CancellationToken cancellationToken = default)
@@ -263,6 +265,8 @@ public sealed class AdminLauncherController(
 
         var bundledAuthlibMergeStats = MergeBundledAuthlib(payload, bundledAuthlibPayload);
         payload = bundledAuthlibMergeStats.Payload;
+        var legacyBridgePatchStats = EnsureLegacyBridgeCompatibilityClass(payload);
+        payload = legacyBridgePatchStats.Payload;
 
         await using (var uploadStream = new MemoryStream(payload, writable: false))
         {
@@ -292,6 +296,8 @@ public sealed class AdminLauncherController(
                 bundledAuthlibUpstreamStatusCode = bundledAuthlibResponseStatusCode,
                 bundledAuthlibEntriesAdded = bundledAuthlibMergeStats.EntriesAdded,
                 bundledAuthlibBytesAdded = bundledAuthlibMergeStats.BytesAdded,
+                legacyBridgeCompatAdded = legacyBridgePatchStats.Added,
+                legacyBridgeCompatAlreadyPresent = legacyBridgePatchStats.AlreadyPresent,
                 legacySessionPatchEnabled = true,
                 legacySessionPatchClassEntriesTouched = legacySessionPatchStats.ClassEntriesTouched,
                 legacySessionPatchStringReplacements = legacySessionPatchStats.StringReplacements,
@@ -317,6 +323,8 @@ public sealed class AdminLauncherController(
             bundledAuthlibSourceUrl,
             bundledAuthlibEntriesAdded = bundledAuthlibMergeStats.EntriesAdded,
             bundledAuthlibBytesAdded = bundledAuthlibMergeStats.BytesAdded,
+            legacyBridgeCompatAdded = legacyBridgePatchStats.Added,
+            legacyBridgeCompatAlreadyPresent = legacyBridgePatchStats.AlreadyPresent,
             legacySessionPatchEnabled = true,
             legacySessionPatchClassEntriesTouched = legacySessionPatchStats.ClassEntriesTouched,
             legacySessionPatchStringReplacements = legacySessionPatchStats.StringReplacements
@@ -1142,6 +1150,188 @@ public sealed class AdminLauncherController(
         return new BundledAuthlibMergeStats(output.ToArray(), entriesAdded, bytesAdded);
     }
 
+    private static LegacyBridgeCompatPatchStats EnsureLegacyBridgeCompatibilityClass(byte[] payload)
+    {
+        if (payload.Length <= 0)
+        {
+            return new LegacyBridgeCompatPatchStats(payload, false, false);
+        }
+
+        using var input = new MemoryStream(payload, writable: false);
+        using var output = new MemoryStream(capacity: payload.Length + 2048);
+        var alreadyPresent = false;
+
+        using (var inputArchive = new ZipArchive(input, ZipArchiveMode.Read, leaveOpen: true))
+        using (var outputArchive = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            foreach (var entry in inputArchive.Entries)
+            {
+                if (string.Equals(entry.FullName, LegacyBridgeClassEntry, StringComparison.Ordinal))
+                {
+                    alreadyPresent = true;
+                }
+
+                CopyZipEntry(entry, outputArchive);
+            }
+
+            if (!alreadyPresent)
+            {
+                var bridgeClassBytes = BuildLegacyBridgeClass();
+                var classEntry = outputArchive.CreateEntry(LegacyBridgeClassEntry, CompressionLevel.Optimal);
+                using var classStream = classEntry.Open();
+                classStream.Write(bridgeClassBytes, 0, bridgeClassBytes.Length);
+            }
+        }
+
+        return new LegacyBridgeCompatPatchStats(
+            output.ToArray(),
+            Added: !alreadyPresent,
+            AlreadyPresent: alreadyPresent);
+    }
+
+    private static byte[] BuildLegacyBridgeClass()
+    {
+        var pool = new LegacyBridgeConstantPoolBuilder();
+        var thisClassIndex = pool.AddClass(LegacyBridgeInternalName);
+        var superClassIndex = pool.AddClass("java/lang/Object");
+        var codeAttributeNameIndex = pool.AddUtf8("Code");
+
+        var ctorNameIndex = pool.AddUtf8("<init>");
+        var ctorDescriptorIndex = pool.AddUtf8("()V");
+        var objectCtorMethodRefIndex = pool.AddMethodRef("java/lang/Object", "<init>", "()V");
+
+        var getCloakNameIndex = pool.AddUtf8("getCloakURL");
+        var getSkinNameIndex = pool.AddUtf8("getSkinURL");
+        var joinServerNameIndex = pool.AddUtf8("joinServer");
+        var singleStringDescriptorIndex = pool.AddUtf8("(Ljava/lang/String;)Ljava/lang/String;");
+        var joinServerDescriptorIndex = pool.AddUtf8("(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;");
+
+        var emptyStringConstantIndex = pool.AddStringConstant(string.Empty);
+        var okStringConstantIndex = pool.AddStringConstant("ok");
+
+        using var stream = new MemoryStream();
+        WriteU4(stream, 0xCAFEBABE);
+        WriteU2(stream, 0);
+        WriteU2(stream, 52);
+        WriteU2(stream, pool.Count);
+        pool.WriteTo(stream);
+
+        WriteU2(stream, 0x0021);
+        WriteU2(stream, thisClassIndex);
+        WriteU2(stream, superClassIndex);
+        WriteU2(stream, 0);
+        WriteU2(stream, 0);
+
+        // constructor + 3 public static methods
+        WriteU2(stream, 4);
+
+        WriteMethod(
+            stream,
+            accessFlags: 0x0001,
+            nameIndex: ctorNameIndex,
+            descriptorIndex: ctorDescriptorIndex,
+            codeAttributeNameIndex: codeAttributeNameIndex,
+            maxStack: 1,
+            maxLocals: 1,
+            code: BuildConstructorCode(objectCtorMethodRefIndex));
+
+        WriteMethod(
+            stream,
+            accessFlags: 0x0009,
+            nameIndex: getCloakNameIndex,
+            descriptorIndex: singleStringDescriptorIndex,
+            codeAttributeNameIndex: codeAttributeNameIndex,
+            maxStack: 1,
+            maxLocals: 1,
+            code: BuildLdcStringReturnCode(emptyStringConstantIndex));
+
+        WriteMethod(
+            stream,
+            accessFlags: 0x0009,
+            nameIndex: getSkinNameIndex,
+            descriptorIndex: singleStringDescriptorIndex,
+            codeAttributeNameIndex: codeAttributeNameIndex,
+            maxStack: 1,
+            maxLocals: 1,
+            code: BuildLdcStringReturnCode(emptyStringConstantIndex));
+
+        WriteMethod(
+            stream,
+            accessFlags: 0x0009,
+            nameIndex: joinServerNameIndex,
+            descriptorIndex: joinServerDescriptorIndex,
+            codeAttributeNameIndex: codeAttributeNameIndex,
+            maxStack: 1,
+            maxLocals: 3,
+            code: BuildLdcStringReturnCode(okStringConstantIndex));
+
+        // class attributes
+        WriteU2(stream, 0);
+        return stream.ToArray();
+    }
+
+    private static byte[] BuildConstructorCode(ushort objectCtorMethodRefIndex)
+    {
+        return
+        [
+            0x2A,
+            0xB7,
+            (byte)(objectCtorMethodRefIndex >> 8),
+            (byte)(objectCtorMethodRefIndex & 0xFF),
+            0xB1
+        ];
+    }
+
+    private static byte[] BuildLdcStringReturnCode(ushort stringConstantIndex)
+    {
+        return
+        [
+            0x13, (byte)(stringConstantIndex >> 8), (byte)(stringConstantIndex & 0xFF),
+            0xB0
+        ];
+    }
+
+    private static void WriteMethod(
+        Stream stream,
+        ushort accessFlags,
+        ushort nameIndex,
+        ushort descriptorIndex,
+        ushort codeAttributeNameIndex,
+        ushort maxStack,
+        ushort maxLocals,
+        byte[] code)
+    {
+        WriteU2(stream, accessFlags);
+        WriteU2(stream, nameIndex);
+        WriteU2(stream, descriptorIndex);
+        WriteU2(stream, 1);
+
+        WriteU2(stream, codeAttributeNameIndex);
+        var attributeLength = checked((uint)(2 + 2 + 4 + code.Length + 2 + 2));
+        WriteU4(stream, attributeLength);
+
+        WriteU2(stream, maxStack);
+        WriteU2(stream, maxLocals);
+        WriteU4(stream, checked((uint)code.Length));
+        stream.Write(code, 0, code.Length);
+        WriteU2(stream, 0);
+        WriteU2(stream, 0);
+    }
+
+    private static void WriteU2(Stream stream, ushort value)
+    {
+        stream.WriteByte((byte)(value >> 8));
+        stream.WriteByte((byte)(value & 0xFF));
+    }
+
+    private static void WriteU4(Stream stream, uint value)
+    {
+        stream.WriteByte((byte)((value >> 24) & 0xFF));
+        stream.WriteByte((byte)((value >> 16) & 0xFF));
+        stream.WriteByte((byte)((value >> 8) & 0xFF));
+        stream.WriteByte((byte)(value & 0xFF));
+    }
+
     private static bool ShouldBundleAuthlibEntry(string entryName)
     {
         if (string.IsNullOrWhiteSpace(entryName))
@@ -1224,10 +1414,136 @@ public sealed class AdminLauncherController(
         int ClassEntriesTouched,
         int StringReplacements);
 
+    private sealed record LegacyBridgeCompatPatchStats(
+        byte[] Payload,
+        bool Added,
+        bool AlreadyPresent);
+
     private sealed record BundledAuthlibMergeStats(
         byte[] Payload,
         int EntriesAdded,
         long BytesAdded);
+
+    private sealed class LegacyBridgeConstantPoolBuilder
+    {
+        private readonly List<LegacyBridgeConstantPoolEntry> _entries = [];
+        private readonly Dictionary<string, ushort> _utf8 = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, ushort> _strings = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, ushort> _classes = new(StringComparer.Ordinal);
+        private readonly Dictionary<(string Name, string Descriptor), ushort> _nameAndTypes = [];
+        private readonly Dictionary<(string Class, string Name, string Descriptor), ushort> _methodRefs = [];
+
+        public ushort Count => checked((ushort)(_entries.Count + 1));
+
+        public ushort AddUtf8(string value)
+        {
+            if (_utf8.TryGetValue(value, out var index))
+            {
+                return index;
+            }
+
+            index = AddEntry(new LegacyBridgeConstantPoolEntry(1, value, 0, 0));
+            _utf8[value] = index;
+            return index;
+        }
+
+        public ushort AddClass(string internalName)
+        {
+            if (_classes.TryGetValue(internalName, out var index))
+            {
+                return index;
+            }
+
+            var nameIndex = AddUtf8(internalName);
+            index = AddEntry(new LegacyBridgeConstantPoolEntry(7, string.Empty, nameIndex, 0));
+            _classes[internalName] = index;
+            return index;
+        }
+
+        public ushort AddStringConstant(string value)
+        {
+            if (_strings.TryGetValue(value, out var index))
+            {
+                return index;
+            }
+
+            var utf8Index = AddUtf8(value);
+            index = AddEntry(new LegacyBridgeConstantPoolEntry(8, string.Empty, utf8Index, 0));
+            _strings[value] = index;
+            return index;
+        }
+
+        public ushort AddMethodRef(string classInternalName, string name, string descriptor)
+        {
+            var key = (classInternalName, name, descriptor);
+            if (_methodRefs.TryGetValue(key, out var index))
+            {
+                return index;
+            }
+
+            var classIndex = AddClass(classInternalName);
+            var nameAndTypeIndex = AddNameAndType(name, descriptor);
+            index = AddEntry(new LegacyBridgeConstantPoolEntry(10, string.Empty, classIndex, nameAndTypeIndex));
+            _methodRefs[key] = index;
+            return index;
+        }
+
+        public void WriteTo(Stream stream)
+        {
+            foreach (var entry in _entries)
+            {
+                stream.WriteByte(entry.Tag);
+                switch (entry.Tag)
+                {
+                    case 1:
+                    {
+                        var bytes = Encoding.UTF8.GetBytes(entry.Utf8Value);
+                        WriteU2(stream, checked((ushort)bytes.Length));
+                        stream.Write(bytes, 0, bytes.Length);
+                        break;
+                    }
+                    case 7:
+                    case 8:
+                        WriteU2(stream, entry.FirstIndex);
+                        break;
+                    case 10:
+                    case 12:
+                        WriteU2(stream, entry.FirstIndex);
+                        WriteU2(stream, entry.SecondIndex);
+                        break;
+                    default:
+                        throw new InvalidOperationException($"Unsupported constant pool tag {entry.Tag}.");
+                }
+            }
+        }
+
+        private ushort AddNameAndType(string name, string descriptor)
+        {
+            var key = (name, descriptor);
+            if (_nameAndTypes.TryGetValue(key, out var index))
+            {
+                return index;
+            }
+
+            var nameIndex = AddUtf8(name);
+            var descriptorIndex = AddUtf8(descriptor);
+            index = AddEntry(new LegacyBridgeConstantPoolEntry(12, string.Empty, nameIndex, descriptorIndex));
+            _nameAndTypes[key] = index;
+            return index;
+        }
+
+        private ushort AddEntry(LegacyBridgeConstantPoolEntry entry)
+        {
+            _entries.Add(entry);
+            return checked((ushort)_entries.Count);
+        }
+    }
+
+    private sealed record LegacyBridgeConstantPoolEntry(
+        byte Tag,
+        string Utf8Value,
+        ushort FirstIndex,
+        ushort SecondIndex);
 
     private static string Truncate(string value, int maxLength)
     {
