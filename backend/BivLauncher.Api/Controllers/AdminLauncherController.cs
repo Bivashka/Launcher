@@ -1227,7 +1227,8 @@ public sealed class AdminLauncherController(
         using var input = new MemoryStream(payload, writable: false);
         using var output = new MemoryStream(capacity: payload.Length + 2048);
         var alreadyPresent = false;
-        var bridgeClassBytes = BuildLegacyBridgeClass();
+        var sourceBridgeClassBytes = BuildLegacyBridgeClass(LegacyBridgeSourceInternalName);
+        var remappedBridgeClassBytes = BuildLegacyBridgeClass(LegacyBridgeInternalName);
 
         using (var inputArchive = new ZipArchive(input, ZipArchiveMode.Read, leaveOpen: true))
         using (var outputArchive = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: true))
@@ -1245,9 +1246,15 @@ public sealed class AdminLauncherController(
                 CopyZipEntry(entry, outputArchive);
             }
 
-            var classEntry = outputArchive.CreateEntry(LegacyBridgeClassEntry, CompressionLevel.Optimal);
-            using var classStream = classEntry.Open();
-            classStream.Write(bridgeClassBytes, 0, bridgeClassBytes.Length);
+            var sourceClassEntry = outputArchive.CreateEntry(LegacyBridgeSourceClassEntry, CompressionLevel.Optimal);
+            using (var sourceClassStream = sourceClassEntry.Open())
+            {
+                sourceClassStream.Write(sourceBridgeClassBytes, 0, sourceBridgeClassBytes.Length);
+            }
+
+            var remappedClassEntry = outputArchive.CreateEntry(LegacyBridgeClassEntry, CompressionLevel.Optimal);
+            using var remappedClassStream = remappedClassEntry.Open();
+            remappedClassStream.Write(remappedBridgeClassBytes, 0, remappedBridgeClassBytes.Length);
         }
 
         return new LegacyBridgeCompatPatchStats(
@@ -1256,10 +1263,10 @@ public sealed class AdminLauncherController(
             AlreadyPresent: alreadyPresent);
     }
 
-    private static byte[] BuildLegacyBridgeClass()
+    private static byte[] BuildLegacyBridgeClass(string classInternalName)
     {
         var pool = new LegacyBridgeConstantPoolBuilder();
-        var thisClassIndex = pool.AddClass(LegacyBridgeInternalName);
+        var thisClassIndex = pool.AddClass(classInternalName);
         var superClassIndex = pool.AddClass("java/lang/Object");
         var codeAttributeNameIndex = pool.AddUtf8("Code");
 
