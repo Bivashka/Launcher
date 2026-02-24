@@ -1160,6 +1160,7 @@ public sealed class AdminLauncherController(
         using var input = new MemoryStream(payload, writable: false);
         using var output = new MemoryStream(capacity: payload.Length + 2048);
         var alreadyPresent = false;
+        var bridgeClassBytes = BuildLegacyBridgeClass();
 
         using (var inputArchive = new ZipArchive(input, ZipArchiveMode.Read, leaveOpen: true))
         using (var outputArchive = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: true))
@@ -1169,18 +1170,16 @@ public sealed class AdminLauncherController(
                 if (string.Equals(entry.FullName, LegacyBridgeClassEntry, StringComparison.Ordinal))
                 {
                     alreadyPresent = true;
+                    // Drop any existing LegacyBridge entry and write a fresh compatibility class below.
+                    continue;
                 }
 
                 CopyZipEntry(entry, outputArchive);
             }
 
-            if (!alreadyPresent)
-            {
-                var bridgeClassBytes = BuildLegacyBridgeClass();
-                var classEntry = outputArchive.CreateEntry(LegacyBridgeClassEntry, CompressionLevel.Optimal);
-                using var classStream = classEntry.Open();
-                classStream.Write(bridgeClassBytes, 0, bridgeClassBytes.Length);
-            }
+            var classEntry = outputArchive.CreateEntry(LegacyBridgeClassEntry, CompressionLevel.Optimal);
+            using var classStream = classEntry.Open();
+            classStream.Write(bridgeClassBytes, 0, bridgeClassBytes.Length);
         }
 
         return new LegacyBridgeCompatPatchStats(
@@ -1206,6 +1205,7 @@ public sealed class AdminLauncherController(
         var joinServerNameIndex = pool.AddUtf8("joinServer");
         var singleStringDescriptorIndex = pool.AddUtf8("(Ljava/lang/String;)Ljava/lang/String;");
         var checkServerDescriptorIndex = pool.AddUtf8("(Ljava/lang/String;Ljava/lang/String;)Z");
+        var checkServerLegacyDescriptorIndex = pool.AddUtf8("(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;");
         var joinServerDescriptorIndex = pool.AddUtf8("(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;");
 
         var emptyStringConstantIndex = pool.AddStringConstant(string.Empty);
@@ -1224,8 +1224,8 @@ public sealed class AdminLauncherController(
         WriteU2(stream, 0);
         WriteU2(stream, 0);
 
-        // constructor + 4 public static methods
-        WriteU2(stream, 5);
+        // constructor + 5 public static methods
+        WriteU2(stream, 6);
 
         WriteMethod(
             stream,
@@ -1266,6 +1266,16 @@ public sealed class AdminLauncherController(
             maxStack: 1,
             maxLocals: 2,
             code: BuildBooleanReturnCode(true));
+
+        WriteMethod(
+            stream,
+            accessFlags: 0x0009,
+            nameIndex: checkServerNameIndex,
+            descriptorIndex: checkServerLegacyDescriptorIndex,
+            codeAttributeNameIndex: codeAttributeNameIndex,
+            maxStack: 1,
+            maxLocals: 3,
+            code: BuildLdcStringReturnCode(okStringConstantIndex));
 
         WriteMethod(
             stream,
