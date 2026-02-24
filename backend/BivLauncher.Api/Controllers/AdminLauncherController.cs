@@ -1202,8 +1202,10 @@ public sealed class AdminLauncherController(
 
         var getCloakNameIndex = pool.AddUtf8("getCloakURL");
         var getSkinNameIndex = pool.AddUtf8("getSkinURL");
+        var checkServerNameIndex = pool.AddUtf8("checkServer");
         var joinServerNameIndex = pool.AddUtf8("joinServer");
         var singleStringDescriptorIndex = pool.AddUtf8("(Ljava/lang/String;)Ljava/lang/String;");
+        var checkServerDescriptorIndex = pool.AddUtf8("(Ljava/lang/String;Ljava/lang/String;)Z");
         var joinServerDescriptorIndex = pool.AddUtf8("(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;");
 
         var emptyStringConstantIndex = pool.AddStringConstant(string.Empty);
@@ -1222,8 +1224,8 @@ public sealed class AdminLauncherController(
         WriteU2(stream, 0);
         WriteU2(stream, 0);
 
-        // constructor + 3 public static methods
-        WriteU2(stream, 4);
+        // constructor + 4 public static methods
+        WriteU2(stream, 5);
 
         WriteMethod(
             stream,
@@ -1258,6 +1260,16 @@ public sealed class AdminLauncherController(
         WriteMethod(
             stream,
             accessFlags: 0x0009,
+            nameIndex: checkServerNameIndex,
+            descriptorIndex: checkServerDescriptorIndex,
+            codeAttributeNameIndex: codeAttributeNameIndex,
+            maxStack: 1,
+            maxLocals: 2,
+            code: BuildBooleanReturnCode(true));
+
+        WriteMethod(
+            stream,
+            accessFlags: 0x0009,
             nameIndex: joinServerNameIndex,
             descriptorIndex: joinServerDescriptorIndex,
             codeAttributeNameIndex: codeAttributeNameIndex,
@@ -1288,6 +1300,15 @@ public sealed class AdminLauncherController(
         [
             0x13, (byte)(stringConstantIndex >> 8), (byte)(stringConstantIndex & 0xFF),
             0xB0
+        ];
+    }
+
+    private static byte[] BuildBooleanReturnCode(bool value)
+    {
+        return
+        [
+            value ? (byte)0x04 : (byte)0x03,
+            0xAC
         ];
     }
 
