@@ -343,6 +343,16 @@ builder.Services.AddRateLimiter(options =>
 
 var app = builder.Build();
 
+var launcherClientProof = (app.Configuration["LAUNCHER_CLIENT_PROOF"] ?? string.Empty).Trim();
+if (string.IsNullOrWhiteSpace(launcherClientProof))
+{
+    app.Logger.LogWarning("LAUNCHER_CLIENT_PROOF is empty. Launcher proof check is disabled.");
+}
+else
+{
+    app.Logger.LogInformation("LAUNCHER_CLIENT_PROOF is configured (length: {ProofLength}).", launcherClientProof.Length);
+}
+
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -356,32 +366,37 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors("AdminClient");
-app.Use(async (context, next) =>
+var yggVerboseLogsRaw = app.Configuration["YGG_VERBOSE_LOGS"];
+var yggVerboseLogsEnabled = bool.TryParse(yggVerboseLogsRaw, out var parsedYggVerboseLogs) && parsedYggVerboseLogs;
+if (yggVerboseLogsEnabled)
 {
-    if (!IsYggdrasilPath(context.Request.Path))
+    app.Use(async (context, next) =>
     {
+        if (!IsYggdrasilPath(context.Request.Path))
+        {
+            await next();
+            return;
+        }
+
+        var startedAt = DateTime.UtcNow;
+        app.Logger.LogInformation(
+            "YGG REQ {Method} {Path}{Query} from {RemoteIp}",
+            context.Request.Method,
+            context.Request.Path.Value ?? string.Empty,
+            context.Request.QueryString.Value ?? string.Empty,
+            context.Connection.RemoteIpAddress?.ToString() ?? "unknown");
+
         await next();
-        return;
-    }
 
-    var startedAt = DateTime.UtcNow;
-    app.Logger.LogWarning(
-        "YGG REQ {Method} {Path}{Query} from {RemoteIp}",
-        context.Request.Method,
-        context.Request.Path.Value ?? string.Empty,
-        context.Request.QueryString.Value ?? string.Empty,
-        context.Connection.RemoteIpAddress?.ToString() ?? "unknown");
-
-    await next();
-
-    app.Logger.LogWarning(
-        "YGG RES {StatusCode} for {Method} {Path}{Query} in {ElapsedMs} ms",
-        context.Response.StatusCode,
-        context.Request.Method,
-        context.Request.Path.Value ?? string.Empty,
-        context.Request.QueryString.Value ?? string.Empty,
-        (DateTime.UtcNow - startedAt).TotalMilliseconds);
-});
+        app.Logger.LogInformation(
+            "YGG RES {StatusCode} for {Method} {Path}{Query} in {ElapsedMs} ms",
+            context.Response.StatusCode,
+            context.Request.Method,
+            context.Request.Path.Value ?? string.Empty,
+            context.Request.QueryString.Value ?? string.Empty,
+            (DateTime.UtcNow - startedAt).TotalMilliseconds);
+    });
+}
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();

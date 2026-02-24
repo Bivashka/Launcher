@@ -11,6 +11,8 @@ namespace BivLauncher.Api.Services;
 
 public sealed class JwtTokenService(IOptions<JwtOptions> options) : IJwtTokenService
 {
+    private const string LauncherVerifiedClaimType = "launcher_verified";
+    private const string LauncherVerifiedClaimValue = "1";
     private readonly JwtOptions _jwtOptions = options.Value;
 
     public string CreateAdminToken(AdminUser adminUser)
@@ -46,7 +48,9 @@ public sealed class JwtTokenService(IOptions<JwtOptions> options) : IJwtTokenSer
             new(JwtRegisteredClaimNames.UniqueName, authAccount.Username),
             new(ClaimTypes.Name, authAccount.Username),
             new("external_id", authAccount.ExternalId),
-            new("session_version", authAccount.SessionVersion.ToString(CultureInfo.InvariantCulture))
+            new("session_version", authAccount.SessionVersion.ToString(CultureInfo.InvariantCulture)),
+            // Marks token as issued by launcher login flow (used by yggdrasil/session checks).
+            new(LauncherVerifiedClaimType, LauncherVerifiedClaimValue)
         };
 
         foreach (var role in roles.Where(x => !string.IsNullOrWhiteSpace(x)))

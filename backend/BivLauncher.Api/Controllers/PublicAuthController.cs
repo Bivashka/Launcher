@@ -24,6 +24,8 @@ public sealed class PublicAuthController(
     ITwoFactorService twoFactorService,
     ILogger<PublicAuthController> logger) : ControllerBase
 {
+    private const string LauncherVerifiedClaimType = "launcher_verified";
+    private const string LauncherVerifiedClaimValue = "1";
     private const string LauncherClientHeaderName = "X-BivLauncher-Client";
     private const string LauncherClientHeaderPrefix = "BivLauncher.Client/";
     private const string LauncherProofHeaderName = "X-BivLauncher-Proof";
@@ -70,6 +72,11 @@ public sealed class PublicAuthController(
         }
 
         if (tokenSessionVersion != account.SessionVersion)
+        {
+            return Unauthorized(new { error = "Player session expired. Login is required." });
+        }
+
+        if (IsLauncherProofEnforced() && !HasLauncherVerifiedClaim(User))
         {
             return Unauthorized(new { error = "Player session expired. Login is required." });
         }
@@ -460,6 +467,18 @@ public sealed class PublicAuthController(
         }
 
         return true;
+    }
+
+    private bool IsLauncherProofEnforced()
+    {
+        var requiredProof = (configuration["LAUNCHER_CLIENT_PROOF"] ?? string.Empty).Trim();
+        return !string.IsNullOrWhiteSpace(requiredProof);
+    }
+
+    private static bool HasLauncherVerifiedClaim(ClaimsPrincipal principal)
+    {
+        var claimValue = principal.FindFirstValue(LauncherVerifiedClaimType)?.Trim() ?? string.Empty;
+        return string.Equals(claimValue, LauncherVerifiedClaimValue, StringComparison.Ordinal);
     }
 
     private static string BuildPendingTwoFactorChallengeKey(string username, string hwidHash, string deviceUserName)

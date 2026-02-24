@@ -24,6 +24,8 @@ public sealed class PublicYggdrasilController(
     IOptions<JwtOptions> jwtOptionsAccessor,
     ILogger<PublicYggdrasilController> logger) : ControllerBase
 {
+    private const string LauncherVerifiedClaimType = "launcher_verified";
+    private const string LauncherVerifiedClaimValue = "1";
     private const string ForbiddenOperation = "ForbiddenOperationException";
     private const string IllegalArgument = "IllegalArgumentException";
     private const string LegacyJoinOk = "OK";
@@ -603,6 +605,16 @@ public sealed class PublicYggdrasilController(
         if (string.IsNullOrWhiteSpace(externalId) && string.IsNullOrWhiteSpace(username))
         {
             return TokenValidationResult.Fail("Invalid access token identity payload.", cause: string.Empty);
+        }
+
+        var requiredProof = (configuration["LAUNCHER_CLIENT_PROOF"] ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(requiredProof))
+        {
+            var launcherVerified = principal.FindFirstValue(LauncherVerifiedClaimType)?.Trim() ?? string.Empty;
+            if (!string.Equals(launcherVerified, LauncherVerifiedClaimValue, StringComparison.Ordinal))
+            {
+                return TokenValidationResult.Fail("Access token session expired. Login again.", cause: string.Empty);
+            }
         }
 
         AuthAccount? account = null;
