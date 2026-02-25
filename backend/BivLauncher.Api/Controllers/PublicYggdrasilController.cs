@@ -26,6 +26,7 @@ public sealed class PublicYggdrasilController(
 {
     private const string LauncherVerifiedClaimType = "launcher_verified";
     private const string LauncherVerifiedClaimValue = "1";
+    private const string LauncherProofIdClaimType = "launcher_proof_id";
     private const string LauncherVersionClaimType = "launcher_version";
     private const string LauncherMinClientVersionConfigKey = "LAUNCHER_MIN_CLIENT_VERSION";
     private const string ForbiddenOperation = "ForbiddenOperationException";
@@ -613,7 +614,8 @@ public sealed class PublicYggdrasilController(
         if (!string.IsNullOrWhiteSpace(requiredProof))
         {
             var launcherVerified = principal.FindFirstValue(LauncherVerifiedClaimType)?.Trim() ?? string.Empty;
-            if (!string.Equals(launcherVerified, LauncherVerifiedClaimValue, StringComparison.Ordinal))
+            if (!string.Equals(launcherVerified, LauncherVerifiedClaimValue, StringComparison.Ordinal) ||
+                !IsTokenLauncherProofAllowed(principal))
             {
                 return TokenValidationResult.Fail("Access token session expired. Login again.", cause: string.Empty);
             }
@@ -719,6 +721,31 @@ public sealed class PublicYggdrasilController(
         }
 
         return tokenLauncherVersion >= minimumLauncherVersion;
+    }
+
+    private bool IsTokenLauncherProofAllowed(ClaimsPrincipal principal)
+    {
+        var expectedProofId = ResolveLauncherProofId();
+        if (string.IsNullOrWhiteSpace(expectedProofId))
+        {
+            return false;
+        }
+
+        var tokenProofId = principal.FindFirstValue(LauncherProofIdClaimType)?.Trim() ?? string.Empty;
+        return !string.IsNullOrWhiteSpace(tokenProofId) &&
+               string.Equals(tokenProofId, expectedProofId, StringComparison.Ordinal);
+    }
+
+    private string ResolveLauncherProofId()
+    {
+        var requiredProof = (configuration["LAUNCHER_CLIENT_PROOF"] ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(requiredProof))
+        {
+            return string.Empty;
+        }
+
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(requiredProof));
+        return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
     private static TokenValidationParameters BuildTokenValidationParameters(JwtOptions options)

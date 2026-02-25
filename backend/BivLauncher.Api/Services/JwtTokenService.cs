@@ -14,6 +14,7 @@ public sealed class JwtTokenService(IOptions<JwtOptions> options) : IJwtTokenSer
     private const string LauncherVerifiedClaimType = "launcher_verified";
     private const string LauncherVerifiedClaimValue = "1";
     private const string LauncherVersionClaimType = "launcher_version";
+    private const string LauncherProofIdClaimType = "launcher_proof_id";
     private readonly JwtOptions _jwtOptions = options.Value;
 
     public string CreateAdminToken(AdminUser adminUser)
@@ -41,7 +42,11 @@ public sealed class JwtTokenService(IOptions<JwtOptions> options) : IJwtTokenSer
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
 
-    public string CreatePlayerToken(AuthAccount authAccount, IReadOnlyList<string> roles, string launcherVersion = "")
+    public string CreatePlayerToken(
+        AuthAccount authAccount,
+        IReadOnlyList<string> roles,
+        string launcherVersion = "",
+        string launcherProofId = "")
     {
         var claims = new List<Claim>
         {
@@ -58,6 +63,12 @@ public sealed class JwtTokenService(IOptions<JwtOptions> options) : IJwtTokenSer
         if (!string.IsNullOrWhiteSpace(normalizedLauncherVersion))
         {
             claims.Add(new Claim(LauncherVersionClaimType, normalizedLauncherVersion));
+        }
+
+        var normalizedLauncherProofId = (launcherProofId ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(normalizedLauncherProofId))
+        {
+            claims.Add(new Claim(LauncherProofIdClaimType, normalizedLauncherProofId));
         }
 
         foreach (var role in roles.Where(x => !string.IsNullOrWhiteSpace(x)))

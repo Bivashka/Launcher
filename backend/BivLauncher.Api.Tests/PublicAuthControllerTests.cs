@@ -91,13 +91,81 @@ public sealed class PublicAuthControllerTests
         Assert.Equal(StatusCodes.Status401Unauthorized, unauthorized.StatusCode);
     }
 
-    private static PublicAuthController CreateController(AppDbContext dbContext, string minClientVersion)
+    [Fact]
+    public async Task Session_WhenProofConfiguredAndTokenHasNoProofIdClaim_ReturnsUnauthorized()
     {
-        var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
+        await using var fixture = await TestFixture.CreateAsync();
+        var jwtService = new JwtTokenService(Microsoft.Extensions.Options.Options.Create(BuildJwtOptions()));
+        var account = new AuthAccount
+        {
+            Username = "player",
+            ExternalId = "player-proof-id",
+            Roles = "player",
+            SessionVersion = 0
+        };
+        fixture.DbContext.AuthAccounts.Add(account);
+        await fixture.DbContext.SaveChangesAsync();
+
+        var token = jwtService.CreatePlayerToken(account, ["player"], launcherVersion: "1.0.3");
+        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token);
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(jwt.Claims, "Bearer"));
+
+        const string proof = "test-proof-secret";
+        var controller = CreateController(fixture.DbContext, minClientVersion: string.Empty, launcherProof: proof);
+        controller.ControllerContext.HttpContext.User = principal;
+        controller.ControllerContext.HttpContext.Request.Headers["X-BivLauncher-Client"] = "BivLauncher.Client/1.0.3";
+        controller.ControllerContext.HttpContext.Request.Headers["X-BivLauncher-Proof"] = proof;
+
+        var response = await controller.Session(CancellationToken.None);
+
+        var unauthorized = Assert.IsType<UnauthorizedObjectResult>(response.Result);
+        Assert.Equal(StatusCodes.Status401Unauthorized, unauthorized.StatusCode);
+    }
+
+    [Fact]
+    public async Task Login_WhenProofConfigured_IssuesTokenWithProofIdClaim()
+    {
+        await using var fixture = await TestFixture.CreateAsync();
+        const string proof = "test-proof-secret";
+
+        var controller = CreateController(fixture.DbContext, minClientVersion: "1.0.0", launcherProof: proof);
+        controller.ControllerContext.HttpContext.Request.Headers["X-BivLauncher-Client"] = "BivLauncher.Client/1.0.3";
+        controller.ControllerContext.HttpContext.Request.Headers["X-BivLauncher-Proof"] = proof;
+
+        var response = await controller.Login(
+            new PublicAuthLoginRequest
             {
-                ["LAUNCHER_MIN_CLIENT_VERSION"] = minClientVersion
-            })
+                Username = "player",
+                Password = "secret"
+            },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(response.Result);
+        var payload = Assert.IsType<PublicAuthLoginResponse>(ok.Value);
+
+        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(payload.Token);
+        var proofId = jwt.Claims.FirstOrDefault(x => x.Type == "launcher_proof_id")?.Value;
+        Assert.False(string.IsNullOrWhiteSpace(proofId));
+    }
+
+    private static PublicAuthController CreateController(
+        AppDbContext dbContext,
+        string minClientVersion,
+        string launcherProof = "")
+    {
+        var values = new Dictionary<string, string?>();
+        if (!string.IsNullOrWhiteSpace(minClientVersion))
+        {
+            values["LAUNCHER_MIN_CLIENT_VERSION"] = minClientVersion;
+        }
+
+        if (!string.IsNullOrWhiteSpace(launcherProof))
+        {
+            values["LAUNCHER_CLIENT_PROOF"] = launcherProof;
+        }
+
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(values)
             .Build();
 
         var controller = new PublicAuthController(

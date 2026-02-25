@@ -188,6 +188,45 @@ public sealed class PublicYggdrasilControllerTests
     }
 
     [Fact]
+    public async Task Validate_WhenProofConfiguredAndTokenHasNoProofId_ReturnsForbidden()
+    {
+        await using var fixture = await TestFixture.CreateAsync();
+        var options = BuildJwtOptions();
+
+        var account = new AuthAccount
+        {
+            Username = "ProofUser",
+            ExternalId = "proof-user-id",
+            SessionVersion = 0,
+            Roles = "player"
+        };
+        fixture.DbContext.AuthAccounts.Add(account);
+        await fixture.DbContext.SaveChangesAsync();
+
+        var token = new JwtTokenService(Microsoft.Extensions.Options.Options.Create(options))
+            .CreatePlayerToken(account, ["player"], launcherVersion: "1.0.3");
+
+        var controller = new PublicYggdrasilController(
+            fixture.DbContext,
+            BuildConfiguration(launcherProof: "proof-secret"),
+            Microsoft.Extensions.Options.Options.Create(options),
+            NullLogger<PublicYggdrasilController>.Instance);
+
+        var response = await controller.Validate(
+            new PublicYggdrasilController.YggdrasilAccessTokenRequest
+            {
+                AccessToken = token,
+                ClientToken = Guid.NewGuid().ToString("N")
+            },
+            CancellationToken.None);
+
+        var forbidden = Assert.IsType<ObjectResult>(response);
+        Assert.Equal(StatusCodes.Status403Forbidden, forbidden.StatusCode);
+        var payload = JsonSerializer.SerializeToElement(forbidden.Value);
+        Assert.Equal("ForbiddenOperationException", payload.GetProperty("error").GetString());
+    }
+
+    [Fact]
     public async Task HasJoined_WithoutJoin_ReturnsNoContent()
     {
         await using var fixture = await TestFixture.CreateAsync();
@@ -286,14 +325,21 @@ public sealed class PublicYggdrasilControllerTests
         };
     }
 
-    private static IConfiguration BuildConfiguration()
+    private static IConfiguration BuildConfiguration(string launcherProof = "")
     {
+        var values = new Dictionary<string, string?>
+        {
+            ["PUBLIC_BASE_URL"] = "http://95.217.99.17:8080",
+            ["YGGDRASIL_SERVER_NAME"] = "BivLauncher Auth"
+        };
+
+        if (!string.IsNullOrWhiteSpace(launcherProof))
+        {
+            values["LAUNCHER_CLIENT_PROOF"] = launcherProof;
+        }
+
         return new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["PUBLIC_BASE_URL"] = "http://95.217.99.17:8080",
-                ["YGGDRASIL_SERVER_NAME"] = "BivLauncher Auth"
-            })
+            .AddInMemoryCollection(values)
             .Build();
     }
 

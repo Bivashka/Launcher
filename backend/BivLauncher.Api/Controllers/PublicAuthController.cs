@@ -9,6 +9,8 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using System.Collections.Concurrent;
 using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace BivLauncher.Api.Controllers;
 
@@ -27,6 +29,7 @@ public sealed class PublicAuthController(
     private const string LauncherVerifiedClaimType = "launcher_verified";
     private const string LauncherVerifiedClaimValue = "1";
     private const string LauncherVersionClaimType = "launcher_version";
+    private const string LauncherProofIdClaimType = "launcher_proof_id";
     private const string LauncherClientHeaderName = "X-BivLauncher-Client";
     private const string LauncherClientHeaderPrefix = "BivLauncher.Client/";
     private const string LauncherProofHeaderName = "X-BivLauncher-Proof";
@@ -83,7 +86,8 @@ public sealed class PublicAuthController(
             return Unauthorized(new { error = "Player session expired. Login is required." });
         }
 
-        if (IsLauncherProofEnforced() && !HasLauncherVerifiedClaim(User))
+        if (IsLauncherProofEnforced() &&
+            (!HasLauncherVerifiedClaim(User) || !IsTokenLauncherProofAllowed(User)))
         {
             return Unauthorized(new { error = "Player session expired. Login is required." });
         }
@@ -363,7 +367,12 @@ public sealed class PublicAuthController(
         RemovePendingTwoFactorChallenge(pendingTwoFactorChallengeKey);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        var token = jwtTokenService.CreatePlayerToken(account, roles, launcherClientVersionRaw);
+        var launcherProofId = ResolveLauncherProofId();
+        var token = jwtTokenService.CreatePlayerToken(
+            account,
+            roles,
+            launcherClientVersionRaw,
+            launcherProofId);
 
         return Ok(new PublicAuthLoginResponse(
             Token: token,
@@ -522,10 +531,36 @@ public sealed class PublicAuthController(
         return string.Equals(claimValue, LauncherVerifiedClaimValue, StringComparison.Ordinal);
     }
 
+    private bool IsTokenLauncherProofAllowed(ClaimsPrincipal principal)
+    {
+        var expectedProofId = ResolveLauncherProofId();
+        if (string.IsNullOrWhiteSpace(expectedProofId))
+        {
+            return false;
+        }
+
+        var tokenProofId = principal.FindFirstValue(LauncherProofIdClaimType)?.Trim() ?? string.Empty;
+        return !string.IsNullOrWhiteSpace(tokenProofId) &&
+               string.Equals(tokenProofId, expectedProofId, StringComparison.Ordinal);
+    }
+
     private bool IsLauncherMinVersionEnforced()
     {
         var minimumLauncherVersionRaw = (configuration[LauncherMinClientVersionConfigKey] ?? string.Empty).Trim();
         return !string.IsNullOrWhiteSpace(minimumLauncherVersionRaw);
+    }
+
+    private string ResolveLauncherProofId()
+    {
+        var requiredProof = (configuration["LAUNCHER_CLIENT_PROOF"] ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(requiredProof))
+        {
+            return string.Empty;
+        }
+
+        using var sha256 = SHA256.Create();
+        var hash = sha256.ComputeHash(Encoding.UTF8.GetBytes(requiredProof));
+        return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
     private bool IsTokenLauncherVersionAllowed(ClaimsPrincipal principal)
