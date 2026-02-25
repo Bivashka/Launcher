@@ -9,7 +9,10 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -18,8 +21,13 @@ public final class LegacyBridge {
     private static final String DEFAULT_SESSION_BASE = "https://sessionserver.mojang.com";
     private static final String YGGDRASIL_PROPERTY = "biv.auth.yggdrasil";
     private static final String YGGDRASIL_PROPERTY_FALLBACK = "authlibinjector.yggdrasil";
-    private static final Pattern TOKEN_PATTERN = Pattern.compile("(?:^|:)token:([^:]+):?([0-9a-fA-F]{32})?$", Pattern.CASE_INSENSITIVE);
+
+    private static final Pattern TOKEN_PATTERN = Pattern.compile("(?:^|:)token:([^:]+)(?::([0-9a-fA-F]{32}))?$", Pattern.CASE_INSENSITIVE);
     private static final Pattern UUID_PATTERN = Pattern.compile("[0-9a-fA-F]{32}");
+    private static final Pattern STRICT_UUID_PATTERN = Pattern.compile("^[0-9a-fA-F]{32}$");
+    private static final Pattern JWT_SEGMENT_PATTERN = Pattern.compile("^[A-Za-z0-9_-]+$");
+    private static final Pattern USERNAME_PATTERN = Pattern.compile("^[A-Za-z0-9_]{2,16}$");
+    private static final Pattern IPV4_PATTERN = Pattern.compile("^\\d{1,3}(?:\\.\\d{1,3}){3}$");
 
     private LegacyBridge() {
     }
@@ -48,52 +56,121 @@ public final class LegacyBridge {
         return resolveAuthBase();
     }
 
-    public static String joinServer(String username, String sessionId, String serverId) {
+    public static String joinServer(String first, String second, String third) {
         try {
             String authBase = resolveAuthBase();
             if (authBase.isEmpty()) {
                 return "Bad login";
             }
 
-            String token = extractToken(sessionId);
-            if (token.isEmpty()) {
-                token = getAccessToken();
-            }
-            if (token.isEmpty()) {
+            List<String> tokenCandidates = collectTokenCandidates(
+                first,
+                second,
+                third,
+                getAccessToken(),
+                getSessionId(),
+                getProp("biv.auth.token"),
+                getProp("biv.auth.session"));
+            if (tokenCandidates.isEmpty()) {
                 return "Bad login";
             }
 
-            String profileId = extractProfileId(sessionId);
-            if (profileId.isEmpty()) {
-                profileId = normalizeUuid(getProp("biv.auth.uuid"));
+            List<String> profileIdCandidates = collectProfileIdCandidates(
+                first,
+                second,
+                third,
+                getProp("biv.auth.uuid"));
+            if (profileIdCandidates.isEmpty()) {
+                profileIdCandidates.add("");
             }
 
-            String payload = "{\"accessToken\":\"" + esc(token) + "\",\"selectedProfile\":\"" + esc(profileId) + "\",\"serverId\":\"" + esc(serverId) + "\"}";
-            int status = postJson(authBase + "/session/minecraft/join", payload);
-            return status >= 200 && status < 300 ? "OK" : "Bad login";
+            List<String> serverIdCandidates = collectServerIdCandidates(first, second, third, tokenCandidates);
+            if (serverIdCandidates.isEmpty()) {
+                addIfNotEmpty(serverIdCandidates, third);
+                addIfNotEmpty(serverIdCandidates, second);
+                addIfNotEmpty(serverIdCandidates, first);
+            }
+
+            for (String token : tokenCandidates) {
+                for (String serverId : serverIdCandidates) {
+                    if (nullToEmpty(token).isEmpty() || nullToEmpty(serverId).isEmpty()) {
+                        continue;
+                    }
+
+                    for (String profileId : profileIdCandidates) {
+                        String payload = "{\"accessToken\":\"" + esc(token) + "\",\"selectedProfile\":\"" + esc(profileId) + "\",\"serverId\":\"" + esc(serverId) + "\"}";
+                        int status = postJson(authBase + "/session/minecraft/join", payload);
+                        if (status >= 200 && status < 300) {
+                            return "OK";
+                        }
+                    }
+                }
+            }
+
+            return "Bad login";
         } catch (Exception ex) {
             return "Bad login";
         }
     }
 
-    public static boolean checkServer(String username, String serverId) {
-        return "YES".equalsIgnoreCase(checkServer(username, serverId, ""));
+    public static boolean checkServer(String first, String second) {
+        return "YES".equalsIgnoreCase(checkServer(first, second, ""));
     }
 
-    public static String checkServer(String username, String serverId, String ip) {
+    public static String checkServer(String first, String second, String third) {
         try {
             String sessionBase = resolveSessionBase();
             if (sessionBase.isEmpty()) {
                 return "NO";
             }
 
+            List<String> tokenCandidates = collectTokenCandidates(first, second, third, "", "", "", "");
+            List<String> serverIdCandidates = collectServerIdCandidates(first, second, third, tokenCandidates);
+            if (serverIdCandidates.isEmpty()) {
+                addIfNotEmpty(serverIdCandidates, second);
+                addIfNotEmpty(serverIdCandidates, first);
+            }
+
+            List<String> usernameCandidates = collectUsernameCandidates(
+                first,
+                second,
+                third,
+                getUsername(),
+                serverIdCandidates,
+                tokenCandidates);
+            if (usernameCandidates.isEmpty()) {
+                return "NO";
+            }
+
+            String ip = looksLikeIpAddress(third) ? nullToEmpty(third) : "";
+
+            for (String username : usernameCandidates) {
+                for (String serverId : serverIdCandidates) {
+                    if (nullToEmpty(username).isEmpty() || nullToEmpty(serverId).isEmpty()) {
+                        continue;
+                    }
+
+                    if (queryHasJoined(sessionBase, username, serverId, ip)) {
+                        return "YES";
+                    }
+                }
+            }
+
+            return "NO";
+        } catch (Exception ex) {
+            return "NO";
+        }
+    }
+
+    private static boolean queryHasJoined(String sessionBase, String username, String serverId, String ip) {
+        try {
             StringBuilder query = new StringBuilder(sessionBase)
                 .append("/session/minecraft/hasJoined?username=")
                 .append(URLEncoder.encode(nullToEmpty(username), "UTF-8"))
                 .append("&serverId=")
                 .append(URLEncoder.encode(nullToEmpty(serverId), "UTF-8"));
 
-            if (ip != null && !ip.trim().isEmpty()) {
+            if (!nullToEmpty(ip).isEmpty()) {
                 query.append("&ip=").append(URLEncoder.encode(ip.trim(), "UTF-8"));
             }
 
@@ -104,14 +181,267 @@ public final class LegacyBridge {
             connection.setUseCaches(false);
 
             if (connection.getResponseCode() != 200) {
-                return "NO";
+                return false;
             }
 
             String body = readBody(connection.getInputStream());
-            return body.contains("\"id\"") && body.contains("\"name\"") ? "YES" : "NO";
+            return body.contains("\"id\"") && body.contains("\"name\"");
         } catch (Exception ex) {
-            return "NO";
+            return false;
         }
+    }
+
+    private static List<String> collectTokenCandidates(
+        String first,
+        String second,
+        String third,
+        String fourth,
+        String fifth,
+        String sixth,
+        String seventh) {
+        Set<String> result = new LinkedHashSet<String>();
+        addTokenCandidates(result, first);
+        addTokenCandidates(result, second);
+        addTokenCandidates(result, third);
+        addTokenCandidates(result, fourth);
+        addTokenCandidates(result, fifth);
+        addTokenCandidates(result, sixth);
+        addTokenCandidates(result, seventh);
+        return new ArrayList<String>(result);
+    }
+
+    private static void addTokenCandidates(Set<String> result, String raw) {
+        String value = nullToEmpty(raw);
+        if (value.isEmpty()) {
+            return;
+        }
+
+        if (value.regionMatches(true, 0, "token:", 0, "token:".length())) {
+            String[] parts = value.split(":");
+            for (int i = 1; i < parts.length; i++) {
+                String part = nullToEmpty(parts[i]);
+                if (looksLikeJwt(part)) {
+                    result.add(part);
+                }
+            }
+
+            for (int i = 1; i < parts.length; i++) {
+                String part = nullToEmpty(parts[i]);
+                if (isLikelyToken(part)) {
+                    result.add(part);
+                }
+            }
+        }
+
+        if (looksLikeJwt(value)) {
+            result.add(value);
+        }
+
+        String extracted = extractToken(value);
+        if (isLikelyToken(extracted)) {
+            result.add(extracted);
+        }
+    }
+
+    private static List<String> collectProfileIdCandidates(String first, String second, String third, String fourth) {
+        Set<String> result = new LinkedHashSet<String>();
+        addProfileIdCandidates(result, first);
+        addProfileIdCandidates(result, second);
+        addProfileIdCandidates(result, third);
+        addProfileIdCandidates(result, fourth);
+        return new ArrayList<String>(result);
+    }
+
+    private static void addProfileIdCandidates(Set<String> result, String raw) {
+        String normalized = normalizeUuid(raw);
+        if (!normalized.isEmpty()) {
+            result.add(normalized);
+        }
+
+        String value = nullToEmpty(raw);
+        if (!value.regionMatches(true, 0, "token:", 0, "token:".length())) {
+            return;
+        }
+
+        String[] parts = value.split(":");
+        for (int i = 1; i < parts.length; i++) {
+            String part = normalizeUuid(parts[i]);
+            if (!part.isEmpty()) {
+                result.add(part);
+            }
+        }
+    }
+
+    private static List<String> collectServerIdCandidates(String first, String second, String third, List<String> tokenCandidates) {
+        Set<String> blocked = new LinkedHashSet<String>();
+        for (String token : tokenCandidates) {
+            if (!nullToEmpty(token).isEmpty()) {
+                blocked.add(token);
+            }
+        }
+
+        Set<String> result = new LinkedHashSet<String>();
+        addServerIdCandidate(result, blocked, first);
+        addServerIdCandidate(result, blocked, second);
+        addServerIdCandidate(result, blocked, third);
+        return new ArrayList<String>(result);
+    }
+
+    private static void addServerIdCandidate(Set<String> result, Set<String> blocked, String raw) {
+        String value = nullToEmpty(raw);
+        if (value.isEmpty()) {
+            return;
+        }
+
+        if (blocked.contains(value)) {
+            return;
+        }
+
+        if (value.regionMatches(true, 0, "token:", 0, "token:".length())) {
+            return;
+        }
+
+        if (looksLikeJwt(value) || looksLikeUuid(value) || looksLikeIpAddress(value) || isLikelyUsername(value)) {
+            return;
+        }
+
+        result.add(value);
+    }
+
+    private static List<String> collectUsernameCandidates(
+        String first,
+        String second,
+        String third,
+        String fallback,
+        List<String> serverIdCandidates,
+        List<String> tokenCandidates) {
+        Set<String> blocked = new LinkedHashSet<String>();
+        for (String value : serverIdCandidates) {
+            if (!nullToEmpty(value).isEmpty()) {
+                blocked.add(value);
+            }
+        }
+
+        for (String value : tokenCandidates) {
+            if (!nullToEmpty(value).isEmpty()) {
+                blocked.add(value);
+            }
+        }
+
+        Set<String> result = new LinkedHashSet<String>();
+        addUsernameCandidate(result, blocked, fallback);
+        addUsernameCandidate(result, blocked, first);
+        addUsernameCandidate(result, blocked, second);
+        addUsernameCandidate(result, blocked, third);
+
+        if (!result.isEmpty()) {
+            return new ArrayList<String>(result);
+        }
+
+        addFallbackUsername(result, blocked, first);
+        addFallbackUsername(result, blocked, second);
+        addFallbackUsername(result, blocked, third);
+        return new ArrayList<String>(result);
+    }
+
+    private static void addUsernameCandidate(Set<String> result, Set<String> blocked, String raw) {
+        String value = nullToEmpty(raw);
+        if (value.isEmpty() || blocked.contains(value)) {
+            return;
+        }
+
+        if (isLikelyUsername(value)) {
+            result.add(value);
+        }
+    }
+
+    private static void addFallbackUsername(Set<String> result, Set<String> blocked, String raw) {
+        String value = nullToEmpty(raw);
+        if (value.isEmpty() || blocked.contains(value)) {
+            return;
+        }
+
+        if (value.regionMatches(true, 0, "token:", 0, "token:".length())) {
+            return;
+        }
+
+        if (looksLikeJwt(value) || looksLikeUuid(value) || looksLikeIpAddress(value)) {
+            return;
+        }
+
+        result.add(value);
+    }
+
+    private static boolean isLikelyToken(String value) {
+        String normalized = nullToEmpty(value);
+        if (normalized.isEmpty()) {
+            return false;
+        }
+
+        if (looksLikeJwt(normalized)) {
+            return true;
+        }
+
+        if (looksLikeUuid(normalized) || looksLikeIpAddress(normalized) || isLikelyUsername(normalized)) {
+            return false;
+        }
+
+        return normalized.length() >= 16;
+    }
+
+    private static boolean isLikelyUsername(String value) {
+        String normalized = nullToEmpty(value);
+        return !normalized.isEmpty() && USERNAME_PATTERN.matcher(normalized).matches();
+    }
+
+    private static boolean looksLikeJwt(String value) {
+        String normalized = nullToEmpty(value);
+        if (normalized.isEmpty()) {
+            return false;
+        }
+
+        String[] parts = normalized.split("\\.");
+        if (parts.length != 3) {
+            return false;
+        }
+
+        for (String part : parts) {
+            if (part == null || part.isEmpty() || !JWT_SEGMENT_PATTERN.matcher(part).matches()) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static boolean looksLikeUuid(String value) {
+        String normalized = nullToEmpty(value).replace("-", "");
+        return STRICT_UUID_PATTERN.matcher(normalized).matches();
+    }
+
+    private static boolean looksLikeIpAddress(String value) {
+        String normalized = nullToEmpty(value);
+        if (normalized.isEmpty() || !IPV4_PATTERN.matcher(normalized).matches()) {
+            return false;
+        }
+
+        String[] parts = normalized.split("\\.");
+        if (parts.length != 4) {
+            return false;
+        }
+
+        for (String part : parts) {
+            try {
+                int octet = Integer.parseInt(part);
+                if (octet < 0 || octet > 255) {
+                    return false;
+                }
+            } catch (NumberFormatException ex) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static String extractToken(String raw) {
@@ -124,36 +454,34 @@ public final class LegacyBridge {
             return "";
         }
 
-        Matcher matcher = TOKEN_PATTERN.matcher(value);
-        if (matcher.find()) {
-            return nullToEmpty(matcher.group(1));
-        }
-
-        if (value.startsWith("token:")) {
+        if (value.regionMatches(true, 0, "token:", 0, "token:".length())) {
             String[] parts = value.split(":");
+            for (int i = 1; i < parts.length; i++) {
+                String part = nullToEmpty(parts[i]);
+                if (looksLikeJwt(part)) {
+                    return part;
+                }
+            }
+
             if (parts.length >= 2) {
                 return nullToEmpty(parts[1]);
             }
         }
 
-        return value;
-    }
-
-    private static String extractProfileId(String raw) {
-        if (raw == null) {
-            return "";
-        }
-
-        Matcher matcher = UUID_PATTERN.matcher(raw);
+        Matcher matcher = TOKEN_PATTERN.matcher(value);
         if (matcher.find()) {
-            return normalizeUuid(matcher.group());
+            return nullToEmpty(matcher.group(1));
         }
 
-        return "";
+        return value;
     }
 
     private static String normalizeUuid(String value) {
         String normalized = nullToEmpty(value).replace("-", "").trim();
+        if (normalized.isEmpty()) {
+            return "";
+        }
+
         Matcher matcher = UUID_PATTERN.matcher(normalized);
         if (!matcher.find()) {
             return "";
@@ -214,11 +542,6 @@ public final class LegacyBridge {
                     continue;
                 }
 
-                String agentPath = normalizedArgument.substring("-javaagent:".length(), equalsIndex).toLowerCase();
-                if (!agentPath.contains("authlib") && !agentPath.contains("launcher")) {
-                    continue;
-                }
-
                 String candidate = normalizeYggdrasilBase(normalizedArgument.substring(equalsIndex + 1));
                 if (!candidate.isEmpty()) {
                     return candidate;
@@ -234,6 +557,11 @@ public final class LegacyBridge {
         String value = nullToEmpty(raw);
         if (value.isEmpty()) {
             return "";
+        }
+
+        if ((value.startsWith("\"") && value.endsWith("\"")) ||
+            (value.startsWith("'") && value.endsWith("'"))) {
+            value = nullToEmpty(value.substring(1, value.length() - 1));
         }
 
         while (value.endsWith("/")) {
@@ -308,5 +636,12 @@ public final class LegacyBridge {
 
     private static String esc(String value) {
         return nullToEmpty(value).replace("\\", "\\\\").replace("\"", "\\\"");
+    }
+
+    private static void addIfNotEmpty(List<String> values, String raw) {
+        String normalized = nullToEmpty(raw);
+        if (!normalized.isEmpty() && !values.contains(normalized)) {
+            values.add(normalized);
+        }
     }
 }
