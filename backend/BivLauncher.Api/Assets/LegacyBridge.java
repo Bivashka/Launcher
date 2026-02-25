@@ -4,16 +4,20 @@ import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.lang.management.ManagementFactory;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public final class LegacyBridge {
-    private static final String AUTH_BASE = "https://authserver.mojang.com";
-    private static final String SESSION_BASE = "https://sessionserver.mojang.com";
+    private static final String DEFAULT_AUTH_BASE = "https://authserver.mojang.com";
+    private static final String DEFAULT_SESSION_BASE = "https://sessionserver.mojang.com";
+    private static final String YGGDRASIL_PROPERTY = "biv.auth.yggdrasil";
+    private static final String YGGDRASIL_PROPERTY_FALLBACK = "authlibinjector.yggdrasil";
     private static final Pattern TOKEN_PATTERN = Pattern.compile("(?:^|:)token:([^:]+):?([0-9a-fA-F]{32})?$", Pattern.CASE_INSENSITIVE);
     private static final Pattern UUID_PATTERN = Pattern.compile("[0-9a-fA-F]{32}");
 
@@ -41,11 +45,16 @@ public final class LegacyBridge {
     }
 
     public static String getServerUrl() {
-        return AUTH_BASE;
+        return resolveAuthBase();
     }
 
     public static String joinServer(String username, String sessionId, String serverId) {
         try {
+            String authBase = resolveAuthBase();
+            if (authBase.isEmpty()) {
+                return "Bad login";
+            }
+
             String token = extractToken(sessionId);
             if (token.isEmpty()) {
                 token = getAccessToken();
@@ -60,7 +69,7 @@ public final class LegacyBridge {
             }
 
             String payload = "{\"accessToken\":\"" + esc(token) + "\",\"selectedProfile\":\"" + esc(profileId) + "\",\"serverId\":\"" + esc(serverId) + "\"}";
-            int status = postJson(AUTH_BASE + "/session/minecraft/join", payload);
+            int status = postJson(authBase + "/session/minecraft/join", payload);
             return status >= 200 && status < 300 ? "OK" : "Bad login";
         } catch (Exception ex) {
             return "Bad login";
@@ -73,7 +82,12 @@ public final class LegacyBridge {
 
     public static String checkServer(String username, String serverId, String ip) {
         try {
-            StringBuilder query = new StringBuilder(SESSION_BASE)
+            String sessionBase = resolveSessionBase();
+            if (sessionBase.isEmpty()) {
+                return "NO";
+            }
+
+            StringBuilder query = new StringBuilder(sessionBase)
                 .append("/session/minecraft/hasJoined?username=")
                 .append(URLEncoder.encode(nullToEmpty(username), "UTF-8"))
                 .append("&serverId=")
@@ -146,6 +160,104 @@ public final class LegacyBridge {
         }
 
         return matcher.group().toLowerCase();
+    }
+
+    private static String resolveAuthBase() {
+        String yggdrasilBase = resolveYggdrasilBase();
+        if (yggdrasilBase.isEmpty()) {
+            return DEFAULT_AUTH_BASE;
+        }
+
+        String lower = yggdrasilBase.toLowerCase();
+        if (lower.endsWith("/authserver")) {
+            return yggdrasilBase;
+        }
+
+        return yggdrasilBase + "/authserver";
+    }
+
+    private static String resolveSessionBase() {
+        String yggdrasilBase = resolveYggdrasilBase();
+        if (yggdrasilBase.isEmpty()) {
+            return DEFAULT_SESSION_BASE;
+        }
+
+        String lower = yggdrasilBase.toLowerCase();
+        if (lower.endsWith("/sessionserver")) {
+            return yggdrasilBase;
+        }
+
+        return yggdrasilBase + "/sessionserver";
+    }
+
+    private static String resolveYggdrasilBase() {
+        String fromProperty = normalizeYggdrasilBase(getProp(YGGDRASIL_PROPERTY));
+        if (!fromProperty.isEmpty()) {
+            return fromProperty;
+        }
+
+        String fromFallbackProperty = normalizeYggdrasilBase(getProp(YGGDRASIL_PROPERTY_FALLBACK));
+        if (!fromFallbackProperty.isEmpty()) {
+            return fromFallbackProperty;
+        }
+
+        try {
+            List<String> inputArguments = ManagementFactory.getRuntimeMXBean().getInputArguments();
+            for (String argument : inputArguments) {
+                String normalizedArgument = nullToEmpty(argument);
+                if (!normalizedArgument.startsWith("-javaagent:")) {
+                    continue;
+                }
+
+                int equalsIndex = normalizedArgument.indexOf('=');
+                if (equalsIndex <= "-javaagent:".length() || equalsIndex >= normalizedArgument.length() - 1) {
+                    continue;
+                }
+
+                String agentPath = normalizedArgument.substring("-javaagent:".length(), equalsIndex).toLowerCase();
+                if (!agentPath.contains("authlib") && !agentPath.contains("launcher")) {
+                    continue;
+                }
+
+                String candidate = normalizeYggdrasilBase(normalizedArgument.substring(equalsIndex + 1));
+                if (!candidate.isEmpty()) {
+                    return candidate;
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+
+        return "";
+    }
+
+    private static String normalizeYggdrasilBase(String raw) {
+        String value = nullToEmpty(raw);
+        if (value.isEmpty()) {
+            return "";
+        }
+
+        while (value.endsWith("/")) {
+            value = value.substring(0, value.length() - 1).trim();
+        }
+
+        if (value.isEmpty()) {
+            return "";
+        }
+
+        String lower = value.toLowerCase();
+        if (!lower.startsWith("https://") && !lower.startsWith("http://")) {
+            return "";
+        }
+
+        if (lower.endsWith("/authserver")) {
+            return value.substring(0, value.length() - "/authserver".length());
+        }
+
+        if (lower.endsWith("/sessionserver")) {
+            return value.substring(0, value.length() - "/sessionserver".length());
+        }
+
+        return value;
     }
 
     private static int postJson(String url, String json) throws Exception {
