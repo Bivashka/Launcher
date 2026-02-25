@@ -184,7 +184,7 @@ public final class LegacyBridge {
                 ", profileIdCandidates=" + profileIdCandidates +
                 ", ip='" + ip + "'");
 
-            if (!authBase.isEmpty()) {
+            if (!authBase.isEmpty() && hasJoinableToken(tokenCandidates)) {
                 // Legacy clients may skip explicit join call. Do it here
                 // using launcher-provided token properties before hasJoined/check.
                 tryJoinCandidates(authBase, tokenCandidates, serverIdCandidates, profileIdCandidates);
@@ -251,6 +251,20 @@ public final class LegacyBridge {
                 }
             }
         }
+    }
+
+    private static boolean hasJoinableToken(List<String> tokenCandidates) {
+        if (tokenCandidates == null || tokenCandidates.isEmpty()) {
+            return false;
+        }
+
+        for (String token : tokenCandidates) {
+            if (looksLikeJwt(token)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static boolean queryHasJoined(String sessionBase, String username, String serverId, String ip) {
