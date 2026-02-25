@@ -130,17 +130,33 @@ public final class LegacyBridge {
         try {
             debug("checkServer args: first='" + nullToEmpty(first) + "', second='" + nullToEmpty(second) + "', third='" + nullToEmpty(third) + "'");
             String sessionBase = resolveSessionBase();
+            String authBase = resolveAuthBase();
             if (sessionBase.isEmpty()) {
                 debug("checkServer session base is empty");
                 return "NO";
             }
 
-            List<String> tokenCandidates = collectTokenCandidates(first, second, third, "", "", "", "");
+            List<String> tokenCandidates = collectTokenCandidates(
+                first,
+                second,
+                third,
+                getAccessToken(),
+                getSessionId(),
+                getProp("biv.auth.token"),
+                getProp("biv.auth.session"));
             List<String> serverIdCandidates = collectServerIdCandidates(first, second, third, tokenCandidates);
             if (serverIdCandidates.isEmpty()) {
                 addIfNotEmpty(serverIdCandidates, second);
                 addIfNotEmpty(serverIdCandidates, first);
                 addIfNotEmpty(serverIdCandidates, third);
+            }
+            List<String> profileIdCandidates = collectProfileIdCandidates(
+                first,
+                second,
+                third,
+                getProp("biv.auth.uuid"));
+            if (profileIdCandidates.isEmpty()) {
+                profileIdCandidates.add("");
             }
 
             List<String> usernameCandidates = collectUsernameCandidates(
@@ -159,7 +175,20 @@ public final class LegacyBridge {
 
             String ip = looksLikeIpAddress(third) ? nullToEmpty(third) : "";
 
-            debug("checkServer sessionBase=" + sessionBase + ", usernameCandidates=" + usernameCandidates + ", serverIdCandidates=" + serverIdCandidates + ", tokenCandidates=" + tokenCandidates + ", ip='" + ip + "'");
+            debug(
+                "checkServer authBase=" + authBase +
+                ", sessionBase=" + sessionBase +
+                ", usernameCandidates=" + usernameCandidates +
+                ", serverIdCandidates=" + serverIdCandidates +
+                ", tokenCandidates=" + tokenCandidates +
+                ", profileIdCandidates=" + profileIdCandidates +
+                ", ip='" + ip + "'");
+
+            if (!authBase.isEmpty()) {
+                // Legacy clients may skip explicit join call. Do it here
+                // using launcher-provided token properties before hasJoined/check.
+                tryJoinCandidates(authBase, tokenCandidates, serverIdCandidates, profileIdCandidates);
+            }
 
             for (String username : usernameCandidates) {
                 for (String serverId : serverIdCandidates) {
@@ -197,6 +226,30 @@ public final class LegacyBridge {
         } catch (Exception ex) {
             debug("checkServer exception: " + ex.getClass().getSimpleName() + ": " + nullToEmpty(ex.getMessage()));
             return "NO";
+        }
+    }
+
+    private static void tryJoinCandidates(
+        String authBase,
+        List<String> tokenCandidates,
+        List<String> serverIdCandidates,
+        List<String> profileIdCandidates) {
+        for (String token : tokenCandidates) {
+            for (String serverId : serverIdCandidates) {
+                if (nullToEmpty(token).isEmpty() || nullToEmpty(serverId).isEmpty()) {
+                    continue;
+                }
+
+                for (String profileId : profileIdCandidates) {
+                    try {
+                        String payload = "{\"accessToken\":\"" + esc(token) + "\",\"selectedProfile\":\"" + esc(profileId) + "\",\"serverId\":\"" + esc(serverId) + "\"}";
+                        int status = postJson(authBase + "/session/minecraft/join", payload);
+                        debug("checkServer pre-join tokenLen=" + nullToEmpty(token).length() + ", serverId='" + serverId + "', profileId='" + nullToEmpty(profileId) + "', status=" + status);
+                    } catch (Exception ex) {
+                        debug("checkServer pre-join exception: " + ex.getClass().getSimpleName() + ": " + nullToEmpty(ex.getMessage()));
+                    }
+                }
+            }
         }
     }
 

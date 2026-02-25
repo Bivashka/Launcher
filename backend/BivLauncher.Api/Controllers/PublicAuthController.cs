@@ -136,7 +136,6 @@ public sealed class PublicAuthController(
         }
 
         var roles = NormalizeRoles(account.Roles.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
-        LegacyLauncherSessionCache.Touch(account.Username, account.SessionVersion, DateTime.UtcNow);
 
         return Ok(new PublicAuthSessionResponse(
             Username: account.Username,
@@ -367,7 +366,6 @@ public sealed class PublicAuthController(
 
         RemovePendingTwoFactorChallenge(pendingTwoFactorChallengeKey);
         await dbContext.SaveChangesAsync(cancellationToken);
-        LegacyLauncherSessionCache.Touch(account.Username, account.SessionVersion, DateTime.UtcNow);
 
         var launcherProofId = ResolveLauncherProofId();
         var token = jwtTokenService.CreatePlayerToken(
