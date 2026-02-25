@@ -26,9 +26,11 @@ public sealed class PublicAuthController(
 {
     private const string LauncherVerifiedClaimType = "launcher_verified";
     private const string LauncherVerifiedClaimValue = "1";
+    private const string LauncherVersionClaimType = "launcher_version";
     private const string LauncherClientHeaderName = "X-BivLauncher-Client";
     private const string LauncherClientHeaderPrefix = "BivLauncher.Client/";
     private const string LauncherProofHeaderName = "X-BivLauncher-Proof";
+    private const string LauncherMinClientVersionConfigKey = "LAUNCHER_MIN_CLIENT_VERSION";
     private static readonly ConcurrentDictionary<string, PendingTwoFactorChallenge> PendingTwoFactorChallenges = new(StringComparer.Ordinal);
     private static readonly TimeSpan PendingTwoFactorChallengeLifetime = TimeSpan.FromMinutes(3);
 
@@ -36,6 +38,11 @@ public sealed class PublicAuthController(
     [HttpGet("session")]
     public async Task<ActionResult<PublicAuthSessionResponse>> Session(CancellationToken cancellationToken)
     {
+        if (!IsLauncherClientAllowed(out var launcherError))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { error = launcherError });
+        }
+
         var externalId = User.FindFirstValue("external_id")?.Trim() ?? string.Empty;
         var username = User.Identity?.Name?.Trim() ?? string.Empty;
         var tokenSessionVersionRaw = User.FindFirstValue("session_version");
@@ -77,6 +84,11 @@ public sealed class PublicAuthController(
         }
 
         if (IsLauncherProofEnforced() && !HasLauncherVerifiedClaim(User))
+        {
+            return Unauthorized(new { error = "Player session expired. Login is required." });
+        }
+
+        if (IsLauncherMinVersionEnforced() && !IsTokenLauncherVersionAllowed(User))
         {
             return Unauthorized(new { error = "Player session expired. Login is required." });
         }
@@ -132,7 +144,7 @@ public sealed class PublicAuthController(
         [FromBody] PublicAuthLoginRequest request,
         CancellationToken cancellationToken)
     {
-        if (!IsLauncherClientAllowed(out var launcherError))
+        if (!IsLauncherClientAllowed(out var launcherError, out var launcherClientVersionRaw))
         {
             return StatusCode(StatusCodes.Status403Forbidden, new { error = launcherError });
         }
@@ -351,7 +363,7 @@ public sealed class PublicAuthController(
         RemovePendingTwoFactorChallenge(pendingTwoFactorChallengeKey);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        var token = jwtTokenService.CreatePlayerToken(account, roles);
+        var token = jwtTokenService.CreatePlayerToken(account, roles, launcherClientVersionRaw);
 
         return Ok(new PublicAuthLoginResponse(
             Token: token,
@@ -432,7 +444,13 @@ public sealed class PublicAuthController(
 
     private bool IsLauncherClientAllowed(out string error)
     {
+        return IsLauncherClientAllowed(out error, out _);
+    }
+
+    private bool IsLauncherClientAllowed(out string error, out string launcherClientVersionRaw)
+    {
         error = string.Empty;
+        launcherClientVersionRaw = string.Empty;
         if (!Request.Headers.TryGetValue(LauncherClientHeaderName, out var launcherClientHeaderValues))
         {
             error = "Launcher client verification failed (missing client header).";
@@ -440,11 +458,34 @@ public sealed class PublicAuthController(
         }
 
         var launcherClientHeader = launcherClientHeaderValues.ToString().Trim();
-        if (string.IsNullOrWhiteSpace(launcherClientHeader) ||
-            !launcherClientHeader.StartsWith(LauncherClientHeaderPrefix, StringComparison.OrdinalIgnoreCase))
+        if (!LauncherVersionParser.TryExtractClientVersion(
+                launcherClientHeader,
+                LauncherClientHeaderPrefix,
+                out launcherClientVersionRaw,
+                out var launcherClientVersion))
         {
             error = "Launcher client verification failed (invalid client header).";
             return false;
+        }
+
+        var minimumLauncherVersionRaw = (configuration[LauncherMinClientVersionConfigKey] ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(minimumLauncherVersionRaw))
+        {
+            if (!LauncherVersionParser.TryParseComparableVersion(minimumLauncherVersionRaw, out var minimumLauncherVersion))
+            {
+                logger.LogError(
+                    "Invalid launcher min client version configured in {ConfigKey}: '{ConfiguredValue}'.",
+                    LauncherMinClientVersionConfigKey,
+                    minimumLauncherVersionRaw);
+                error = "Launcher client verification failed (invalid minimum launcher version config).";
+                return false;
+            }
+
+            if (launcherClientVersion < minimumLauncherVersion)
+            {
+                error = $"Launcher version '{launcherClientVersionRaw}' is not supported. Minimum required version: '{minimumLauncherVersionRaw}'.";
+                return false;
+            }
         }
 
         var requiredProof = (configuration["LAUNCHER_CLIENT_PROOF"] ?? string.Empty).Trim();
@@ -479,6 +520,38 @@ public sealed class PublicAuthController(
     {
         var claimValue = principal.FindFirstValue(LauncherVerifiedClaimType)?.Trim() ?? string.Empty;
         return string.Equals(claimValue, LauncherVerifiedClaimValue, StringComparison.Ordinal);
+    }
+
+    private bool IsLauncherMinVersionEnforced()
+    {
+        var minimumLauncherVersionRaw = (configuration[LauncherMinClientVersionConfigKey] ?? string.Empty).Trim();
+        return !string.IsNullOrWhiteSpace(minimumLauncherVersionRaw);
+    }
+
+    private bool IsTokenLauncherVersionAllowed(ClaimsPrincipal principal)
+    {
+        var minimumLauncherVersionRaw = (configuration[LauncherMinClientVersionConfigKey] ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(minimumLauncherVersionRaw))
+        {
+            return true;
+        }
+
+        if (!LauncherVersionParser.TryParseComparableVersion(minimumLauncherVersionRaw, out var minimumLauncherVersion))
+        {
+            logger.LogError(
+                "Invalid launcher min client version configured in {ConfigKey}: '{ConfiguredValue}'.",
+                LauncherMinClientVersionConfigKey,
+                minimumLauncherVersionRaw);
+            return false;
+        }
+
+        var tokenLauncherVersionRaw = principal.FindFirstValue(LauncherVersionClaimType)?.Trim() ?? string.Empty;
+        if (!LauncherVersionParser.TryParseComparableVersion(tokenLauncherVersionRaw, out var tokenLauncherVersion))
+        {
+            return false;
+        }
+
+        return tokenLauncherVersion >= minimumLauncherVersion;
     }
 
     private static string BuildPendingTwoFactorChallengeKey(string username, string hwidHash, string deviceUserName)

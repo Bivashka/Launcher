@@ -26,6 +26,8 @@ public sealed class PublicYggdrasilController(
 {
     private const string LauncherVerifiedClaimType = "launcher_verified";
     private const string LauncherVerifiedClaimValue = "1";
+    private const string LauncherVersionClaimType = "launcher_version";
+    private const string LauncherMinClientVersionConfigKey = "LAUNCHER_MIN_CLIENT_VERSION";
     private const string ForbiddenOperation = "ForbiddenOperationException";
     private const string IllegalArgument = "IllegalArgumentException";
     private const string LegacyJoinOk = "OK";
@@ -617,6 +619,11 @@ public sealed class PublicYggdrasilController(
             }
         }
 
+        if (!IsTokenLauncherVersionAllowed(principal))
+        {
+            return TokenValidationResult.Fail("Access token session expired. Login again.", cause: string.Empty);
+        }
+
         AuthAccount? account = null;
         if (!string.IsNullOrWhiteSpace(externalId))
         {
@@ -686,6 +693,32 @@ public sealed class PublicYggdrasilController(
                     (x.ExpiresAtUtc == null || x.ExpiresAtUtc > now),
                 cancellationToken);
         return !hasDeviceUserBan;
+    }
+
+    private bool IsTokenLauncherVersionAllowed(ClaimsPrincipal principal)
+    {
+        var minimumLauncherVersionRaw = (configuration[LauncherMinClientVersionConfigKey] ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(minimumLauncherVersionRaw))
+        {
+            return true;
+        }
+
+        if (!LauncherVersionParser.TryParseComparableVersion(minimumLauncherVersionRaw, out var minimumLauncherVersion))
+        {
+            logger.LogError(
+                "Invalid launcher min client version configured in {ConfigKey}: '{ConfiguredValue}'.",
+                LauncherMinClientVersionConfigKey,
+                minimumLauncherVersionRaw);
+            return false;
+        }
+
+        var tokenLauncherVersionRaw = principal.FindFirstValue(LauncherVersionClaimType)?.Trim() ?? string.Empty;
+        if (!LauncherVersionParser.TryParseComparableVersion(tokenLauncherVersionRaw, out var tokenLauncherVersion))
+        {
+            return false;
+        }
+
+        return tokenLauncherVersion >= minimumLauncherVersion;
     }
 
     private static TokenValidationParameters BuildTokenValidationParameters(JwtOptions options)

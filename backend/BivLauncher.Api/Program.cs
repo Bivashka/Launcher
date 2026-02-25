@@ -353,6 +353,16 @@ else
     app.Logger.LogInformation("LAUNCHER_CLIENT_PROOF is configured (length: {ProofLength}).", launcherClientProof.Length);
 }
 
+var launcherMinClientVersion = (app.Configuration["LAUNCHER_MIN_CLIENT_VERSION"] ?? string.Empty).Trim();
+if (string.IsNullOrWhiteSpace(launcherMinClientVersion))
+{
+    app.Logger.LogWarning("LAUNCHER_MIN_CLIENT_VERSION is empty. Older launcher versions are allowed.");
+}
+else
+{
+    app.Logger.LogInformation("LAUNCHER_MIN_CLIENT_VERSION is configured: {LauncherMinClientVersion}.", launcherMinClientVersion);
+}
+
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();

@@ -13,6 +13,7 @@ public sealed class JwtTokenService(IOptions<JwtOptions> options) : IJwtTokenSer
 {
     private const string LauncherVerifiedClaimType = "launcher_verified";
     private const string LauncherVerifiedClaimValue = "1";
+    private const string LauncherVersionClaimType = "launcher_version";
     private readonly JwtOptions _jwtOptions = options.Value;
 
     public string CreateAdminToken(AdminUser adminUser)
@@ -40,7 +41,7 @@ public sealed class JwtTokenService(IOptions<JwtOptions> options) : IJwtTokenSer
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
 
-    public string CreatePlayerToken(AuthAccount authAccount, IReadOnlyList<string> roles)
+    public string CreatePlayerToken(AuthAccount authAccount, IReadOnlyList<string> roles, string launcherVersion = "")
     {
         var claims = new List<Claim>
         {
@@ -52,6 +53,12 @@ public sealed class JwtTokenService(IOptions<JwtOptions> options) : IJwtTokenSer
             // Marks token as issued by launcher login flow (used by yggdrasil/session checks).
             new(LauncherVerifiedClaimType, LauncherVerifiedClaimValue)
         };
+
+        var normalizedLauncherVersion = (launcherVersion ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(normalizedLauncherVersion))
+        {
+            claims.Add(new Claim(LauncherVersionClaimType, normalizedLauncherVersion));
+        }
 
         foreach (var role in roles.Where(x => !string.IsNullOrWhiteSpace(x)))
         {
