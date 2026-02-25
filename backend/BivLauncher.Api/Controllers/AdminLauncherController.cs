@@ -946,8 +946,8 @@ public sealed class AdminLauncherController(
         var raw = (configuration["LAUNCHER_SERVER_LEGACY_BRIDGE_COMPAT_ENABLED"] ?? string.Empty).Trim();
         if (!bool.TryParse(raw, out var enabled))
         {
-            // Security-first default: keep legacy bridge compat disabled unless explicitly enabled.
-            return false;
+            // Compatibility-first default: keep bridge enabled for legacy server stacks.
+            return true;
         }
 
         return enabled;
@@ -1377,7 +1377,7 @@ public sealed class AdminLauncherController(
         return new BundledAuthlibMergeStats(output.ToArray(), entriesAdded, bytesAdded);
     }
 
-    private static LegacyBridgeCompatPatchStats EnsureLegacyBridgeCompatibilityClass(byte[] payload)
+    private LegacyBridgeCompatPatchStats EnsureLegacyBridgeCompatibilityClass(byte[] payload)
     {
         if (payload.Length <= 0)
         {
@@ -1434,7 +1434,11 @@ public sealed class AdminLauncherController(
 
             if (sourceBridgeClassBytes is null)
             {
-                sourceBridgeClassBytes = BuildLegacyBridgeClass(LegacyBridgeSourceInternalName);
+                sourceBridgeClassBytes = LoadLegacyBridgeClassTemplate();
+                if (sourceBridgeClassBytes.Length <= 0)
+                {
+                    sourceBridgeClassBytes = BuildLegacyBridgeClass(LegacyBridgeSourceInternalName);
+                }
             }
             else
             {
@@ -1476,6 +1480,35 @@ public sealed class AdminLauncherController(
             output.ToArray(),
             Added: !alreadyPresent,
             AlreadyPresent: alreadyPresent);
+    }
+
+    private byte[] LoadLegacyBridgeClassTemplate()
+    {
+        try
+        {
+            var candidate = Path.Combine(environment.ContentRootPath, "Assets", "LegacyBridge.class");
+            if (!System.IO.File.Exists(candidate))
+            {
+                return Array.Empty<byte>();
+            }
+
+            var bytes = System.IO.File.ReadAllBytes(candidate);
+            if (bytes.Length <= 0)
+            {
+                return Array.Empty<byte>();
+            }
+
+            var normalized = (byte[])bytes.Clone();
+            ReplaceAsciiSequenceInPlace(
+                normalized,
+                LegacyBridgeInternalName,
+                LegacyBridgeSourceInternalName);
+            return normalized;
+        }
+        catch
+        {
+            return Array.Empty<byte>();
+        }
     }
 
     private static byte[] BuildLegacyBridgeClass(string classInternalName)
