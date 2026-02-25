@@ -272,10 +272,16 @@ public sealed class AdminLauncherController(
         payload = bundledAuthlibMergeStats.Payload;
         var agentManifestPatchStats = PatchServerAgentManifest(payload);
         payload = agentManifestPatchStats.Payload;
-        var legacyBridgeOwnerPatchStats = PatchLegacyBridgeOwnerMapping(payload);
-        payload = legacyBridgeOwnerPatchStats.Payload;
-        var legacyBridgePatchStats = EnsureLegacyBridgeCompatibilityClass(payload);
-        payload = legacyBridgePatchStats.Payload;
+        var legacyBridgeCompatEnabled = ResolveLegacyBridgeCompatEnabled();
+        var legacyBridgeOwnerPatchStats = new LegacySessionPatchStats(payload, 0, 0);
+        var legacyBridgePatchStats = new LegacyBridgeCompatPatchStats(payload, false, false);
+        if (legacyBridgeCompatEnabled)
+        {
+            legacyBridgeOwnerPatchStats = PatchLegacyBridgeOwnerMapping(payload);
+            payload = legacyBridgeOwnerPatchStats.Payload;
+            legacyBridgePatchStats = EnsureLegacyBridgeCompatibilityClass(payload);
+            payload = legacyBridgePatchStats.Payload;
+        }
 
         await using (var uploadStream = new MemoryStream(payload, writable: false))
         {
@@ -306,6 +312,7 @@ public sealed class AdminLauncherController(
                 bundledAuthlibEntriesAdded = bundledAuthlibMergeStats.EntriesAdded,
                 bundledAuthlibBytesAdded = bundledAuthlibMergeStats.BytesAdded,
                 serverAgentManifestPatched = agentManifestPatchStats.Patched,
+                legacyBridgeCompatEnabled,
                 legacyBridgeOwnerPatchClassEntriesTouched = legacyBridgeOwnerPatchStats.ClassEntriesTouched,
                 legacyBridgeOwnerPatchStringReplacements = legacyBridgeOwnerPatchStats.StringReplacements,
                 legacyBridgeCompatAdded = legacyBridgePatchStats.Added,
@@ -336,6 +343,7 @@ public sealed class AdminLauncherController(
             bundledAuthlibEntriesAdded = bundledAuthlibMergeStats.EntriesAdded,
             bundledAuthlibBytesAdded = bundledAuthlibMergeStats.BytesAdded,
             serverAgentManifestPatched = agentManifestPatchStats.Patched,
+            legacyBridgeCompatEnabled,
             legacyBridgeOwnerPatchClassEntriesTouched = legacyBridgeOwnerPatchStats.ClassEntriesTouched,
             legacyBridgeOwnerPatchStringReplacements = legacyBridgeOwnerPatchStats.StringReplacements,
             legacyBridgeCompatAdded = legacyBridgePatchStats.Added,
@@ -931,6 +939,18 @@ public sealed class AdminLauncherController(
         }
 
         return Math.Clamp(maxBytes, 256 * 1024, 256L * 1024 * 1024);
+    }
+
+    private bool ResolveLegacyBridgeCompatEnabled()
+    {
+        var raw = (configuration["LAUNCHER_SERVER_LEGACY_BRIDGE_COMPAT_ENABLED"] ?? string.Empty).Trim();
+        if (!bool.TryParse(raw, out var enabled))
+        {
+            // Security-first default: keep legacy bridge compat disabled unless explicitly enabled.
+            return false;
+        }
+
+        return enabled;
     }
 
     private int ResolveTimeoutSeconds()
