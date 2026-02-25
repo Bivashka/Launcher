@@ -407,6 +407,18 @@ public sealed class PublicYggdrasilController(
         var ticketKey = BuildTicketKey(normalizedUsername, normalizedServerId);
         if (!JoinTickets.TryGetValue(ticketKey, out var ticket))
         {
+            var syntheticTicket = await TryCreateSyntheticJoinTicketFromRecentLauncherSessionAsync(
+                normalizedUsername,
+                normalizedServerId,
+                cancellationToken);
+            if (syntheticTicket is not null)
+            {
+                ticket = syntheticTicket;
+            }
+        }
+
+        if (ticket is null)
+        {
             logger.LogWarning(
                 "Yggdrasil hasJoined miss: no join ticket username={Username}, serverId={ServerId}",
                 normalizedUsername,
@@ -659,6 +671,63 @@ public sealed class PublicYggdrasilController(
         }
 
         return TokenValidationResult.Ok(account);
+    }
+
+    private async Task<JoinTicket?> TryCreateSyntheticJoinTicketFromRecentLauncherSessionAsync(
+        string normalizedUsername,
+        string normalizedServerId,
+        CancellationToken cancellationToken)
+    {
+        var requiredProof = (configuration["LAUNCHER_CLIENT_PROOF"] ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(requiredProof))
+        {
+            return null;
+        }
+
+        var now = DateTime.UtcNow;
+        if (!LegacyLauncherSessionCache.TryGet(normalizedUsername, now, out var cachedSessionVersion))
+        {
+            return null;
+        }
+
+        var usernameLookup = normalizedUsername.Trim().ToLowerInvariant();
+        var account = await dbContext.AuthAccounts
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                x => x.Username.ToLower() == usernameLookup,
+                cancellationToken);
+        if (account is null)
+        {
+            return null;
+        }
+
+        if (account.SessionVersion != cachedSessionVersion)
+        {
+            return null;
+        }
+
+        if (!await IsAccountStateAllowedAsync(account, cancellationToken))
+        {
+            return null;
+        }
+
+        var profile = BuildProfile(account);
+        var ticket = new JoinTicket(
+            AccountId: account.Id,
+            Username: account.Username,
+            ServerId: normalizedServerId,
+            ProfileId: profile.Id,
+            SessionVersion: account.SessionVersion,
+            ExpiresAtUtc: now.Add(JoinTicketLifetime));
+        var ticketKey = BuildTicketKey(normalizedUsername, normalizedServerId);
+        JoinTickets[ticketKey] = ticket;
+        PruneExpiredTickets(now);
+
+        logger.LogWarning(
+            "Yggdrasil hasJoined fallback accepted: synthetic join ticket username={Username}, serverId={ServerId}",
+            account.Username,
+            normalizedServerId);
+        return ticket;
     }
 
     private async Task<bool> IsAccountStateAllowedAsync(AuthAccount account, CancellationToken cancellationToken)
