@@ -1424,7 +1424,6 @@ public sealed class AdminLauncherController(
         var joinServerDescriptorIndex = pool.AddUtf8("(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;");
 
         var emptyStringConstantIndex = pool.AddStringConstant(string.Empty);
-        var okStringConstantIndex = pool.AddStringConstant("ok");
 
         using var stream = new MemoryStream();
         WriteU4(stream, 0xCAFEBABE);
@@ -1480,7 +1479,8 @@ public sealed class AdminLauncherController(
             codeAttributeNameIndex: codeAttributeNameIndex,
             maxStack: 1,
             maxLocals: 2,
-            code: BuildBooleanReturnCode(true));
+            // Fail closed for legacy bridge checks; real auth path must validate against server session API.
+            code: BuildBooleanReturnCode(false));
 
         WriteMethod(
             stream,
@@ -1490,7 +1490,7 @@ public sealed class AdminLauncherController(
             codeAttributeNameIndex: codeAttributeNameIndex,
             maxStack: 1,
             maxLocals: 3,
-            code: BuildLdcStringReturnCode(okStringConstantIndex));
+            code: BuildLdcStringReturnCode(emptyStringConstantIndex));
 
         WriteMethod(
             stream,
@@ -1500,7 +1500,7 @@ public sealed class AdminLauncherController(
             codeAttributeNameIndex: codeAttributeNameIndex,
             maxStack: 1,
             maxLocals: 3,
-            code: BuildLdcStringReturnCode(okStringConstantIndex));
+            code: BuildLdcStringReturnCode(emptyStringConstantIndex));
 
         // class attributes
         WriteU2(stream, 0);
