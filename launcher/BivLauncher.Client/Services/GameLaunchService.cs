@@ -27,7 +27,13 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
     private static readonly string[] LaunchArchiveSearchPatterns = ["*.jar", "*.jar2"];
     private const string DefaultClientAuthlibAssetPath = "/api/public/assets/uploads/assets/launcher.jar";
     private const string LocalClientAuthlibRelativePath = ".bivlauncher/authlib-injector.jar";
-    private const string LegacySessionDomainCompatibilityMarker = "session.minecraft.net";
+    private const string LegacySessionDomainCompatibilityMarker = "authserver.mojang.com";
+    private static readonly string[] LegacySessionDomainCompatibilityMarkers =
+    [
+        "authserver.mojang.com",
+        "sessionserver.mojang.com",
+        "session.minecraft.net"
+    ];
 
     public async Task<LaunchResult> LaunchAsync(
         LauncherManifest manifest,
@@ -1342,7 +1348,7 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
             return true;
         }
 
-        validationError = $"missing '{LegacySessionDomainCompatibilityMarker}' mapping";
+        validationError = $"missing legacy auth marker '{LegacySessionDomainCompatibilityMarker}'";
         return false;
     }
 
@@ -1357,7 +1363,9 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
         {
             using var stream = new FileStream(jarPath, FileMode.Open, FileAccess.Read, FileShare.Read);
             using var archive = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: false);
-            var marker = Encoding.ASCII.GetBytes(LegacySessionDomainCompatibilityMarker);
+            var markers = LegacySessionDomainCompatibilityMarkers
+                .Select(Encoding.ASCII.GetBytes)
+                .ToArray();
             foreach (var entry in archive.Entries)
             {
                 if (!entry.FullName.EndsWith(".class", StringComparison.OrdinalIgnoreCase))
@@ -1368,7 +1376,8 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
                 using var entryStream = entry.Open();
                 using var memory = new MemoryStream();
                 entryStream.CopyTo(memory);
-                if (ContainsByteSequence(memory.ToArray(), marker))
+                var classBytes = memory.ToArray();
+                if (markers.Any(marker => ContainsByteSequence(classBytes, marker)))
                 {
                     return true;
                 }

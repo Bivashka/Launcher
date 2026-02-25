@@ -265,8 +265,7 @@ public sealed class AdminLauncherController(
             });
         }
 
-        var legacySessionPatchStats = PatchLegacySessionDomainMapping(payload);
-        payload = legacySessionPatchStats.Payload;
+        var legacySessionPatchStats = new LegacySessionPatchStats(payload, 0, 0);
 
         var bundledAuthlibMergeStats = MergeBundledAuthlib(payload, bundledAuthlibPayload);
         payload = bundledAuthlibMergeStats.Payload;
@@ -317,7 +316,7 @@ public sealed class AdminLauncherController(
                 legacyBridgeOwnerPatchStringReplacements = legacyBridgeOwnerPatchStats.StringReplacements,
                 legacyBridgeCompatAdded = legacyBridgePatchStats.Added,
                 legacyBridgeCompatAlreadyPresent = legacyBridgePatchStats.AlreadyPresent,
-                legacySessionPatchEnabled = true,
+                legacySessionPatchEnabled = false,
                 legacySessionPatchClassEntriesTouched = legacySessionPatchStats.ClassEntriesTouched,
                 legacySessionPatchStringReplacements = legacySessionPatchStats.StringReplacements,
                 finishedAtUtc = DateTime.UtcNow,
@@ -348,7 +347,7 @@ public sealed class AdminLauncherController(
             legacyBridgeOwnerPatchStringReplacements = legacyBridgeOwnerPatchStats.StringReplacements,
             legacyBridgeCompatAdded = legacyBridgePatchStats.Added,
             legacyBridgeCompatAlreadyPresent = legacyBridgePatchStats.AlreadyPresent,
-            legacySessionPatchEnabled = true,
+            legacySessionPatchEnabled = false,
             legacySessionPatchClassEntriesTouched = legacySessionPatchStats.ClassEntriesTouched,
             legacySessionPatchStringReplacements = legacySessionPatchStats.StringReplacements
         });
