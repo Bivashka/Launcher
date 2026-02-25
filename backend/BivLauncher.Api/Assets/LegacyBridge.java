@@ -28,6 +28,7 @@ public final class LegacyBridge {
     private static final Pattern JWT_SEGMENT_PATTERN = Pattern.compile("^[A-Za-z0-9_-]+$");
     private static final Pattern USERNAME_PATTERN = Pattern.compile("^[A-Za-z0-9_]{2,16}$");
     private static final Pattern IPV4_PATTERN = Pattern.compile("^\\d{1,3}(?:\\.\\d{1,3}){3}$");
+    private static final String DEBUG_PROPERTY = "biv.auth.debug";
 
     private LegacyBridge() {
     }
@@ -58,8 +59,10 @@ public final class LegacyBridge {
 
     public static String joinServer(String first, String second, String third) {
         try {
+            debug("joinServer args: first='" + nullToEmpty(first) + "', second='" + nullToEmpty(second) + "', third='" + nullToEmpty(third) + "'");
             String authBase = resolveAuthBase();
             if (authBase.isEmpty()) {
+                debug("joinServer auth base is empty");
                 return "Bad login";
             }
 
@@ -72,6 +75,7 @@ public final class LegacyBridge {
                 getProp("biv.auth.token"),
                 getProp("biv.auth.session"));
             if (tokenCandidates.isEmpty()) {
+                debug("joinServer token candidates are empty");
                 return "Bad login";
             }
 
@@ -91,6 +95,8 @@ public final class LegacyBridge {
                 addIfNotEmpty(serverIdCandidates, first);
             }
 
+            debug("joinServer authBase=" + authBase + ", tokenCandidates=" + tokenCandidates + ", profileIdCandidates=" + profileIdCandidates + ", serverIdCandidates=" + serverIdCandidates);
+
             for (String token : tokenCandidates) {
                 for (String serverId : serverIdCandidates) {
                     if (nullToEmpty(token).isEmpty() || nullToEmpty(serverId).isEmpty()) {
@@ -100,6 +106,7 @@ public final class LegacyBridge {
                     for (String profileId : profileIdCandidates) {
                         String payload = "{\"accessToken\":\"" + esc(token) + "\",\"selectedProfile\":\"" + esc(profileId) + "\",\"serverId\":\"" + esc(serverId) + "\"}";
                         int status = postJson(authBase + "/session/minecraft/join", payload);
+                        debug("joinServer POST /session/minecraft/join tokenLen=" + nullToEmpty(token).length() + ", serverId='" + serverId + "', profileId='" + nullToEmpty(profileId) + "', status=" + status);
                         if (status >= 200 && status < 300) {
                             return "OK";
                         }
@@ -107,8 +114,10 @@ public final class LegacyBridge {
                 }
             }
 
+            debug("joinServer all attempts failed");
             return "Bad login";
         } catch (Exception ex) {
+            debug("joinServer exception: " + ex.getClass().getSimpleName() + ": " + nullToEmpty(ex.getMessage()));
             return "Bad login";
         }
     }
@@ -119,8 +128,10 @@ public final class LegacyBridge {
 
     public static String checkServer(String first, String second, String third) {
         try {
+            debug("checkServer args: first='" + nullToEmpty(first) + "', second='" + nullToEmpty(second) + "', third='" + nullToEmpty(third) + "'");
             String sessionBase = resolveSessionBase();
             if (sessionBase.isEmpty()) {
+                debug("checkServer session base is empty");
                 return "NO";
             }
 
@@ -129,6 +140,7 @@ public final class LegacyBridge {
             if (serverIdCandidates.isEmpty()) {
                 addIfNotEmpty(serverIdCandidates, second);
                 addIfNotEmpty(serverIdCandidates, first);
+                addIfNotEmpty(serverIdCandidates, third);
             }
 
             List<String> usernameCandidates = collectUsernameCandidates(
@@ -139,10 +151,15 @@ public final class LegacyBridge {
                 serverIdCandidates,
                 tokenCandidates);
             if (usernameCandidates.isEmpty()) {
-                return "NO";
+                addIfNotEmpty(usernameCandidates, getUsername());
+                addIfNotEmpty(usernameCandidates, first);
+                addIfNotEmpty(usernameCandidates, second);
+                addIfNotEmpty(usernameCandidates, third);
             }
 
             String ip = looksLikeIpAddress(third) ? nullToEmpty(third) : "";
+
+            debug("checkServer sessionBase=" + sessionBase + ", usernameCandidates=" + usernameCandidates + ", serverIdCandidates=" + serverIdCandidates + ", tokenCandidates=" + tokenCandidates + ", ip='" + ip + "'");
 
             for (String username : usernameCandidates) {
                 for (String serverId : serverIdCandidates) {
@@ -150,14 +167,35 @@ public final class LegacyBridge {
                         continue;
                     }
 
-                    if (queryHasJoined(sessionBase, username, serverId, ip)) {
+                    if (queryHasJoined(sessionBase, username, serverId, ip) ||
+                        queryLegacyCheckServer(sessionBase, username, serverId, ip)) {
                         return "YES";
                     }
                 }
             }
 
+            List<String> rawCandidates = collectDistinctNonEmpty(first, second, third, getUsername());
+            for (String username : rawCandidates) {
+                if (!isLikelyUsername(username)) {
+                    continue;
+                }
+
+                for (String serverId : rawCandidates) {
+                    if (username.equals(serverId)) {
+                        continue;
+                    }
+
+                    if (queryHasJoined(sessionBase, username, serverId, ip) ||
+                        queryLegacyCheckServer(sessionBase, username, serverId, ip)) {
+                        return "YES";
+                    }
+                }
+            }
+
+            debug("checkServer all attempts failed");
             return "NO";
         } catch (Exception ex) {
+            debug("checkServer exception: " + ex.getClass().getSimpleName() + ": " + nullToEmpty(ex.getMessage()));
             return "NO";
         }
     }
@@ -181,12 +219,57 @@ public final class LegacyBridge {
             connection.setUseCaches(false);
 
             if (connection.getResponseCode() != 200) {
+                debug("queryHasJoined non-200: url=" + query + ", status=" + connection.getResponseCode());
                 return false;
             }
 
             String body = readBody(connection.getInputStream());
-            return body.contains("\"id\"") && body.contains("\"name\"");
+            boolean ok = body.contains("\"id\"") && body.contains("\"name\"");
+            debug("queryHasJoined status=200, url=" + query + ", ok=" + ok);
+            return ok;
         } catch (Exception ex) {
+            debug("queryHasJoined exception: " + ex.getClass().getSimpleName() + ": " + nullToEmpty(ex.getMessage()));
+            return false;
+        }
+    }
+
+    private static boolean queryLegacyCheckServer(String sessionBase, String username, String serverId, String ip) {
+        return queryLegacyCheckServerPath(sessionBase, "/checkserver.jsp", username, serverId, ip) ||
+               queryLegacyCheckServerPath(sessionBase, "/game/checkserver.jsp", username, serverId, ip);
+    }
+
+    private static boolean queryLegacyCheckServerPath(String sessionBase, String path, String username, String serverId, String ip) {
+        try {
+            StringBuilder query = new StringBuilder(sessionBase)
+                .append(path)
+                .append("?user=")
+                .append(URLEncoder.encode(nullToEmpty(username), "UTF-8"))
+                .append("&serverId=")
+                .append(URLEncoder.encode(nullToEmpty(serverId), "UTF-8"));
+
+            if (!nullToEmpty(ip).isEmpty()) {
+                query.append("&ip=").append(URLEncoder.encode(ip.trim(), "UTF-8"));
+            }
+
+            HttpURLConnection connection = (HttpURLConnection) new URL(query.toString()).openConnection();
+            connection.setConnectTimeout(5000);
+            connection.setReadTimeout(5000);
+            connection.setRequestMethod("GET");
+            connection.setUseCaches(false);
+
+            int status = connection.getResponseCode();
+            if (status != 200) {
+                debug("queryLegacyCheck non-200: url=" + query + ", status=" + status);
+                return false;
+            }
+
+            String body = readBody(connection.getInputStream());
+            String normalizedBody = nullToEmpty(body);
+            boolean ok = "YES".equalsIgnoreCase(normalizedBody) || (body.contains("\"id\"") && body.contains("\"name\""));
+            debug("queryLegacyCheck status=200, url=" + query + ", body='" + normalizedBody + "', ok=" + ok);
+            return ok;
+        } catch (Exception ex) {
+            debug("queryLegacyCheck exception: " + ex.getClass().getSimpleName() + ": " + nullToEmpty(ex.getMessage()));
             return false;
         }
     }
@@ -341,6 +424,15 @@ public final class LegacyBridge {
         addFallbackUsername(result, blocked, first);
         addFallbackUsername(result, blocked, second);
         addFallbackUsername(result, blocked, third);
+        return new ArrayList<String>(result);
+    }
+
+    private static List<String> collectDistinctNonEmpty(String first, String second, String third, String fourth) {
+        Set<String> result = new LinkedHashSet<String>();
+        addIfNotEmpty(result, first);
+        addIfNotEmpty(result, second);
+        addIfNotEmpty(result, third);
+        addIfNotEmpty(result, fourth);
         return new ArrayList<String>(result);
     }
 
@@ -521,11 +613,13 @@ public final class LegacyBridge {
     private static String resolveYggdrasilBase() {
         String fromProperty = normalizeYggdrasilBase(getProp(YGGDRASIL_PROPERTY));
         if (!fromProperty.isEmpty()) {
+            debug("resolveYggdrasilBase from property " + YGGDRASIL_PROPERTY + ": " + fromProperty);
             return fromProperty;
         }
 
         String fromFallbackProperty = normalizeYggdrasilBase(getProp(YGGDRASIL_PROPERTY_FALLBACK));
         if (!fromFallbackProperty.isEmpty()) {
+            debug("resolveYggdrasilBase from property " + YGGDRASIL_PROPERTY_FALLBACK + ": " + fromFallbackProperty);
             return fromFallbackProperty;
         }
 
@@ -544,12 +638,14 @@ public final class LegacyBridge {
 
                 String candidate = normalizeYggdrasilBase(normalizedArgument.substring(equalsIndex + 1));
                 if (!candidate.isEmpty()) {
+                    debug("resolveYggdrasilBase from javaagent arg: " + candidate);
                     return candidate;
                 }
             }
         } catch (Throwable ignored) {
         }
 
+        debug("resolveYggdrasilBase: empty");
         return "";
     }
 
@@ -643,5 +739,20 @@ public final class LegacyBridge {
         if (!normalized.isEmpty() && !values.contains(normalized)) {
             values.add(normalized);
         }
+    }
+
+    private static void addIfNotEmpty(Set<String> values, String raw) {
+        String normalized = nullToEmpty(raw);
+        if (!normalized.isEmpty()) {
+            values.add(normalized);
+        }
+    }
+
+    private static void debug(String message) {
+        if (!Boolean.parseBoolean(System.getProperty(DEBUG_PROPERTY, "false"))) {
+            return;
+        }
+
+        System.out.println("[BivLegacyBridge] " + nullToEmpty(message));
     }
 }
