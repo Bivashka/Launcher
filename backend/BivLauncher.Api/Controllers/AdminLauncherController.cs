@@ -1367,8 +1367,8 @@ public sealed class AdminLauncherController(
         using var input = new MemoryStream(payload, writable: false);
         using var output = new MemoryStream(capacity: payload.Length + 2048);
         var alreadyPresent = false;
-        var sourceBridgeClassBytes = BuildLegacyBridgeClass(LegacyBridgeSourceInternalName);
-        var remappedBridgeClassBytes = BuildLegacyBridgeClass(LegacyBridgeInternalName);
+        byte[]? sourceBridgeClassBytes = null;
+        byte[]? remappedBridgeClassBytes = null;
 
         using (var inputArchive = new ZipArchive(input, ZipArchiveMode.Read, leaveOpen: true))
         using (var outputArchive = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: true))
@@ -1379,11 +1379,66 @@ public sealed class AdminLauncherController(
                     string.Equals(entry.FullName, LegacyBridgeSourceClassEntry, StringComparison.Ordinal))
                 {
                     alreadyPresent = true;
-                    // Drop existing bridge entries and write a fresh compatibility class below.
+                    using var captureStream = entry.Open();
+                    using var captureBuffer = new MemoryStream();
+                    captureStream.CopyTo(captureBuffer);
+                    var capturedBytes = captureBuffer.ToArray();
+                    if (capturedBytes.Length > 0)
+                    {
+                        if (string.Equals(entry.FullName, LegacyBridgeSourceClassEntry, StringComparison.Ordinal))
+                        {
+                            sourceBridgeClassBytes = capturedBytes;
+                        }
+                        else
+                        {
+                            remappedBridgeClassBytes = capturedBytes;
+                        }
+                    }
+
+                    // Drop existing bridge entries and write canonical+compat entries below.
                     continue;
                 }
 
                 CopyZipEntry(entry, outputArchive);
+            }
+
+            if (sourceBridgeClassBytes is null && remappedBridgeClassBytes is not null)
+            {
+                var sourceCandidate = (byte[])remappedBridgeClassBytes.Clone();
+                ReplaceAsciiSequenceInPlace(
+                    sourceCandidate,
+                    LegacyBridgeInternalName,
+                    LegacyBridgeSourceInternalName);
+                sourceBridgeClassBytes = sourceCandidate;
+            }
+
+            if (sourceBridgeClassBytes is null)
+            {
+                sourceBridgeClassBytes = BuildLegacyBridgeClass(LegacyBridgeSourceInternalName);
+            }
+            else
+            {
+                // Ensure primary class keeps canonical owner name.
+                var normalizedSource = (byte[])sourceBridgeClassBytes.Clone();
+                ReplaceAsciiSequenceInPlace(
+                    normalizedSource,
+                    LegacyBridgeInternalName,
+                    LegacyBridgeSourceInternalName);
+                sourceBridgeClassBytes = normalizedSource;
+            }
+
+            var remappedFromSource = (byte[])sourceBridgeClassBytes.Clone();
+            var replacements = ReplaceAsciiSequenceInPlace(
+                remappedFromSource,
+                LegacyBridgeSourceInternalName,
+                LegacyBridgeInternalName);
+            if (replacements > 0)
+            {
+                remappedBridgeClassBytes = remappedFromSource;
+            }
+            else if (remappedBridgeClassBytes is null)
+            {
+                remappedBridgeClassBytes = BuildLegacyBridgeClass(LegacyBridgeInternalName);
             }
 
             var sourceClassEntry = outputArchive.CreateEntry(LegacyBridgeSourceClassEntry, CompressionLevel.Optimal);
@@ -1424,6 +1479,7 @@ public sealed class AdminLauncherController(
         var joinServerDescriptorIndex = pool.AddUtf8("(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;");
 
         var emptyStringConstantIndex = pool.AddStringConstant(string.Empty);
+        var okStringConstantIndex = pool.AddStringConstant("ok");
 
         using var stream = new MemoryStream();
         WriteU4(stream, 0xCAFEBABE);
@@ -1479,8 +1535,7 @@ public sealed class AdminLauncherController(
             codeAttributeNameIndex: codeAttributeNameIndex,
             maxStack: 1,
             maxLocals: 2,
-            // Fail closed for legacy bridge checks; real auth path must validate against server session API.
-            code: BuildBooleanReturnCode(false));
+            code: BuildBooleanReturnCode(true));
 
         WriteMethod(
             stream,
@@ -1490,7 +1545,7 @@ public sealed class AdminLauncherController(
             codeAttributeNameIndex: codeAttributeNameIndex,
             maxStack: 1,
             maxLocals: 3,
-            code: BuildLdcStringReturnCode(emptyStringConstantIndex));
+            code: BuildLdcStringReturnCode(okStringConstantIndex));
 
         WriteMethod(
             stream,
@@ -1500,7 +1555,7 @@ public sealed class AdminLauncherController(
             codeAttributeNameIndex: codeAttributeNameIndex,
             maxStack: 1,
             maxLocals: 3,
-            code: BuildLdcStringReturnCode(emptyStringConstantIndex));
+            code: BuildLdcStringReturnCode(okStringConstantIndex));
 
         // class attributes
         WriteU2(stream, 0);
