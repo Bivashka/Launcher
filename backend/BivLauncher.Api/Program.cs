@@ -343,9 +343,20 @@ builder.Services.AddRateLimiter(options =>
 
 var app = builder.Build();
 
+var launcherStrictSecurityRaw = app.Configuration["LAUNCHER_STRICT_SECURITY"];
+var launcherStrictSecurity = bool.TryParse(launcherStrictSecurityRaw, out var parsedLauncherStrictSecurity)
+    ? parsedLauncherStrictSecurity
+    : !app.Environment.IsDevelopment();
+
 var launcherClientProof = (app.Configuration["LAUNCHER_CLIENT_PROOF"] ?? string.Empty).Trim();
 if (string.IsNullOrWhiteSpace(launcherClientProof))
 {
+    if (launcherStrictSecurity)
+    {
+        throw new InvalidOperationException(
+            "LAUNCHER_CLIENT_PROOF is empty. Set a long random launcher proof or disable strict mode via LAUNCHER_STRICT_SECURITY=false.");
+    }
+
     app.Logger.LogWarning("LAUNCHER_CLIENT_PROOF is empty. Launcher proof check is disabled.");
 }
 else
@@ -356,11 +367,32 @@ else
 var launcherMinClientVersion = (app.Configuration["LAUNCHER_MIN_CLIENT_VERSION"] ?? string.Empty).Trim();
 if (string.IsNullOrWhiteSpace(launcherMinClientVersion))
 {
+    if (launcherStrictSecurity)
+    {
+        throw new InvalidOperationException(
+            "LAUNCHER_MIN_CLIENT_VERSION is empty. Set a minimum launcher version or disable strict mode via LAUNCHER_STRICT_SECURITY=false.");
+    }
+
     app.Logger.LogWarning("LAUNCHER_MIN_CLIENT_VERSION is empty. Older launcher versions are allowed.");
 }
 else
 {
-    app.Logger.LogInformation("LAUNCHER_MIN_CLIENT_VERSION is configured: {LauncherMinClientVersion}.", launcherMinClientVersion);
+    if (!LauncherVersionParser.TryParseComparableVersion(launcherMinClientVersion, out _))
+    {
+        if (launcherStrictSecurity)
+        {
+            throw new InvalidOperationException(
+                $"LAUNCHER_MIN_CLIENT_VERSION value '{launcherMinClientVersion}' is invalid.");
+        }
+
+        app.Logger.LogError(
+            "LAUNCHER_MIN_CLIENT_VERSION value '{LauncherMinClientVersion}' is invalid. Older launcher versions are effectively allowed.",
+            launcherMinClientVersion);
+    }
+    else
+    {
+        app.Logger.LogInformation("LAUNCHER_MIN_CLIENT_VERSION is configured: {LauncherMinClientVersion}.", launcherMinClientVersion);
+    }
 }
 
 using (var scope = app.Services.CreateScope())

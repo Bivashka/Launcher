@@ -143,6 +143,58 @@ public sealed class PublicAuthController(
             Roles: roles));
     }
 
+    [Authorize]
+    [HttpPost("logout")]
+    public async Task<IActionResult> Logout(CancellationToken cancellationToken)
+    {
+        if (!IsLauncherClientAllowed(out var launcherError))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { error = launcherError });
+        }
+
+        var externalId = User.FindFirstValue("external_id")?.Trim() ?? string.Empty;
+        var username = User.Identity?.Name?.Trim() ?? string.Empty;
+        var tokenSessionVersionRaw = User.FindFirstValue("session_version");
+
+        if (string.IsNullOrWhiteSpace(externalId) && string.IsNullOrWhiteSpace(username))
+        {
+            return Unauthorized(new { error = "Invalid player session token." });
+        }
+
+        var account = await ResolveAccountForSessionMutationAsync(externalId, username, cancellationToken);
+        if (account is null)
+        {
+            return Unauthorized(new { error = "Player session is not recognized." });
+        }
+
+        if (!TryParseSessionVersion(tokenSessionVersionRaw, out var tokenSessionVersion))
+        {
+            return Unauthorized(new { error = "Invalid player session token version." });
+        }
+
+        if (tokenSessionVersion != account.SessionVersion)
+        {
+            return Unauthorized(new { error = "Player session expired. Login is required." });
+        }
+
+        if (IsLauncherProofEnforced() &&
+            (!HasLauncherVerifiedClaim(User) || !IsTokenLauncherProofAllowed(User)))
+        {
+            return Unauthorized(new { error = "Player session expired. Login is required." });
+        }
+
+        if (IsLauncherMinVersionEnforced() && !IsTokenLauncherVersionAllowed(User))
+        {
+            return Unauthorized(new { error = "Player session expired. Login is required." });
+        }
+
+        account.SessionVersion++;
+        account.UpdatedAtUtc = DateTime.UtcNow;
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return NoContent();
+    }
+
     [HttpPost("login")]
     public async Task<ActionResult<PublicAuthLoginResponse>> Login(
         [FromBody] PublicAuthLoginRequest request,
@@ -595,6 +647,27 @@ public sealed class PublicAuthController(
         var normalizedHwid = (hwidHash ?? string.Empty).Trim().ToLowerInvariant();
         var normalizedDeviceUser = (deviceUserName ?? string.Empty).Trim().ToLowerInvariant();
         return $"{normalizedUsername}|{normalizedHwid}|{normalizedDeviceUser}";
+    }
+
+    private async Task<AuthAccount?> ResolveAccountForSessionMutationAsync(
+        string externalId,
+        string username,
+        CancellationToken cancellationToken)
+    {
+        AuthAccount? account = null;
+        if (!string.IsNullOrWhiteSpace(externalId))
+        {
+            account = await dbContext.AuthAccounts
+                .FirstOrDefaultAsync(x => x.ExternalId == externalId, cancellationToken);
+        }
+
+        if (account is null && !string.IsNullOrWhiteSpace(username))
+        {
+            account = await dbContext.AuthAccounts
+                .FirstOrDefaultAsync(x => x.Username == username, cancellationToken);
+        }
+
+        return account;
     }
 
     private static bool TryGetPendingTwoFactorChallenge(string key, out PendingTwoFactorChallenge challenge)

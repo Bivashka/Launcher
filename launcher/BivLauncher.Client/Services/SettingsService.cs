@@ -1,4 +1,5 @@
 using BivLauncher.Client.Models;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
@@ -9,6 +10,8 @@ public sealed class SettingsService : ISettingsService
     private const string DefaultProjectDirectoryName = "BivLauncher";
     private const string PortableModeEnvVar = "BIVLAUNCHER_PORTABLE_MODE";
     private const string PortableModeMarkerFileName = "portable-mode.flag";
+    private const string ProtectedTokenPrefix = "enc:v1:dpapi:";
+    private static readonly byte[] TokenProtectionEntropy = Encoding.UTF8.GetBytes("BivLauncher.TokenProtection.v1");
     private static readonly string ApplicationDirectory = ResolveApplicationDirectory();
     private readonly object _syncRoot = new();
     private string _projectDirectoryName = DefaultProjectDirectoryName;
@@ -51,7 +54,9 @@ public sealed class SettingsService : ISettingsService
 
         await using var stream = File.OpenRead(path);
         var loaded = await JsonSerializer.DeserializeAsync<LauncherSettings>(stream, JsonOptions, cancellationToken);
-        return loaded ?? CreateDefaultSettings();
+        return loaded is null
+            ? CreateDefaultSettings()
+            : NormalizeLoadedSettings(loaded);
     }
 
     public async Task SaveAsync(LauncherSettings settings, CancellationToken cancellationToken = default)
@@ -59,9 +64,10 @@ public sealed class SettingsService : ISettingsService
         var path = GetSettingsFilePath();
         var directory = Path.GetDirectoryName(path)!;
         Directory.CreateDirectory(directory);
+        var persistSnapshot = PreparePersistSnapshot(settings);
 
         await using var stream = File.Create(path);
-        await JsonSerializer.SerializeAsync(stream, settings, JsonOptions, cancellationToken);
+        await JsonSerializer.SerializeAsync(stream, persistSnapshot, JsonOptions, cancellationToken);
     }
 
     public string GetSettingsFilePath()
@@ -221,5 +227,148 @@ public sealed class SettingsService : ISettingsService
         return string.IsNullOrWhiteSpace(sanitized) || sanitized is "." or ".."
             ? DefaultProjectDirectoryName
             : sanitized;
+    }
+
+    private static LauncherSettings PreparePersistSnapshot(LauncherSettings settings)
+    {
+        var snapshot = CloneSettings(settings);
+        snapshot.PlayerAuthToken = ProtectToken(snapshot.PlayerAuthToken);
+        snapshot.PlayerAccounts = snapshot.PlayerAccounts
+            .Select(account =>
+            {
+                var cloned = CloneStoredPlayerAccount(account);
+                cloned.AuthToken = ProtectToken(cloned.AuthToken);
+                return cloned;
+            })
+            .ToList();
+        return snapshot;
+    }
+
+    private static LauncherSettings NormalizeLoadedSettings(LauncherSettings settings)
+    {
+        var normalized = CloneSettings(settings);
+        normalized.PlayerAuthToken = UnprotectToken(normalized.PlayerAuthToken);
+        normalized.PlayerAccounts = normalized.PlayerAccounts
+            .Select(account =>
+            {
+                var cloned = CloneStoredPlayerAccount(account);
+                cloned.AuthToken = UnprotectToken(cloned.AuthToken);
+                return cloned;
+            })
+            .ToList();
+        return normalized;
+    }
+
+    private static LauncherSettings CloneSettings(LauncherSettings source)
+    {
+        return new LauncherSettings
+        {
+            ApiBaseUrl = source.ApiBaseUrl,
+            InstallDirectory = source.InstallDirectory,
+            DebugMode = source.DebugMode,
+            RamMb = source.RamMb,
+            JavaMode = source.JavaMode,
+            Language = source.Language,
+            ProfileRouteSelections = (source.ProfileRouteSelections ?? [])
+                .Select(selection => new ProfileRouteSelection
+                {
+                    ProfileSlug = selection.ProfileSlug,
+                    Route = selection.Route
+                })
+                .ToList(),
+            SelectedServerId = source.SelectedServerId,
+            LastPlayerUsername = source.LastPlayerUsername,
+            PlayerAuthToken = source.PlayerAuthToken,
+            PlayerAuthTokenType = source.PlayerAuthTokenType,
+            PlayerAuthUsername = source.PlayerAuthUsername,
+            PlayerAuthExternalId = source.PlayerAuthExternalId,
+            PlayerAuthRoles = [.. (source.PlayerAuthRoles ?? [])],
+            PlayerAuthApiBaseUrl = source.PlayerAuthApiBaseUrl,
+            PlayerAccounts = (source.PlayerAccounts ?? [])
+                .Select(CloneStoredPlayerAccount)
+                .ToList(),
+            ActivePlayerAccountUsername = source.ActivePlayerAccountUsername,
+            LastAutoUpdateVersionAttempted = source.LastAutoUpdateVersionAttempted
+        };
+    }
+
+    private static StoredPlayerAccount CloneStoredPlayerAccount(StoredPlayerAccount source)
+    {
+        return new StoredPlayerAccount
+        {
+            Username = source.Username,
+            AuthToken = source.AuthToken,
+            AuthTokenType = source.AuthTokenType,
+            ExternalId = source.ExternalId,
+            Roles = [.. (source.Roles ?? [])],
+            ApiBaseUrl = source.ApiBaseUrl,
+            LastUsedAtUtc = source.LastUsedAtUtc
+        };
+    }
+
+    private static string ProtectToken(string? rawToken)
+    {
+        var token = (rawToken ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return string.Empty;
+        }
+
+        if (token.StartsWith(ProtectedTokenPrefix, StringComparison.Ordinal))
+        {
+            return token;
+        }
+
+        if (!OperatingSystem.IsWindows())
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            var tokenBytes = Encoding.UTF8.GetBytes(token);
+            var protectedBytes = ProtectedData.Protect(tokenBytes, TokenProtectionEntropy, DataProtectionScope.CurrentUser);
+            return ProtectedTokenPrefix + Convert.ToBase64String(protectedBytes);
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private static string UnprotectToken(string? persistedToken)
+    {
+        var value = (persistedToken ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        if (!value.StartsWith(ProtectedTokenPrefix, StringComparison.Ordinal))
+        {
+            return value;
+        }
+
+        if (!OperatingSystem.IsWindows())
+        {
+            return string.Empty;
+        }
+
+        var payload = value[ProtectedTokenPrefix.Length..].Trim();
+        if (string.IsNullOrWhiteSpace(payload))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            var protectedBytes = Convert.FromBase64String(payload);
+            var tokenBytes = ProtectedData.Unprotect(protectedBytes, TokenProtectionEntropy, DataProtectionScope.CurrentUser);
+            return Encoding.UTF8.GetString(tokenBytes).Trim();
+        }
+        catch
+        {
+            return string.Empty;
+        }
     }
 }

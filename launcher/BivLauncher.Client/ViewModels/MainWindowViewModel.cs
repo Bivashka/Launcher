@@ -2176,6 +2176,21 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         await RunBusyAsync(async () =>
         {
+            var tokenToRevoke = _playerAuthToken;
+            var tokenTypeToRevoke = _playerAuthTokenType;
+
+            if (!string.IsNullOrWhiteSpace(tokenToRevoke))
+            {
+                try
+                {
+                    await _launcherApiService.LogoutAsync(ApiBaseUrl, tokenToRevoke, tokenTypeToRevoke);
+                }
+                catch (Exception ex)
+                {
+                    _logService.LogInfo($"Server-side logout call failed (will continue local logout): {ex.Message}");
+                }
+            }
+
             _allowAutoSessionRestore = false;
             IsPlayerLoggedIn = false;
             PlayerPassword = string.Empty;

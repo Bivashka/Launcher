@@ -148,6 +148,41 @@ public sealed class PublicAuthControllerTests
         Assert.False(string.IsNullOrWhiteSpace(proofId));
     }
 
+    [Fact]
+    public async Task Logout_WhenTokenIsValid_RevokesSessionVersion()
+    {
+        await using var fixture = await TestFixture.CreateAsync();
+        var controller = CreateController(fixture.DbContext, minClientVersion: "1.0.0");
+        controller.ControllerContext.HttpContext.Request.Headers["X-BivLauncher-Client"] = "BivLauncher.Client/1.2.3";
+
+        var loginResult = await controller.Login(
+            new PublicAuthLoginRequest
+            {
+                Username = "logout-player",
+                Password = "secret"
+            },
+            CancellationToken.None);
+
+        var loginOk = Assert.IsType<OkObjectResult>(loginResult.Result);
+        var loginPayload = Assert.IsType<PublicAuthLoginResponse>(loginOk.Value);
+
+        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(loginPayload.Token);
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(jwt.Claims, "Bearer"));
+
+        var logoutController = CreateController(fixture.DbContext, minClientVersion: "1.0.0");
+        logoutController.ControllerContext.HttpContext.User = principal;
+        logoutController.ControllerContext.HttpContext.Request.Headers["X-BivLauncher-Client"] = "BivLauncher.Client/1.2.3";
+
+        var logoutResult = await logoutController.Logout(CancellationToken.None);
+        Assert.IsType<NoContentResult>(logoutResult);
+
+        var account = await fixture.DbContext.AuthAccounts
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Username == "logout-player");
+        Assert.NotNull(account);
+        Assert.Equal(1, account!.SessionVersion);
+    }
+
     private static PublicAuthController CreateController(
         AppDbContext dbContext,
         string minClientVersion,

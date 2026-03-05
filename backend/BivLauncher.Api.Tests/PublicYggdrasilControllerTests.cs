@@ -227,6 +227,56 @@ public sealed class PublicYggdrasilControllerTests
     }
 
     [Fact]
+    public async Task Invalidate_WhenTokenIsValid_RevokesSessionAndTokenBecomesForbidden()
+    {
+        await using var fixture = await TestFixture.CreateAsync();
+        var options = BuildJwtOptions();
+
+        var account = new AuthAccount
+        {
+            Username = "InvalidateUser",
+            ExternalId = "invalidate-user-id",
+            SessionVersion = 0,
+            Roles = "player"
+        };
+        fixture.DbContext.AuthAccounts.Add(account);
+        await fixture.DbContext.SaveChangesAsync();
+
+        var token = new JwtTokenService(Microsoft.Extensions.Options.Options.Create(options))
+            .CreatePlayerToken(account, ["player"]);
+
+        var controller = new PublicYggdrasilController(
+            fixture.DbContext,
+            BuildConfiguration(),
+            Microsoft.Extensions.Options.Options.Create(options),
+            NullLogger<PublicYggdrasilController>.Instance);
+
+        var invalidateResponse = await controller.Invalidate(
+            new PublicYggdrasilController.YggdrasilAccessTokenRequest
+            {
+                AccessToken = token
+            },
+            CancellationToken.None);
+        Assert.IsType<NoContentResult>(invalidateResponse);
+
+        var updatedAccount = await fixture.DbContext.AuthAccounts
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Username == "InvalidateUser");
+        Assert.NotNull(updatedAccount);
+        Assert.Equal(1, updatedAccount!.SessionVersion);
+
+        var validateResponse = await controller.Validate(
+            new PublicYggdrasilController.YggdrasilAccessTokenRequest
+            {
+                AccessToken = token,
+                ClientToken = Guid.NewGuid().ToString("N")
+            },
+            CancellationToken.None);
+        var forbidden = Assert.IsType<ObjectResult>(validateResponse);
+        Assert.Equal(StatusCodes.Status403Forbidden, forbidden.StatusCode);
+    }
+
+    [Fact]
     public async Task HasJoined_WithoutJoin_ReturnsNoContent()
     {
         await using var fixture = await TestFixture.CreateAsync();

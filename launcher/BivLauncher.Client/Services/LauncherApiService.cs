@@ -100,6 +100,32 @@ public sealed class LauncherApiService : ILauncherApiService
         return payload ?? throw new InvalidOperationException("Session response is empty.");
     }
 
+    public async Task LogoutAsync(
+        string apiBaseUrl,
+        string accessToken,
+        string tokenType = "Bearer",
+        CancellationToken cancellationToken = default)
+    {
+        var token = accessToken.Trim();
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return;
+        }
+
+        var uri = BuildUri(apiBaseUrl, "/api/public/auth/logout");
+        using var response = await SendWithRetryAsync(
+            () => BuildAuthorizedRequest(HttpMethod.Post, uri, token, tokenType),
+            cancellationToken);
+        if (response.IsSuccessStatusCode ||
+            response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+        {
+            return;
+        }
+
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        throw CreateApiException("Logout", response, body);
+    }
+
     public Task<bool> HasSkinAsync(string apiBaseUrl, string username, CancellationToken cancellationToken = default)
     {
         return CheckResourceExistsAsync(apiBaseUrl, $"/api/public/skins/{Uri.EscapeDataString(username)}", cancellationToken);

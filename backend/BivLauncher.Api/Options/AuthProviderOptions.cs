@@ -9,5 +9,5 @@ public sealed class AuthProviderOptions
     public string LoginFieldKey { get; set; } = "username";
     public string PasswordFieldKey { get; set; } = "password";
     public int TimeoutSeconds { get; set; } = 15;
-    public bool AllowDevFallback { get; set; } = true;
+    public bool AllowDevFallback { get; set; } = false;
 }

@@ -52,7 +52,8 @@ Note: API now reads Postgres connection from `DB_CONN` (in `.env`) as the primar
 - CI behavior:
   - installer now uses dedicated non-zero exit codes (e.g. `20` docker missing, `21` compose missing, `22` port-in-use, `23` compose-config-invalid, `24` env-backup-failed, `25` compose-up-failed, `26` env-atomic-write-failed, `30` strict-check failure)
   - JSON report includes `result` and `checkSummary` blocks for machine parsing
-- Installer auto-generates strong `JWT_SECRET` and `HWID_HMAC_SALT` if they are empty/default placeholders.
+- Installer auto-generates strong `JWT_SECRET`, `HWID_HMAC_SALT`, and `LAUNCHER_CLIENT_PROOF` if they are empty/default placeholders.
+- Production startup is strict by default (`LAUNCHER_STRICT_SECURITY=true`): backend refuses to start when `LAUNCHER_CLIENT_PROOF` or `LAUNCHER_MIN_CLIENT_VERSION` is missing/invalid.
 - Env updates are written atomically via temp file + rename.
 - For existing env files installer creates timestamped backup before first write (unless `--no-env-backup`).
 - Compose operations (`up`, `ps`, `config`) respect selected `--env-file`.
@@ -83,6 +84,7 @@ Note: API now reads Postgres connection from `DB_CONN` (in `.env`) as the primar
 - `POST /api/admin/launcher/server-jar/build`
 - `GET /api/public/manifest/{profileSlug}`
 - `POST /api/public/auth/login`
+- `POST /api/public/auth/logout`
 - `GET /api/public/skins/{user}`
 - `GET /api/public/capes/{user}`
 - `POST /authserver/validate` (Yggdrasil compatibility alias set)

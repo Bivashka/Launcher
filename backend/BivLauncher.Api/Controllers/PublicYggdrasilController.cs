@@ -185,8 +185,17 @@ public sealed class PublicYggdrasilController(
     [HttpPost("/api/public/yggdrasil/invalidate")]
     [HttpPost("/api/public/yggdrasil/authserver/invalidate")]
     [HttpPost("/api/yggdrasil/authserver/invalidate")]
-    public IActionResult Invalidate()
+    public async Task<IActionResult> Invalidate(
+        [FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] YggdrasilAccessTokenRequest? request,
+        CancellationToken cancellationToken)
     {
+        var token = (request?.AccessToken ?? string.Empty).Trim();
+        if (HttpContext is not null && string.IsNullOrWhiteSpace(token))
+        {
+            token = await ReadLegacyParameterAsync(cancellationToken, "accessToken", "sessionId");
+        }
+
+        await TryRevokeSessionByTokenAsync(token, cancellationToken);
         return NoContent();
     }
 
@@ -196,8 +205,17 @@ public sealed class PublicYggdrasilController(
     [HttpPost("/api/public/yggdrasil/signout")]
     [HttpPost("/api/public/yggdrasil/authserver/signout")]
     [HttpPost("/api/yggdrasil/authserver/signout")]
-    public IActionResult SignOutEndpoint()
+    public async Task<IActionResult> SignOutEndpoint(
+        [FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] YggdrasilAccessTokenRequest? request,
+        CancellationToken cancellationToken)
     {
+        var token = (request?.AccessToken ?? string.Empty).Trim();
+        if (HttpContext is not null && string.IsNullOrWhiteSpace(token))
+        {
+            token = await ReadLegacyParameterAsync(cancellationToken, "accessToken", "sessionId");
+        }
+
+        await TryRevokeSessionByTokenAsync(token, cancellationToken);
         return NoContent();
     }
 
@@ -963,6 +981,19 @@ public sealed class PublicYggdrasilController(
         }
     }
 
+    private static void RevokeJoinTicketsForAccount(Guid accountId)
+    {
+        foreach (var entry in JoinTickets)
+        {
+            if (entry.Value.AccountId != accountId)
+            {
+                continue;
+            }
+
+            JoinTickets.TryRemove(entry.Key, out _);
+        }
+    }
+
     private static bool TryParseSessionVersion(string? rawValue, out int sessionVersion)
     {
         sessionVersion = 0;
@@ -984,6 +1015,33 @@ public sealed class PublicYggdrasilController(
 
         var normalized = rawDeviceUserName.Trim().ToLowerInvariant();
         return normalized.Length > 128 ? normalized[..128] : normalized;
+    }
+
+    private async Task<bool> TryRevokeSessionByTokenAsync(string rawToken, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(rawToken))
+        {
+            return false;
+        }
+
+        var tokenValidation = await ValidatePlayerAccessTokenAsync(rawToken, cancellationToken);
+        if (!tokenValidation.Success || tokenValidation.Account is null)
+        {
+            return false;
+        }
+
+        var account = await dbContext.AuthAccounts
+            .FirstOrDefaultAsync(x => x.Id == tokenValidation.Account.Id, cancellationToken);
+        if (account is null)
+        {
+            return false;
+        }
+
+        account.SessionVersion++;
+        account.UpdatedAtUtc = DateTime.UtcNow;
+        await dbContext.SaveChangesAsync(cancellationToken);
+        RevokeJoinTicketsForAccount(account.Id);
+        return true;
     }
 
     private static YggdrasilProfile BuildProfile(AuthAccount account)

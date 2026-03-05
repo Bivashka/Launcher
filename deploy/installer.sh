@@ -1180,12 +1180,19 @@ write_env_value "DB_CONN" "$DB_CONN_VALUE"
 
 JWT_SECRET_VALUE="$(read_env_value "JWT_SECRET" "")"
 HWID_HMAC_VALUE="$(read_env_value "HWID_HMAC_SALT" "")"
+LAUNCHER_CLIENT_PROOF_VALUE="$(read_env_value "LAUNCHER_CLIENT_PROOF" "")"
 ensure_secret_value "JWT_SECRET" "$JWT_SECRET_VALUE" "change_me_to_a_long_random_secret" "change-me" "64"
 ensure_secret_value "HWID_HMAC_SALT" "$HWID_HMAC_VALUE" "change_me_hwid_salt" "change-me" "64"
+ensure_secret_value "LAUNCHER_CLIENT_PROOF" "$LAUNCHER_CLIENT_PROOF_VALUE" "change_me_launcher_client_proof" "change-me" "64"
 
-# Keep key visible in existing env files after upgrades.
-if ! grep -qE '^LAUNCHER_CLIENT_PROOF=' "$ENV_FILE" 2>/dev/null; then
-  write_env_value "LAUNCHER_CLIENT_PROOF" ""
+# Keep launcher security keys visible and non-empty after upgrades.
+LAUNCHER_MIN_CLIENT_VERSION_VALUE="$(read_env_value "LAUNCHER_MIN_CLIENT_VERSION" "")"
+if [ -z "$LAUNCHER_MIN_CLIENT_VERSION_VALUE" ]; then
+  write_env_value "LAUNCHER_MIN_CLIENT_VERSION" "1.0.0"
+fi
+
+if ! grep -qE '^LAUNCHER_STRICT_SECURITY=' "$ENV_FILE" 2>/dev/null; then
+  write_env_value "LAUNCHER_STRICT_SECURITY" "true"
 fi
 
 if [ "$DRY_RUN" = "1" ]; then
