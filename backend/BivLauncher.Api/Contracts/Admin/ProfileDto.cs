@@ -6,6 +6,8 @@ public sealed record ProfileDto(
     string Slug,
     string Description,
     bool Enabled,
+    bool IsPrivate,
+    string AllowedPlayerUsernames,
     string IconKey,
     int Priority,
     int RecommendedRamMb,

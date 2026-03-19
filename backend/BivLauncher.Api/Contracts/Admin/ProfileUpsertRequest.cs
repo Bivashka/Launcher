@@ -19,6 +19,11 @@ public sealed class ProfileUpsertRequest
 
     public bool Enabled { get; set; } = true;
 
+    public bool IsPrivate { get; set; }
+
+    [MaxLength(4096)]
+    public string AllowedPlayerUsernames { get; set; } = string.Empty;
+
     [MaxLength(512)]
     public string IconKey { get; set; } = string.Empty;
 

@@ -219,6 +219,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.Property(x => x.Name).HasMaxLength(128);
             entity.Property(x => x.Slug).HasMaxLength(64);
             entity.Property(x => x.Description).HasMaxLength(2048);
+            entity.Property(x => x.AllowedPlayerUsernames).HasMaxLength(4096);
             entity.Property(x => x.IconKey).HasMaxLength(512);
             entity.Property(x => x.JvmArgsDefault).HasMaxLength(4096);
             entity.Property(x => x.GameArgsDefault).HasMaxLength(4096);

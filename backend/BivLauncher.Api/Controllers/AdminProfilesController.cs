@@ -1,6 +1,7 @@
 using BivLauncher.Api.Contracts.Admin;
 using BivLauncher.Api.Data;
 using BivLauncher.Api.Data.Entities;
+using BivLauncher.Api.Infrastructure;
 using BivLauncher.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -33,6 +34,8 @@ public sealed class AdminProfilesController(
                 x.Slug,
                 x.Description,
                 x.Enabled,
+                x.IsPrivate,
+                x.AllowedPlayerUsernames,
                 x.IconKey,
                 x.Priority,
                 x.RecommendedRamMb,
@@ -64,6 +67,8 @@ public sealed class AdminProfilesController(
                 x.Slug,
                 x.Description,
                 x.Enabled,
+                x.IsPrivate,
+                x.AllowedPlayerUsernames,
                 x.IconKey,
                 x.Priority,
                 x.RecommendedRamMb,
@@ -88,6 +93,7 @@ public sealed class AdminProfilesController(
     {
         var normalizedSlug = NormalizeSlug(request.Slug);
         var normalizedRuntimeKey = NormalizeBundledRuntimeKey(request.BundledRuntimeKey);
+        var normalizedAllowedPlayerUsernames = ProfileAccessRules.NormalizeAllowedPlayerUsernames(request.AllowedPlayerUsernames);
         if (!TryValidateLaunchArgs(request.JvmArgsDefault, out var jvmError))
         {
             return BadRequest(new { error = $"JvmArgsDefault: {jvmError}" });
@@ -125,6 +131,8 @@ public sealed class AdminProfilesController(
             Slug = normalizedSlug,
             Description = request.Description.Trim(),
             Enabled = request.Enabled,
+            IsPrivate = request.IsPrivate,
+            AllowedPlayerUsernames = normalizedAllowedPlayerUsernames,
             IconKey = request.IconKey.Trim(),
             Priority = request.Priority,
             RecommendedRamMb = request.RecommendedRamMb,
@@ -147,6 +155,7 @@ public sealed class AdminProfilesController(
             {
                 profileId = profile.Id,
                 profile.Enabled,
+                profile.IsPrivate,
                 profile.Priority
             },
             cancellationToken: cancellationToken);
@@ -165,6 +174,7 @@ public sealed class AdminProfilesController(
 
         var normalizedSlug = NormalizeSlug(request.Slug);
         var normalizedRuntimeKey = NormalizeBundledRuntimeKey(request.BundledRuntimeKey);
+        var normalizedAllowedPlayerUsernames = ProfileAccessRules.NormalizeAllowedPlayerUsernames(request.AllowedPlayerUsernames);
         if (!TryValidateLaunchArgs(request.JvmArgsDefault, out var jvmError))
         {
             return BadRequest(new { error = $"JvmArgsDefault: {jvmError}" });
@@ -201,6 +211,8 @@ public sealed class AdminProfilesController(
         profile.Slug = normalizedSlug;
         profile.Description = request.Description.Trim();
         profile.Enabled = request.Enabled;
+        profile.IsPrivate = request.IsPrivate;
+        profile.AllowedPlayerUsernames = normalizedAllowedPlayerUsernames;
         profile.IconKey = request.IconKey.Trim();
         profile.Priority = request.Priority;
         profile.RecommendedRamMb = request.RecommendedRamMb;
@@ -228,6 +240,7 @@ public sealed class AdminProfilesController(
             {
                 profileId = profile.Id,
                 profile.Enabled,
+                profile.IsPrivate,
                 profile.Priority
             },
             cancellationToken: cancellationToken);
@@ -391,6 +404,8 @@ public sealed class AdminProfilesController(
             profile.Slug,
             profile.Description,
             profile.Enabled,
+            profile.IsPrivate,
+            profile.AllowedPlayerUsernames,
             profile.IconKey,
             profile.Priority,
             profile.RecommendedRamMb,

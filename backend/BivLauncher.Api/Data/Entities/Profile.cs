@@ -7,6 +7,8 @@ public sealed class Profile
     public required string Slug { get; set; }
     public string Description { get; set; } = string.Empty;
     public bool Enabled { get; set; } = true;
+    public bool IsPrivate { get; set; }
+    public string AllowedPlayerUsernames { get; set; } = string.Empty;
     public string IconKey { get; set; } = string.Empty;
     public int Priority { get; set; } = 100;
     public int RecommendedRamMb { get; set; } = 2048;

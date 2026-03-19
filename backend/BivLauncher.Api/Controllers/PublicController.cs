@@ -2,12 +2,14 @@ using BivLauncher.Api.Contracts.Public;
 using BivLauncher.Api.Contracts.Admin;
 using BivLauncher.Api.Data;
 using BivLauncher.Api.Data.Entities;
+using BivLauncher.Api.Infrastructure;
 using BivLauncher.Api.Options;
 using BivLauncher.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using System.Collections.Concurrent;
+using System.Security.Claims;
 using System.Text.Json;
 
 namespace BivLauncher.Api.Controllers;
@@ -35,6 +37,7 @@ public sealed class PublicController(
         Response.Headers.CacheControl = "no-store, no-cache, must-revalidate";
         Response.Headers.Pragma = "no-cache";
         Response.Headers.Expires = "0";
+        var currentUsername = ResolveCurrentPlayerUsername();
 
         var profiles = await dbContext.Profiles
             .AsNoTracking()
@@ -42,6 +45,9 @@ public sealed class PublicController(
             .Where(x => x.Enabled)
             .OrderBy(x => x.Priority)
             .ToListAsync(cancellationToken);
+        profiles = profiles
+            .Where(profile => ProfileAccessRules.CanAccess(profile, currentUsername))
+            .ToList();
 
         var profileIds = profiles.Select(x => x.Id).ToHashSet();
         var serverIds = profiles.SelectMany(x => x.Servers).Select(x => x.Id).ToHashSet();
@@ -159,14 +165,30 @@ public sealed class PublicController(
     public async Task<IActionResult> Manifest(string profileSlug, CancellationToken cancellationToken)
     {
         var normalizedSlug = profileSlug.Trim().ToLowerInvariant();
+        var currentUsername = ResolveCurrentPlayerUsername();
 
         var profile = await dbContext.Profiles
             .AsNoTracking()
             .Where(x => x.Slug == normalizedSlug && x.Enabled)
-            .Select(x => new { x.Id, x.Slug, x.LatestManifestKey })
+            .Select(x => new
+            {
+                x.Id,
+                x.Slug,
+                x.LatestManifestKey,
+                x.IsPrivate,
+                x.AllowedPlayerUsernames
+            })
             .FirstOrDefaultAsync(cancellationToken);
 
         if (profile is null)
+        {
+            return NotFound(new { error = "Profile not found." });
+        }
+
+        if (!ProfileAccessRules.CanAccess(
+                profile.IsPrivate,
+                profile.AllowedPlayerUsernames,
+                currentUsername))
         {
             return NotFound(new { error = "Profile not found." });
         }
@@ -310,6 +332,17 @@ public sealed class PublicController(
     private static int ResolvePositiveInt(string? rawValue, int fallback)
     {
         return int.TryParse(rawValue, out var parsed) && parsed > 0 ? parsed : fallback;
+    }
+
+    private string ResolveCurrentPlayerUsername()
+    {
+        if (User?.Identity?.IsAuthenticated != true)
+        {
+            return string.Empty;
+        }
+
+        var username = User.FindFirstValue(ClaimTypes.Name) ?? User.Identity?.Name;
+        return ProfileAccessRules.NormalizePlayerUsername(username);
     }
 
     private async Task<bool> ResolveInstallTelemetryEnabledAsync(CancellationToken cancellationToken)

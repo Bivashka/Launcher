@@ -1337,128 +1337,133 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private async Task RefreshAsync()
     {
-        await RunBusyAsync(async () =>
+        await RunBusyAsync(RefreshCoreAsync);
+    }
+
+    private async Task RefreshCoreAsync()
+    {
+        StatusText = T("status.fetchingBootstrap");
+        var bootstrap = await _launcherApiService.GetBootstrapAsync(
+            ApiBaseUrl,
+            _playerAuthToken,
+            _playerAuthTokenType);
+        _ = FlushPendingSubmissionsAsync();
+        await TrySubmitInstallTelemetryAsync(bootstrap);
+
+        await ApplyLauncherDirectoryNameAsync(bootstrap.Branding);
+        await ApplyBrandingAsync(ApiBaseUrl, bootstrap.Branding);
+        var discordRpcEnabled = bootstrap.Constraints.DiscordRpcEnabled;
+        var discordRpcPrivacyMode = bootstrap.Constraints.DiscordRpcPrivacyMode;
+        _discordRpcService.ConfigurePolicy(discordRpcEnabled, discordRpcPrivacyMode, ProductName);
+        ApplyLauncherUpdateInfo(bootstrap.LauncherUpdate);
+
+        var totalMemoryMb = GetTotalAvailableMemoryMb();
+        RamMinMb = Math.Max(bootstrap.Constraints.MinRamMb, 512);
+        RamMaxMb = Math.Max(RamMinMb, totalMemoryMb - Math.Max(bootstrap.Constraints.ReservedSystemRamMb, 512));
+        RamMb = Math.Clamp(RamMb, RamMinMb, RamMaxMb);
+
+        var allServers = new List<ManagedServerItem>();
+        var orderedProfiles = bootstrap.Profiles.OrderBy(profile => profile.Priority);
+        foreach (var profile in orderedProfiles)
         {
-            StatusText = T("status.fetchingBootstrap");
-            var bootstrap = await _launcherApiService.GetBootstrapAsync(ApiBaseUrl);
-            _ = FlushPendingSubmissionsAsync();
-            await TrySubmitInstallTelemetryAsync(bootstrap);
-
-            await ApplyLauncherDirectoryNameAsync(bootstrap.Branding);
-            await ApplyBrandingAsync(ApiBaseUrl, bootstrap.Branding);
-            var discordRpcEnabled = bootstrap.Constraints.DiscordRpcEnabled;
-            var discordRpcPrivacyMode = bootstrap.Constraints.DiscordRpcPrivacyMode;
-            _discordRpcService.ConfigurePolicy(discordRpcEnabled, discordRpcPrivacyMode, ProductName);
-            ApplyLauncherUpdateInfo(bootstrap.LauncherUpdate);
-
-            var totalMemoryMb = GetTotalAvailableMemoryMb();
-            RamMinMb = Math.Max(bootstrap.Constraints.MinRamMb, 512);
-            RamMaxMb = Math.Max(RamMinMb, totalMemoryMb - Math.Max(bootstrap.Constraints.ReservedSystemRamMb, 512));
-            RamMb = Math.Clamp(RamMb, RamMinMb, RamMaxMb);
-
-            var allServers = new List<ManagedServerItem>();
-            var orderedProfiles = bootstrap.Profiles.OrderBy(profile => profile.Priority);
-            foreach (var profile in orderedProfiles)
+            var orderedServers = profile.Servers.OrderBy(server => server.Order);
+            foreach (var server in orderedServers)
             {
-                var orderedServers = profile.Servers.OrderBy(server => server.Order);
-                foreach (var server in orderedServers)
+                var rpc = server.DiscordRpc ?? profile.DiscordRpc;
+                var effectiveRpcEnabled = (rpc?.Enabled ?? false) && discordRpcEnabled;
+                var effectiveRpcDetails = discordRpcPrivacyMode ? string.Empty : (rpc?.DetailsText ?? string.Empty);
+                var effectiveRpcState = discordRpcPrivacyMode ? string.Empty : (rpc?.StateText ?? string.Empty);
+                var effectiveRpcLargeText = discordRpcPrivacyMode ? string.Empty : (rpc?.LargeImageText ?? string.Empty);
+                var effectiveRpcSmallText = discordRpcPrivacyMode ? string.Empty : (rpc?.SmallImageText ?? string.Empty);
+                var icon = await ResolveServerIconAsync(ApiBaseUrl, server.IconUrl, profile.IconUrl);
+                allServers.Add(new ManagedServerItem
                 {
-                    var rpc = server.DiscordRpc ?? profile.DiscordRpc;
-                    var effectiveRpcEnabled = (rpc?.Enabled ?? false) && discordRpcEnabled;
-                    var effectiveRpcDetails = discordRpcPrivacyMode ? string.Empty : (rpc?.DetailsText ?? string.Empty);
-                    var effectiveRpcState = discordRpcPrivacyMode ? string.Empty : (rpc?.StateText ?? string.Empty);
-                    var effectiveRpcLargeText = discordRpcPrivacyMode ? string.Empty : (rpc?.LargeImageText ?? string.Empty);
-                    var effectiveRpcSmallText = discordRpcPrivacyMode ? string.Empty : (rpc?.SmallImageText ?? string.Empty);
-                    var icon = await ResolveServerIconAsync(ApiBaseUrl, server.IconUrl, profile.IconUrl);
-                    allServers.Add(new ManagedServerItem
-                    {
-                        ServerId = server.Id,
-                        ProfileSlug = profile.Slug,
-                        ProfileName = profile.Name,
-                        ServerName = server.Name,
-                        Address = server.Address,
-                        Port = server.Port,
-                        MainAddress = server.Address,
-                        MainPort = server.Port,
-                        MainJarPath = server.MainJarPath,
-                        RuProxyAddress = server.RuProxyAddress,
-                        RuProxyPort = server.RuProxyPort,
-                        RuJarPath = server.RuJarPath,
-                        LoaderType = server.LoaderType,
-                        McVersion = server.McVersion,
-                        RecommendedRamMb = profile.RecommendedRamMb,
-                        DiscordRpcAppId = rpc?.AppId ?? string.Empty,
-                        DiscordRpcDetails = effectiveRpcDetails,
-                        DiscordRpcState = effectiveRpcState,
-                        DiscordRpcLargeImageKey = rpc?.LargeImageKey ?? string.Empty,
-                        DiscordRpcLargeImageText = effectiveRpcLargeText,
-                        DiscordRpcSmallImageKey = rpc?.SmallImageKey ?? string.Empty,
-                        DiscordRpcSmallImageText = effectiveRpcSmallText,
-                        DiscordRpcEnabled = effectiveRpcEnabled,
-                        DiscordPreview = BuildDiscordPreview(
-                            effectiveRpcEnabled,
-                            rpc?.AppId ?? string.Empty,
-                            effectiveRpcDetails,
-                            effectiveRpcState),
-                        Icon = icon,
-                        IsOnline = false,
-                        OnlinePlayers = 0,
-                        OnlineMaxPlayers = -1,
-                        OnlineStatusText = _languageCode == "en" ? "Checking..." : "Проверка...",
-                        OnlineStatusBrush = new SolidColorBrush(Color.Parse("#8EA3C0")),
-                        OnlineLastCheckedAtUtc = default
-                    });
-                }
+                    ServerId = server.Id,
+                    ProfileSlug = profile.Slug,
+                    ProfileName = profile.Name,
+                    ServerName = server.Name,
+                    Address = server.Address,
+                    Port = server.Port,
+                    MainAddress = server.Address,
+                    MainPort = server.Port,
+                    MainJarPath = server.MainJarPath,
+                    RuProxyAddress = server.RuProxyAddress,
+                    RuProxyPort = server.RuProxyPort,
+                    RuJarPath = server.RuJarPath,
+                    LoaderType = server.LoaderType,
+                    McVersion = server.McVersion,
+                    RecommendedRamMb = profile.RecommendedRamMb,
+                    DiscordRpcAppId = rpc?.AppId ?? string.Empty,
+                    DiscordRpcDetails = effectiveRpcDetails,
+                    DiscordRpcState = effectiveRpcState,
+                    DiscordRpcLargeImageKey = rpc?.LargeImageKey ?? string.Empty,
+                    DiscordRpcLargeImageText = effectiveRpcLargeText,
+                    DiscordRpcSmallImageKey = rpc?.SmallImageKey ?? string.Empty,
+                    DiscordRpcSmallImageText = effectiveRpcSmallText,
+                    DiscordRpcEnabled = effectiveRpcEnabled,
+                    DiscordPreview = BuildDiscordPreview(
+                        effectiveRpcEnabled,
+                        rpc?.AppId ?? string.Empty,
+                        effectiveRpcDetails,
+                        effectiveRpcState),
+                    Icon = icon,
+                    IsOnline = false,
+                    OnlinePlayers = 0,
+                    OnlineMaxPlayers = -1,
+                    OnlineStatusText = _languageCode == "en" ? "Checking..." : "Проверка...",
+                    OnlineStatusBrush = new SolidColorBrush(Color.Parse("#8EA3C0")),
+                    OnlineLastCheckedAtUtc = default
+                });
             }
+        }
 
-            var allNews = bootstrap.News
-                .OrderByDescending(item => item.Pinned)
-                .ThenByDescending(item => item.CreatedAtUtc)
-                .Select(item => new LauncherNewsItem
-                {
-                    Id = item.Id,
-                    Title = item.Title,
-                    Body = item.Body,
-                    Preview = BuildNewsPreview(item.Body),
-                    Source = item.Source,
-                    Pinned = item.Pinned,
-                    CreatedAtUtc = item.CreatedAtUtc,
-                    Meta = BuildNewsMeta(item.Source, item.Pinned, item.CreatedAtUtc)
-                })
-                .ToList();
-
-            ManagedServers.Clear();
-            foreach (var server in allServers)
+        var allNews = bootstrap.News
+            .OrderByDescending(item => item.Pinned)
+            .ThenByDescending(item => item.CreatedAtUtc)
+            .Select(item => new LauncherNewsItem
             {
-                ManagedServers.Add(server);
-            }
+                Id = item.Id,
+                Title = item.Title,
+                Body = item.Body,
+                Preview = BuildNewsPreview(item.Body),
+                Source = item.Source,
+                Pinned = item.Pinned,
+                CreatedAtUtc = item.CreatedAtUtc,
+                Meta = BuildNewsMeta(item.Source, item.Pinned, item.CreatedAtUtc)
+            })
+            .ToList();
 
-            NewsItems.Clear();
-            foreach (var item in allNews)
-            {
-                NewsItems.Add(item);
-            }
+        ManagedServers.Clear();
+        foreach (var server in allServers)
+        {
+            ManagedServers.Add(server);
+        }
 
-            SelectedNewsItem = NewsItems.FirstOrDefault();
+        NewsItems.Clear();
+        foreach (var item in allNews)
+        {
+            NewsItems.Add(item);
+        }
 
-            if (ManagedServers.Count == 0)
-            {
-                SelectedServer = null;
-                _discordRpcService.ClearPresence();
-                StatusText = T("status.noServers");
-                return;
-            }
+        SelectedNewsItem = NewsItems.FirstOrDefault();
 
-            SelectedServer = ManagedServers.FirstOrDefault(x => x.ServerId.ToString() == _settings.SelectedServerId)
-                ?? ManagedServers[0];
+        if (ManagedServers.Count == 0)
+        {
+            SelectedServer = null;
+            _discordRpcService.ClearPresence();
+            StatusText = T("status.noServers");
+            return;
+        }
 
-            StatusText = F("status.loadedServers", ManagedServers.Count);
+        SelectedServer = ManagedServers.FirstOrDefault(x => x.ServerId.ToString() == _settings.SelectedServerId)
+            ?? ManagedServers[0];
 
-            if (IsPlayerLoggedIn)
-            {
-                await RefreshServerOnlineStatusesAsync(force: true);
-            }
-        });
+        StatusText = F("status.loadedServers", ManagedServers.Count);
+
+        if (IsPlayerLoggedIn)
+        {
+            await RefreshServerOnlineStatusesAsync(force: true);
+        }
     }
 
     private async Task VerifyFilesAsync()
@@ -1476,7 +1481,11 @@ public partial class MainWindowViewModel : ViewModelBase
             try
             {
                 StatusText = T("status.fetchingManifest");
-                var manifest = await _launcherApiService.GetManifestAsync(ApiBaseUrl, SelectedServer.ProfileSlug);
+                var manifest = await _launcherApiService.GetManifestAsync(
+                    ApiBaseUrl,
+                    SelectedServer.ProfileSlug,
+                    _playerAuthToken,
+                    _playerAuthTokenType);
 
                 var progress = new Progress<InstallProgressInfo>(info =>
                 {
@@ -1539,7 +1548,11 @@ public partial class MainWindowViewModel : ViewModelBase
                 await SaveSettingsAsync();
 
                 StatusText = T("status.fetchingManifest");
-                manifest = await _launcherApiService.GetManifestAsync(ApiBaseUrl, selectedServer.ProfileSlug);
+                manifest = await _launcherApiService.GetManifestAsync(
+                    ApiBaseUrl,
+                    selectedServer.ProfileSlug,
+                    _playerAuthToken,
+                    _playerAuthTokenType);
 
                 StartFileSyncProgress();
                 var progress = new Progress<InstallProgressInfo>(info =>
@@ -2081,6 +2094,7 @@ public partial class MainWindowViewModel : ViewModelBase
 
             await RefreshPlayerCosmeticsAsync(response.Username);
             await PersistSettingsSnapshotAsync();
+            await RefreshCoreAsync();
             StatusText = T("status.ready");
             _logService.LogInfo($"Player login success: {response.Username} ({response.ExternalId})");
         });
@@ -2139,6 +2153,7 @@ public partial class MainWindowViewModel : ViewModelBase
                     ResetTwoFactorState();
                     ClearAuthenticatedPlayerSession();
                     await PersistSettingsSnapshotAsync();
+                    await RefreshCoreAsync();
                     StatusText = _languageCode == "en"
                         ? "Saved account token belongs to another user. Login again."
                         : "Токен сохранённого аккаунта принадлежит другому пользователю. Войдите снова.";
@@ -2157,6 +2172,7 @@ public partial class MainWindowViewModel : ViewModelBase
                     currentApiBaseUrl);
                 await RefreshPlayerCosmeticsAsync(sessionUsername);
                 await PersistSettingsSnapshotAsync();
+                await RefreshCoreAsync();
                 StatusText = T("status.ready");
             }
             catch (LauncherApiException apiException) when (
@@ -2165,6 +2181,7 @@ public partial class MainWindowViewModel : ViewModelBase
                 RemoveStoredAccount(account.Username);
                 IsPlayerLoggedIn = false;
                 await PersistSettingsSnapshotAsync();
+                await RefreshCoreAsync();
                 StatusText = _languageCode == "en"
                     ? "Saved account session expired. Login again."
                     : "Сессия аккаунта истекла. Войдите заново.";
@@ -2198,6 +2215,7 @@ public partial class MainWindowViewModel : ViewModelBase
             ClearAuthenticatedPlayerSession();
             StatusText = T("status.notLoggedIn");
             await PersistSettingsSnapshotAsync();
+            await RefreshCoreAsync();
         });
     }
 
@@ -2216,6 +2234,7 @@ public partial class MainWindowViewModel : ViewModelBase
         PlayerUsername = string.Empty;
         SetSelectedStoredAccount(null);
         StatusText = _languageCode == "en" ? "Add another account." : "Добавьте новый аккаунт.";
+        _ = RefreshAsync();
     }
 
     private async Task DeleteSelectedAccountAsync()
@@ -2254,6 +2273,7 @@ public partial class MainWindowViewModel : ViewModelBase
                 ResetTwoFactorState();
                 ClearAuthenticatedPlayerSession();
                 await PersistSettingsSnapshotAsync();
+                await RefreshCoreAsync();
                 StatusText = _languageCode == "en"
                     ? "Selected account removed. Login again."
                     : "Выбранный аккаунт удалён. Войдите снова.";

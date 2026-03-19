@@ -437,6 +437,8 @@ type Profile = {
   slug: string
   description: string
   enabled: boolean
+  isPrivate: boolean
+  allowedPlayerUsernames: string
   iconKey: string
   priority: number
   recommendedRamMb: number
@@ -475,6 +477,8 @@ type ProfileForm = {
   slug: string
   description: string
   enabled: boolean
+  isPrivate: boolean
+  allowedPlayerUsernames: string
   iconKey: string
   priority: number
   recommendedRamMb: number
@@ -591,6 +595,8 @@ const defaultProfileForm: ProfileForm = {
   slug: '',
   description: '',
   enabled: true,
+  isPrivate: false,
+  allowedPlayerUsernames: '',
   iconKey: '',
   priority: 100,
   recommendedRamMb: 2048,
@@ -598,6 +604,13 @@ const defaultProfileForm: ProfileForm = {
   gameArgsDefault: '',
   bundledJavaPath: '',
   bundledRuntimeKey: '',
+}
+
+function parseAllowedPlayerUsernames(rawValue: string): string[] {
+  return rawValue
+    .split(/[\s,;]+/)
+    .map((value) => value.trim())
+    .filter(Boolean)
 }
 
 const defaultServerForm: ServerForm = {
@@ -2330,14 +2343,16 @@ function App() {
     setRuntimeCleanupResult(null)
     setRebuildJvmArgsDefault(profile.jvmArgsDefault || '-Xms1024M -Xmx2048M')
     setRebuildGameArgsDefault(profile.gameArgsDefault || '')
-    setProfileForm({
-      name: profile.name,
-      slug: profile.slug,
-      description: profile.description,
-      enabled: profile.enabled,
-      iconKey: profile.iconKey,
-      priority: profile.priority,
-      recommendedRamMb: profile.recommendedRamMb,
+      setProfileForm({
+        name: profile.name,
+        slug: profile.slug,
+        description: profile.description,
+        enabled: profile.enabled,
+        isPrivate: profile.isPrivate,
+        allowedPlayerUsernames: profile.allowedPlayerUsernames || '',
+        iconKey: profile.iconKey,
+        priority: profile.priority,
+        recommendedRamMb: profile.recommendedRamMb,
       jvmArgsDefault: profile.jvmArgsDefault || '-Xms1024M -Xmx2048M',
       gameArgsDefault: profile.gameArgsDefault || '',
       bundledJavaPath: profile.bundledJavaPath || '',
@@ -3004,6 +3019,8 @@ function App() {
           slug: profileSlug,
           description: '',
           enabled: true,
+          isPrivate: false,
+          allowedPlayerUsernames: '',
           iconKey: '',
           priority: 100,
           recommendedRamMb: 2048,
@@ -5250,6 +5267,25 @@ function App() {
                   value={profileForm.bundledRuntimeKey}
                   onChange={(event) => setProfileForm((prev) => ({ ...prev, bundledRuntimeKey: event.target.value }))}
                 />
+                <label className="checkbox">
+                  <input
+                    type="checkbox"
+                    checked={profileForm.isPrivate}
+                    onChange={(event) => setProfileForm((prev) => ({ ...prev, isPrivate: event.target.checked }))}
+                  />
+                  Приватный профиль: показывать только указанным никам
+                </label>
+                <textarea
+                  placeholder="Разрешённые ники: по одному в строке или через запятую"
+                  rows={4}
+                  value={profileForm.allowedPlayerUsernames}
+                  onChange={(event) =>
+                    setProfileForm((prev) => ({ ...prev, allowedPlayerUsernames: event.target.value }))
+                  }
+                />
+                <small>
+                  Если профиль приватный и список пустой, он будет скрыт для всех игроков.
+                </small>
                 {runtimeMetadataProfile ? (
                   <small>
                     Метаданные рантайма: {runtimeMetadataProfile.bundledRuntimeSizeBytes > 0 ? formatBytes(runtimeMetadataProfile.bundledRuntimeSizeBytes) : 'размер n/a'}
@@ -6020,6 +6056,12 @@ function App() {
                         </small>
                         <small>Встроенная Java: {profile.bundledJavaPath || 'не задано'}</small>
                         <small>Ключ runtime: {profile.bundledRuntimeKey || 'не задано'}</small>
+                        <small>
+                          Доступ: {profile.isPrivate ? 'приватный' : 'публичный'}
+                          {profile.isPrivate
+                            ? ` | ников в списке: ${parseAllowedPlayerUsernames(profile.allowedPlayerUsernames || '').length}`
+                            : ''}
+                        </small>
                         <small>
                           Метаданные runtime: {profile.bundledRuntimeSizeBytes > 0 ? formatBytes(profile.bundledRuntimeSizeBytes) : 'n/a'}
                           {profile.bundledRuntimeContentType ? ` | ${profile.bundledRuntimeContentType}` : ''}

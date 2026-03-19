@@ -4,7 +4,11 @@ namespace BivLauncher.Client.Services;
 
 public interface ILauncherApiService
 {
-    Task<BootstrapResponse> GetBootstrapAsync(string apiBaseUrl, CancellationToken cancellationToken = default);
+    Task<BootstrapResponse> GetBootstrapAsync(
+        string apiBaseUrl,
+        string accessToken = "",
+        string tokenType = "Bearer",
+        CancellationToken cancellationToken = default);
     Task<PublicAuthLoginResponse> LoginAsync(
         string apiBaseUrl,
         PublicAuthLoginRequest request,
@@ -21,7 +25,12 @@ public interface ILauncherApiService
         CancellationToken cancellationToken = default);
     Task<bool> HasSkinAsync(string apiBaseUrl, string username, CancellationToken cancellationToken = default);
     Task<bool> HasCapeAsync(string apiBaseUrl, string username, CancellationToken cancellationToken = default);
-    Task<LauncherManifest> GetManifestAsync(string apiBaseUrl, string profileSlug, CancellationToken cancellationToken = default);
+    Task<LauncherManifest> GetManifestAsync(
+        string apiBaseUrl,
+        string profileSlug,
+        string accessToken = "",
+        string tokenType = "Bearer",
+        CancellationToken cancellationToken = default);
     Task<Stream> OpenAssetReadStreamAsync(string apiBaseUrl, string s3Key, CancellationToken cancellationToken = default);
     Task<PublicCrashReportCreateResponse> SubmitCrashReportAsync(
         string apiBaseUrl,

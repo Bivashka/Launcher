@@ -36,12 +36,16 @@ public sealed class LauncherApiService : ILauncherApiService
         }
     }
 
-    public async Task<BootstrapResponse> GetBootstrapAsync(string apiBaseUrl, CancellationToken cancellationToken = default)
+    public async Task<BootstrapResponse> GetBootstrapAsync(
+        string apiBaseUrl,
+        string accessToken = "",
+        string tokenType = "Bearer",
+        CancellationToken cancellationToken = default)
     {
         var cacheBust = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var uri = BuildUri(apiBaseUrl, $"/api/public/bootstrap?v={cacheBust}");
         using var response = await SendWithRetryAsync(
-            () => new HttpRequestMessage(HttpMethod.Get, uri),
+            () => BuildOptionalAuthorizedRequest(HttpMethod.Get, uri, accessToken, tokenType),
             cancellationToken);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         if (!response.IsSuccessStatusCode)
@@ -136,11 +140,16 @@ public sealed class LauncherApiService : ILauncherApiService
         return CheckResourceExistsAsync(apiBaseUrl, $"/api/public/capes/{Uri.EscapeDataString(username)}", cancellationToken);
     }
 
-    public async Task<LauncherManifest> GetManifestAsync(string apiBaseUrl, string profileSlug, CancellationToken cancellationToken = default)
+    public async Task<LauncherManifest> GetManifestAsync(
+        string apiBaseUrl,
+        string profileSlug,
+        string accessToken = "",
+        string tokenType = "Bearer",
+        CancellationToken cancellationToken = default)
     {
         var uri = BuildUri(apiBaseUrl, $"/api/public/manifest/{Uri.EscapeDataString(profileSlug)}");
         using var response = await SendWithRetryAsync(
-            () => new HttpRequestMessage(HttpMethod.Get, uri),
+            () => BuildOptionalAuthorizedRequest(HttpMethod.Get, uri, accessToken, tokenType),
             cancellationToken);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         if (!response.IsSuccessStatusCode)
@@ -274,6 +283,18 @@ public sealed class LauncherApiService : ILauncherApiService
         var normalizedType = string.IsNullOrWhiteSpace(tokenType) ? "Bearer" : tokenType.Trim();
         request.Headers.Authorization = new AuthenticationHeaderValue(normalizedType, accessToken.Trim());
         return request;
+    }
+
+    private static HttpRequestMessage BuildOptionalAuthorizedRequest(
+        HttpMethod method,
+        Uri uri,
+        string? accessToken,
+        string tokenType)
+    {
+        var token = (accessToken ?? string.Empty).Trim();
+        return string.IsNullOrWhiteSpace(token)
+            ? new HttpRequestMessage(method, uri)
+            : BuildAuthorizedRequest(method, uri, token, tokenType);
     }
 
     private static bool ShouldRetry(HttpStatusCode statusCode)
