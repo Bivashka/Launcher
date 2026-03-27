@@ -2292,11 +2292,10 @@ public partial class MainWindowViewModel : ViewModelBase
         var knownAccounts = NormalizeStoredAccounts(_settings.PlayerAccounts);
         SetStoredAccounts(knownAccounts);
 
-        var autoRestoreAccount = ResolveStoredAccount(_settings.ActivePlayerAccountUsername)
-            ?? StoredPlayerAccounts.FirstOrDefault();
-        SetSelectedStoredAccount(autoRestoreAccount ?? StoredPlayerAccounts.FirstOrDefault());
+        var activeStoredAccount = ResolveStoredAccount(_settings.ActivePlayerAccountUsername);
+        SetSelectedStoredAccount(activeStoredAccount ?? StoredPlayerAccounts.FirstOrDefault());
 
-        if (autoRestoreAccount is null)
+        if (activeStoredAccount is null)
         {
             _allowAutoSessionRestore = false;
             ClearAuthenticatedPlayerSession();
@@ -2304,14 +2303,14 @@ public partial class MainWindowViewModel : ViewModelBase
         }
 
         _allowAutoSessionRestore = true;
-        _playerAuthToken = (autoRestoreAccount.AuthToken ?? string.Empty).Trim();
-        _playerAuthTokenType = string.IsNullOrWhiteSpace(autoRestoreAccount.AuthTokenType)
+        _playerAuthToken = (activeStoredAccount.AuthToken ?? string.Empty).Trim();
+        _playerAuthTokenType = string.IsNullOrWhiteSpace(activeStoredAccount.AuthTokenType)
             ? "Bearer"
-            : autoRestoreAccount.AuthTokenType.Trim();
-        _playerAuthExternalId = (autoRestoreAccount.ExternalId ?? string.Empty).Trim();
-        _playerAuthRoles = NormalizePlayerRoles(autoRestoreAccount.Roles);
-        _playerAuthApiBaseUrl = NormalizeBaseUrlOrEmpty(autoRestoreAccount.ApiBaseUrl);
-        PlayerUsername = autoRestoreAccount.Username.Trim();
+            : activeStoredAccount.AuthTokenType.Trim();
+        _playerAuthExternalId = (activeStoredAccount.ExternalId ?? string.Empty).Trim();
+        _playerAuthRoles = NormalizePlayerRoles(activeStoredAccount.Roles);
+        _playerAuthApiBaseUrl = NormalizeBaseUrlOrEmpty(activeStoredAccount.ApiBaseUrl);
+        PlayerUsername = activeStoredAccount.Username.Trim();
     }
 
     private async Task TryRestorePlayerSessionAsync()
