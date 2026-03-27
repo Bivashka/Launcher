@@ -131,10 +131,8 @@ public sealed class ExternalAuthService(
         {
             return new ExternalAuthResult
             {
-                Success = true,
-                ExternalId = fallbackUsername,
-                Username = fallbackUsername,
-                Roles = ["player"]
+                Success = false,
+                ErrorMessage = "Auth provider returned empty response."
             };
         }
 
@@ -142,12 +140,17 @@ public sealed class ExternalAuthService(
         {
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                return new ExternalAuthResult
+                {
+                    Success = false,
+                    ErrorMessage = "Auth provider returned invalid JSON payload."
+                };
+            }
 
-            var explicitSuccess = root.TryGetProperty("success", out var successElement)
-                ? successElement.ValueKind == JsonValueKind.True
-                : root.TryGetProperty("ok", out var okElement) && okElement.ValueKind == JsonValueKind.True;
-
-            if ((root.TryGetProperty("success", out _) || root.TryGetProperty("ok", out _)) && !explicitSuccess)
+            var hasExplicitSuccess = TryGetBoolean(root, out var explicitSuccess, "success", "ok");
+            if (hasExplicitSuccess && !explicitSuccess)
             {
                 return new ExternalAuthResult
                 {
@@ -156,40 +159,46 @@ public sealed class ExternalAuthService(
                 };
             }
 
-            var externalId = GetString(root, "externalId")
-                ?? GetString(root, "userId")
-                ?? GetString(root, "id")
-                ?? fallbackUsername;
-            var username = GetString(root, "username")
-                ?? GetString(root, "name")
-                ?? fallbackUsername;
+            var externalId = GetString(root, "externalId", "userId", "id");
+            var username = GetString(root, "username", "name");
+            if (string.IsNullOrWhiteSpace(externalId) && string.IsNullOrWhiteSpace(username))
+            {
+                return new ExternalAuthResult
+                {
+                    Success = false,
+                    ErrorMessage = hasExplicitSuccess && explicitSuccess
+                        ? "Auth provider returned success without identity fields."
+                        : TryExtractError(json) ?? "Auth provider returned invalid auth response."
+                };
+            }
+
+            var resolvedExternalId = externalId ?? username ?? fallbackUsername;
+            var resolvedUsername = username ?? externalId ?? fallbackUsername;
             var roles = GetRoles(root);
-            var banned = root.TryGetProperty("banned", out var bannedElement) && bannedElement.ValueKind == JsonValueKind.True;
+            var banned = TryGetBoolean(root, out var bannedValue, "banned") && bannedValue;
 
             return new ExternalAuthResult
             {
                 Success = true,
-                ExternalId = externalId,
-                Username = username,
+                ExternalId = resolvedExternalId,
+                Username = resolvedUsername,
                 Roles = roles.Count == 0 ? ["player"] : roles,
                 Banned = banned
             };
         }
-        catch
+        catch (JsonException)
         {
             return new ExternalAuthResult
             {
-                Success = true,
-                ExternalId = fallbackUsername,
-                Username = fallbackUsername,
-                Roles = ["player"]
+                Success = false,
+                ErrorMessage = "Auth provider returned invalid JSON."
             };
         }
     }
 
     private static List<string> GetRoles(JsonElement root)
     {
-        if (root.TryGetProperty("roles", out var rolesElement))
+        if (TryGetPropertyIgnoreCase(root, "roles", out var rolesElement))
         {
             if (rolesElement.ValueKind == JsonValueKind.Array)
             {
@@ -213,12 +222,20 @@ public sealed class ExternalAuthService(
         return [];
     }
 
-    private static string? GetString(JsonElement root, string propertyName)
+    private static string? GetString(JsonElement root, params string[] propertyNames)
     {
-        if (root.TryGetProperty(propertyName, out var value) && value.ValueKind == JsonValueKind.String)
+        foreach (var propertyName in propertyNames)
         {
+            if (!TryGetPropertyIgnoreCase(root, propertyName, out var value) || value.ValueKind != JsonValueKind.String)
+            {
+                continue;
+            }
+
             var raw = value.GetString();
-            return string.IsNullOrWhiteSpace(raw) ? null : raw.Trim();
+            if (!string.IsNullOrWhiteSpace(raw))
+            {
+                return raw.Trim();
+            }
         }
 
         return null;
@@ -235,9 +252,14 @@ public sealed class ExternalAuthService(
         {
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
-            return GetString(root, "error") ?? GetString(root, "message");
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            return GetString(root, "error", "message");
         }
-        catch
+        catch (JsonException)
         {
             return null;
         }
@@ -290,5 +312,65 @@ public sealed class ExternalAuthService(
         }
 
         return value;
+    }
+
+    private static bool TryGetBoolean(JsonElement root, out bool value, params string[] propertyNames)
+    {
+        foreach (var propertyName in propertyNames)
+        {
+            if (!TryGetPropertyIgnoreCase(root, propertyName, out var propertyValue))
+            {
+                continue;
+            }
+
+            switch (propertyValue.ValueKind)
+            {
+                case JsonValueKind.True:
+                    value = true;
+                    return true;
+                case JsonValueKind.False:
+                    value = false;
+                    return true;
+                case JsonValueKind.Number when propertyValue.TryGetInt32(out var number):
+                    value = number != 0;
+                    return true;
+                case JsonValueKind.String:
+                    var raw = propertyValue.GetString();
+                    if (bool.TryParse(raw, out var parsedBool))
+                    {
+                        value = parsedBool;
+                        return true;
+                    }
+
+                    if (int.TryParse(raw, out var parsedNumber))
+                    {
+                        value = parsedNumber != 0;
+                        return true;
+                    }
+
+                    break;
+            }
+        }
+
+        value = false;
+        return false;
+    }
+
+    private static bool TryGetPropertyIgnoreCase(JsonElement root, string propertyName, out JsonElement value)
+    {
+        if (root.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in root.EnumerateObject())
+            {
+                if (string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+                {
+                    value = property.Value;
+                    return true;
+                }
+            }
+        }
+
+        value = default;
+        return false;
     }
 }
