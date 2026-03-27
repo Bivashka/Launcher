@@ -183,6 +183,41 @@ public sealed class PublicAuthControllerTests
         Assert.Equal(1, account!.SessionVersion);
     }
 
+    [Fact]
+    public async Task Login_WhenUsernameIsLinkedToLegacyExternalId_RelinksAccountToProviderExternalId()
+    {
+        await using var fixture = await TestFixture.CreateAsync();
+        fixture.DbContext.AuthAccounts.Add(new AuthAccount
+        {
+            Username = "Bivashka",
+            ExternalId = "Bivashka",
+            Roles = "player",
+            SessionVersion = 0
+        });
+        await fixture.DbContext.SaveChangesAsync();
+
+        var controller = CreateController(fixture.DbContext, minClientVersion: "1.0.0");
+        controller.ControllerContext.HttpContext.Request.Headers["X-BivLauncher-Client"] = "BivLauncher.Client/1.2.3";
+
+        var response = await controller.Login(
+            new PublicAuthLoginRequest
+            {
+                Username = "Bivashka",
+                Password = "secret"
+            },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(response.Result);
+        var payload = Assert.IsType<PublicAuthLoginResponse>(ok.Value);
+        Assert.Equal("Bivashka", payload.Username);
+        Assert.Equal("Bivashka-id", payload.ExternalId);
+
+        var account = await fixture.DbContext.AuthAccounts
+            .AsNoTracking()
+            .SingleAsync(x => x.Username == "Bivashka");
+        Assert.Equal("Bivashka-id", account.ExternalId);
+    }
+
     private static PublicAuthController CreateController(
         AppDbContext dbContext,
         string minClientVersion,

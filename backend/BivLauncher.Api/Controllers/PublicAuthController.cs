@@ -313,6 +313,10 @@ public sealed class PublicAuthController(
             var accountByUsername = await dbContext.AuthAccounts.FirstOrDefaultAsync(
                 x => x.Username == normalizedUsername,
                 cancellationToken);
+            var canRelinkLegacyUsernameAccount =
+                accountByExternalId is null &&
+                accountByUsername is not null &&
+                IsLegacyUsernameExternalId(accountByUsername);
 
             if (accountByExternalId is not null &&
                 !string.Equals(
@@ -335,7 +339,8 @@ public sealed class PublicAuthController(
                 !string.Equals(
                     accountByUsername.ExternalId,
                     normalizedExternalId,
-                    StringComparison.OrdinalIgnoreCase))
+                    StringComparison.OrdinalIgnoreCase) &&
+                !canRelinkLegacyUsernameAccount)
             {
                 logger.LogWarning(
                     "Auth identity mismatch by username. Username={Username}, existingExternalId={ExistingExternalId}, providerExternalId={ProviderExternalId}",
@@ -365,16 +370,17 @@ public sealed class PublicAuthController(
             }
             else
             {
-                if (string.Equals(account.Username, normalizedUsername, StringComparison.OrdinalIgnoreCase))
+                if (canRelinkLegacyUsernameAccount)
                 {
-                    account.Username = normalizedUsername;
+                    logger.LogInformation(
+                        "Auth legacy username-based externalId relinked. Username={Username}, oldExternalId={OldExternalId}, newExternalId={NewExternalId}",
+                        account.Username,
+                        account.ExternalId,
+                        normalizedExternalId);
                 }
 
-                if (string.Equals(account.ExternalId, normalizedExternalId, StringComparison.OrdinalIgnoreCase))
-                {
-                    account.ExternalId = normalizedExternalId;
-                }
-
+                account.Username = normalizedUsername;
+                account.ExternalId = normalizedExternalId;
                 account.Roles = string.Join(',', roles);
                 account.HwidHash = hwidHash;
                 account.DeviceUserName = deviceUserName;
@@ -736,6 +742,12 @@ public sealed class PublicAuthController(
 
         var normalized = rawDeviceUserName.Trim().ToLowerInvariant();
         return normalized.Length > 128 ? normalized[..128] : normalized;
+    }
+
+    private static bool IsLegacyUsernameExternalId(AuthAccount account)
+    {
+        return string.IsNullOrWhiteSpace(account.ExternalId) ||
+            string.Equals(account.ExternalId, account.Username, StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool TryParseSessionVersion(string? rawValue, out int sessionVersion)
