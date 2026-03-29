@@ -408,15 +408,16 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
 
     private static string ResolveBundledJavaExecutableOrEmpty(string? javaRuntime, string instanceDirectory)
     {
-        if (string.IsNullOrWhiteSpace(javaRuntime))
+        if (!string.IsNullOrWhiteSpace(javaRuntime))
         {
-            return string.Empty;
+            var runtimePath = Path.Combine(instanceDirectory, javaRuntime.Replace('/', Path.DirectorySeparatorChar));
+            if (File.Exists(runtimePath))
+            {
+                return runtimePath;
+            }
         }
 
-        var runtimePath = Path.Combine(instanceDirectory, javaRuntime.Replace('/', Path.DirectorySeparatorChar));
-        return File.Exists(runtimePath)
-            ? runtimePath
-            : string.Empty;
+        return ResolveLauncherBundledJavaExecutableOrEmpty();
     }
 
     private static string ResolveSystemJavaExecutableOrEmpty()
@@ -458,6 +459,70 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
             }
             catch
             {
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static string ResolveLauncherBundledJavaExecutableOrEmpty()
+    {
+        var searchRoots = new[]
+        {
+            AppContext.BaseDirectory,
+            Path.Combine(AppContext.BaseDirectory, "launcher-data")
+        };
+
+        foreach (var root in searchRoots)
+        {
+            var fromRoot = TryFindJavaExecutableInLauncherRoot(root);
+            if (!string.IsNullOrWhiteSpace(fromRoot))
+            {
+                return fromRoot;
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static string TryFindJavaExecutableInLauncherRoot(string rootPath)
+    {
+        if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
+        {
+            return string.Empty;
+        }
+
+        var executableNames = OperatingSystem.IsWindows()
+            ? new[] { "javaw.exe", "java.exe" }
+            : new[] { "java" };
+        var candidateDirectories = new[]
+        {
+            Path.Combine(rootPath, "runtime"),
+            Path.Combine(rootPath, "java"),
+            Path.Combine(rootPath, "jre"),
+            Path.Combine(rootPath, "launcher-runtime")
+        };
+
+        foreach (var candidateDirectory in candidateDirectories)
+        {
+            if (!Directory.Exists(candidateDirectory))
+            {
+                continue;
+            }
+
+            var matches = executableNames
+                .SelectMany(executableName =>
+                    Directory.EnumerateFiles(candidateDirectory, executableName, SearchOption.AllDirectories))
+                .Select(Path.GetFullPath)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(path => path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+                .ThenBy(path => path.Count(ch => ch == Path.DirectorySeparatorChar))
+                .ThenBy(path => path, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (matches.Count > 0)
+            {
+                return matches[0];
             }
         }
 

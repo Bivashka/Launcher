@@ -9,6 +9,7 @@ public sealed class ManifestInstallerService(
     ILogService logService) : IManifestInstallerService
 {
     private static readonly string[] ManagedCleanupRoots = ["mods/", "libraries/"];
+    private const string AutoRuntimeRootRelativePath = ".bivlauncher/runtime";
 
     public async Task<InstallResult> VerifyAndInstallAsync(
         string apiBaseUrl,
@@ -215,25 +216,43 @@ public sealed class ManifestInstallerService(
         string instanceDirectory,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(manifest.JavaRuntime))
+        var normalizedRuntimePath = NormalizeRelativePath(manifest.JavaRuntime ?? string.Empty);
+        if (!string.IsNullOrWhiteSpace(normalizedRuntimePath))
         {
-            return;
-        }
-
-        var runtimeRelativePath = manifest.JavaRuntime.Replace('/', Path.DirectorySeparatorChar);
-        var runtimeAbsolutePath = Path.Combine(instanceDirectory, runtimeRelativePath);
-        if (File.Exists(runtimeAbsolutePath))
-        {
-            return;
+            var runtimeAbsolutePath = Path.Combine(instanceDirectory, normalizedRuntimePath.Replace('/', Path.DirectorySeparatorChar));
+            if (File.Exists(runtimeAbsolutePath))
+            {
+                manifest.JavaRuntime = normalizedRuntimePath;
+                return;
+            }
         }
 
         if (string.IsNullOrWhiteSpace(manifest.JavaRuntimeArtifactKey))
         {
-            logService.LogInfo("Manifest JavaRuntimeArtifactKey is missing; runtime auto-install skipped.");
+            if (!string.IsNullOrWhiteSpace(normalizedRuntimePath))
+            {
+                logService.LogInfo("Manifest JavaRuntimeArtifactKey is missing; runtime auto-install skipped.");
+            }
             return;
         }
 
         var runtimeArtifactKey = manifest.JavaRuntimeArtifactKey.Trim();
+        var autoRuntimeRootRelativePath = BuildAutoRuntimeRootRelativePath(runtimeArtifactKey);
+        var autoRuntimeRootAbsolutePath = Path.Combine(
+            instanceDirectory,
+            autoRuntimeRootRelativePath.Replace('/', Path.DirectorySeparatorChar));
+
+        if (string.IsNullOrWhiteSpace(normalizedRuntimePath))
+        {
+            var detectedExistingRuntime = TryFindBundledJavaRelativePath(instanceDirectory, autoRuntimeRootAbsolutePath);
+            if (!string.IsNullOrWhiteSpace(detectedExistingRuntime))
+            {
+                manifest.JavaRuntime = detectedExistingRuntime;
+                logService.LogInfo($"Runtime auto-detected from cached artifact: {detectedExistingRuntime}");
+                return;
+            }
+        }
+
         var artifactName = Path.GetFileName(runtimeArtifactKey);
         if (string.IsNullOrWhiteSpace(artifactName))
         {
@@ -278,28 +297,119 @@ public sealed class ManifestInstallerService(
             logService.LogInfo($"Runtime artifact hash verified: {runtimeArtifactKey}");
         }
 
+        if (!string.IsNullOrWhiteSpace(normalizedRuntimePath))
+        {
+            var runtimeAbsolutePath = Path.Combine(instanceDirectory, normalizedRuntimePath.Replace('/', Path.DirectorySeparatorChar));
+            if (runtimeArtifactPath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+            {
+                ZipFile.ExtractToDirectory(runtimeArtifactPath, instanceDirectory, overwriteFiles: true);
+                File.Delete(runtimeArtifactPath);
+                logService.LogInfo($"Runtime archive extracted: {runtimeArtifactKey}");
+            }
+            else
+            {
+                var runtimeDir = Path.GetDirectoryName(runtimeAbsolutePath);
+                if (!string.IsNullOrWhiteSpace(runtimeDir))
+                {
+                    Directory.CreateDirectory(runtimeDir);
+                }
+
+                File.Move(runtimeArtifactPath, runtimeAbsolutePath, overwrite: true);
+                logService.LogInfo($"Runtime binary installed: {runtimeArtifactKey}");
+            }
+
+            if (!File.Exists(runtimeAbsolutePath))
+            {
+                throw new InvalidOperationException($"Runtime file '{manifest.JavaRuntime}' was not found after runtime artifact install.");
+            }
+
+            manifest.JavaRuntime = normalizedRuntimePath;
+            return;
+        }
+
+        PrepareAutoRuntimeDirectory(autoRuntimeRootAbsolutePath);
         if (runtimeArtifactPath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
         {
-            ZipFile.ExtractToDirectory(runtimeArtifactPath, instanceDirectory, overwriteFiles: true);
+            ZipFile.ExtractToDirectory(runtimeArtifactPath, autoRuntimeRootAbsolutePath, overwriteFiles: true);
             File.Delete(runtimeArtifactPath);
-            logService.LogInfo($"Runtime archive extracted: {runtimeArtifactKey}");
+            logService.LogInfo($"Runtime archive extracted to auto-runtime root: {runtimeArtifactKey}");
         }
         else
         {
-            var runtimeDir = Path.GetDirectoryName(runtimeAbsolutePath);
-            if (!string.IsNullOrWhiteSpace(runtimeDir))
-            {
-                Directory.CreateDirectory(runtimeDir);
-            }
-
+            var autoRuntimeBinDirectory = Path.Combine(autoRuntimeRootAbsolutePath, "bin");
+            Directory.CreateDirectory(autoRuntimeBinDirectory);
+            var runtimeAbsolutePath = Path.Combine(autoRuntimeBinDirectory, artifactName);
             File.Move(runtimeArtifactPath, runtimeAbsolutePath, overwrite: true);
-            logService.LogInfo($"Runtime binary installed: {runtimeArtifactKey}");
+            logService.LogInfo($"Runtime binary installed to auto-runtime root: {runtimeArtifactKey}");
         }
 
-        if (!File.Exists(runtimeAbsolutePath))
+        var detectedRuntimePath = TryFindBundledJavaRelativePath(instanceDirectory, autoRuntimeRootAbsolutePath);
+        if (string.IsNullOrWhiteSpace(detectedRuntimePath))
         {
-            throw new InvalidOperationException($"Runtime file '{manifest.JavaRuntime}' was not found after runtime artifact install.");
+            throw new InvalidOperationException(
+                $"Runtime artifact '{runtimeArtifactKey}' was installed, but java executable was not found in '{autoRuntimeRootRelativePath}'.");
         }
+
+        manifest.JavaRuntime = detectedRuntimePath;
+        logService.LogInfo($"Runtime auto-detected from artifact: {detectedRuntimePath}");
+    }
+
+    private static void PrepareAutoRuntimeDirectory(string autoRuntimeRootAbsolutePath)
+    {
+        try
+        {
+            if (Directory.Exists(autoRuntimeRootAbsolutePath))
+            {
+                Directory.Delete(autoRuntimeRootAbsolutePath, recursive: true);
+            }
+        }
+        catch
+        {
+            // Best-effort cleanup before runtime refresh.
+        }
+
+        Directory.CreateDirectory(autoRuntimeRootAbsolutePath);
+    }
+
+    private static string BuildAutoRuntimeRootRelativePath(string runtimeArtifactKey)
+    {
+        var normalizedKey = NormalizeRelativePath(runtimeArtifactKey);
+        if (string.IsNullOrWhiteSpace(normalizedKey))
+        {
+            return AutoRuntimeRootRelativePath;
+        }
+
+        var hashBytes = SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(normalizedKey));
+        var shortHash = Convert.ToHexString(hashBytes)[..12].ToLowerInvariant();
+        return $"{AutoRuntimeRootRelativePath}/{shortHash}";
+    }
+
+    private static string TryFindBundledJavaRelativePath(string instanceDirectory, string runtimeRootAbsolutePath)
+    {
+        if (!Directory.Exists(runtimeRootAbsolutePath))
+        {
+            return string.Empty;
+        }
+
+        var executableNames = OperatingSystem.IsWindows()
+            ? new[] { "javaw.exe", "java.exe" }
+            : new[] { "java" };
+        var candidates = executableNames
+            .SelectMany(executableName =>
+                Directory.EnumerateFiles(runtimeRootAbsolutePath, executableName, SearchOption.AllDirectories))
+            .Select(path => Path.GetFullPath(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(path => path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+            .ThenBy(path => path.Count(ch => ch == Path.DirectorySeparatorChar))
+            .ThenBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (candidates.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        return NormalizeRelativePath(Path.GetRelativePath(instanceDirectory, candidates[0]));
     }
 
     private static async Task<string> ComputeSha256Async(Stream stream, CancellationToken cancellationToken)
