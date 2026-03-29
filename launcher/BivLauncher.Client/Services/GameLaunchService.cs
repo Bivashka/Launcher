@@ -54,6 +54,8 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
         }
 
         var javaExecutable = ResolveJavaExecutable(settings.JavaMode, manifest.JavaRuntime, instanceDirectory);
+        logService.LogInfo(
+            $"Java executable selected: {DescribeJavaExecutableForLog(javaExecutable, instanceDirectory)} (mode={settings.JavaMode}).");
         var jvmArgs = SplitArgs(manifest.JvmArgsDefault)
             .Where(x => !x.StartsWith("-Xmx", StringComparison.OrdinalIgnoreCase) &&
                         !x.StartsWith("-Xms", StringComparison.OrdinalIgnoreCase))
@@ -274,7 +276,7 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
 
         if (pending.Length > 0)
         {
-            var tail = pending.ToString().Trim();
+            var tail = LogSanitizer.Sanitize(pending.ToString().Trim());
             if (!string.IsNullOrWhiteSpace(tail))
             {
                 onLine(tail);
@@ -300,7 +302,7 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
 
             if (length > 0)
             {
-                var line = pending.ToString(start, length).Trim();
+                var line = LogSanitizer.Sanitize(pending.ToString(start, length).Trim());
                 if (!string.IsNullOrWhiteSpace(line))
                 {
                     onLine(line);
@@ -318,23 +320,44 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
 
     private static string ResolveJavaExecutable(string javaMode, string? javaRuntime, string instanceDirectory)
     {
+        if (javaMode.Equals("System", StringComparison.OrdinalIgnoreCase))
+        {
+            return "java";
+        }
+
+        var bundledJavaExecutable = ResolveBundledJavaExecutableOrEmpty(javaRuntime, instanceDirectory);
         if (javaMode.Equals("Bundled", StringComparison.OrdinalIgnoreCase))
         {
+            if (!string.IsNullOrWhiteSpace(bundledJavaExecutable))
+            {
+                return bundledJavaExecutable;
+            }
+
             if (string.IsNullOrWhiteSpace(javaRuntime))
             {
                 throw new InvalidOperationException("Bundled Java mode selected but manifest has no JavaRuntime.");
             }
 
             var runtimePath = Path.Combine(instanceDirectory, javaRuntime.Replace('/', Path.DirectorySeparatorChar));
-            if (File.Exists(runtimePath))
-            {
-                return runtimePath;
-            }
-
             throw new FileNotFoundException("Bundled Java runtime executable is missing.", runtimePath);
         }
 
-        return "java";
+        return !string.IsNullOrWhiteSpace(bundledJavaExecutable)
+            ? bundledJavaExecutable
+            : "java";
+    }
+
+    private static string ResolveBundledJavaExecutableOrEmpty(string? javaRuntime, string instanceDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(javaRuntime))
+        {
+            return string.Empty;
+        }
+
+        var runtimePath = Path.Combine(instanceDirectory, javaRuntime.Replace('/', Path.DirectorySeparatorChar));
+        return File.Exists(runtimePath)
+            ? runtimePath
+            : string.Empty;
     }
 
     private string ResolveGameJar(LauncherManifest manifest, string instanceDirectory, string preferredJarPath)
@@ -700,6 +723,30 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
     private static string NormalizePath(string rawPath)
     {
         return rawPath.Replace('\\', '/');
+    }
+
+    private static string DescribeJavaExecutableForLog(string javaExecutable, string instanceDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(javaExecutable) || !Path.IsPathRooted(javaExecutable))
+        {
+            return javaExecutable;
+        }
+
+        try
+        {
+            var normalizedJavaPath = Path.GetFullPath(javaExecutable);
+            var normalizedInstanceDirectory = Path.GetFullPath(instanceDirectory);
+            if (normalizedJavaPath.StartsWith(normalizedInstanceDirectory, StringComparison.OrdinalIgnoreCase))
+            {
+                return NormalizePath(Path.GetRelativePath(instanceDirectory, normalizedJavaPath));
+            }
+
+            return NormalizePath(normalizedJavaPath);
+        }
+        catch
+        {
+            return NormalizePath(javaExecutable);
+        }
     }
 
     private static bool IsLaunchArchivePath(string path)
@@ -1075,7 +1122,7 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
 
     private static string BuildArgsPreview(IEnumerable<string> args)
     {
-        return string.Join(' ', args.Select(QuoteIfNeeded));
+        return LogSanitizer.Sanitize(string.Join(' ', args.Select(QuoteIfNeeded)));
     }
 
     private static bool RequiresInstanceHomeCompatibility(string mainClass)
@@ -1240,7 +1287,7 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
         _ = EnsureJavaAgent(jvmArgs, agentPath, yggdrasilUrl, insertionIndex);
 
         logService.LogInfo(
-            $"Client authlib-injector enabled: {NormalizePath(agentPath)} -> {yggdrasilUrl} (requireLegacyCompat={requireLegacySessionDomainCompatibility}).");
+            $"Client authlib-injector enabled: {NormalizePath(agentPath)} (requireLegacyCompat={requireLegacySessionDomainCompatibility}, hasYggdrasil=true).");
     }
 
     private async Task<string> ResolveClientAuthlibAgentPathAsync(
@@ -1272,7 +1319,7 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
             using var response = await httpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
-                logService.LogInfo($"WARN: Client authlib-injector download failed: HTTP {(int)response.StatusCode} from {downloadUrl}");
+                logService.LogInfo($"WARN: Client authlib-injector download failed: HTTP {(int)response.StatusCode} from launcher asset endpoint.");
                 return string.Empty;
             }
 
@@ -1303,7 +1350,7 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
 
         if (!string.IsNullOrWhiteSpace(downloadedValidationError))
         {
-            logService.LogInfo($"WARN: Downloaded client authlib-injector is incompatible: {downloadedValidationError}. Source: {downloadUrl}");
+            logService.LogInfo($"WARN: Downloaded client authlib-injector is incompatible: {downloadedValidationError}.");
         }
 
         var fallbackCandidates = new[]

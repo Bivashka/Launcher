@@ -468,10 +468,8 @@ public partial class MainWindowViewModel : ViewModelBase
         if (!string.IsNullOrWhiteSpace(configuredApiBaseUrl))
         {
             ApiBaseUrl = configuredApiBaseUrl;
-            var persistedApiBaseUrl = NormalizeBaseUrlOrEmpty(_settings.ApiBaseUrl);
-            if (!string.Equals(persistedApiBaseUrl, configuredApiBaseUrl, StringComparison.OrdinalIgnoreCase))
+            if (TrimConfiguredApiBaseUrlReferences(_settings, configuredApiBaseUrl))
             {
-                _settings.ApiBaseUrl = configuredApiBaseUrl;
                 await _settingsService.SaveAsync(_settings);
             }
         }
@@ -1964,6 +1962,9 @@ public partial class MainWindowViewModel : ViewModelBase
     private LauncherSettings BuildSettingsSnapshot(bool includeRuntimeAuthSnapshot = false)
     {
         var configuredApiBaseUrl = TryResolveConfiguredApiBaseUrl();
+        var persistedApiBaseUrl = string.IsNullOrWhiteSpace(configuredApiBaseUrl)
+            ? NormalizeBaseUrl(ApiBaseUrl)
+            : string.Empty;
         var storedAccounts = NormalizeStoredAccounts(StoredPlayerAccounts);
         var activeStoredAccount = ResolveStoredAccount(PlayerLoggedInAs)
             ?? SelectedStoredAccount;
@@ -1987,14 +1988,12 @@ public partial class MainWindowViewModel : ViewModelBase
             ? NormalizePlayerRoles(_playerAuthRoles)
             : [];
         var runtimeAuthApiBaseUrl = includeRuntimeAuthSnapshot && hasActiveSession
-            ? _playerAuthApiBaseUrl
+            ? NormalizeBaseUrlOrEmpty(_playerAuthApiBaseUrl)
             : string.Empty;
 
         return new LauncherSettings
         {
-            ApiBaseUrl = string.IsNullOrWhiteSpace(configuredApiBaseUrl)
-                ? NormalizeBaseUrl(ApiBaseUrl)
-                : configuredApiBaseUrl,
+            ApiBaseUrl = persistedApiBaseUrl,
             InstallDirectory = InstallDirectory.Trim(),
             DebugMode = DebugMode,
             RamMb = RamMb,
@@ -2016,7 +2015,7 @@ public partial class MainWindowViewModel : ViewModelBase
             PlayerAuthUsername = runtimeAuthUsername,
             PlayerAuthExternalId = runtimeAuthExternalId,
             PlayerAuthRoles = runtimeAuthRoles,
-            PlayerAuthApiBaseUrl = runtimeAuthApiBaseUrl,
+            PlayerAuthApiBaseUrl = NormalizePersistedApiBaseUrl(runtimeAuthApiBaseUrl, configuredApiBaseUrl),
             PlayerAccounts = [.. storedAccounts.Select(account => new StoredPlayerAccount
             {
                 Username = account.Username,
@@ -2024,7 +2023,7 @@ public partial class MainWindowViewModel : ViewModelBase
                 AuthTokenType = account.AuthTokenType,
                 ExternalId = account.ExternalId,
                 Roles = [.. account.Roles],
-                ApiBaseUrl = account.ApiBaseUrl,
+                ApiBaseUrl = NormalizePersistedApiBaseUrl(account.ApiBaseUrl, configuredApiBaseUrl),
                 LastUsedAtUtc = account.LastUsedAtUtc
             })],
             ActivePlayerAccountUsername = canAutoRestore ? (activeStoredAccount?.Username ?? string.Empty) : string.Empty
@@ -3260,6 +3259,62 @@ public partial class MainWindowViewModel : ViewModelBase
         }
 
         return value.Trim().TrimEnd('/');
+    }
+
+    private static string NormalizePersistedApiBaseUrl(string? value, string? configuredApiBaseUrl)
+    {
+        var normalizedValue = NormalizeBaseUrlOrEmpty(value);
+        if (string.IsNullOrWhiteSpace(normalizedValue))
+        {
+            return string.Empty;
+        }
+
+        var normalizedConfiguredApiBaseUrl = NormalizeBaseUrlOrEmpty(configuredApiBaseUrl);
+        if (!string.IsNullOrWhiteSpace(normalizedConfiguredApiBaseUrl) &&
+            string.Equals(normalizedValue, normalizedConfiguredApiBaseUrl, StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Empty;
+        }
+
+        return normalizedValue;
+    }
+
+    private static bool TrimConfiguredApiBaseUrlReferences(LauncherSettings settings, string configuredApiBaseUrl)
+    {
+        var changed = false;
+
+        if (!string.IsNullOrWhiteSpace(settings.ApiBaseUrl))
+        {
+            settings.ApiBaseUrl = string.Empty;
+            changed = true;
+        }
+
+        var normalizedPlayerAuthApiBaseUrl = NormalizePersistedApiBaseUrl(settings.PlayerAuthApiBaseUrl, configuredApiBaseUrl);
+        if (!string.Equals(
+                normalizedPlayerAuthApiBaseUrl,
+                NormalizeBaseUrlOrEmpty(settings.PlayerAuthApiBaseUrl),
+                StringComparison.Ordinal))
+        {
+            settings.PlayerAuthApiBaseUrl = normalizedPlayerAuthApiBaseUrl;
+            changed = true;
+        }
+
+        foreach (var account in settings.PlayerAccounts ?? [])
+        {
+            var normalizedAccountApiBaseUrl = NormalizePersistedApiBaseUrl(account.ApiBaseUrl, configuredApiBaseUrl);
+            if (string.Equals(
+                    normalizedAccountApiBaseUrl,
+                    NormalizeBaseUrlOrEmpty(account.ApiBaseUrl),
+                    StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            account.ApiBaseUrl = normalizedAccountApiBaseUrl;
+            changed = true;
+        }
+
+        return changed;
     }
 
     private static string NormalizeJavaMode(string? javaMode)

@@ -33,7 +33,8 @@ public sealed class LogService(ISettingsService settingsService) : ILogService
 
     private void Write(string level, string message)
     {
-        var line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} [{level}] {message}";
+        var sanitizedMessage = LogSanitizer.Sanitize(message);
+        var line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} [{level}] {sanitizedMessage}";
         _lines.Enqueue(line);
         while (_lines.Count > MaxBufferedLines && _lines.TryDequeue(out _))
         {

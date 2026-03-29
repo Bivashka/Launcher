@@ -184,17 +184,24 @@ public sealed class PendingSubmissionService(ISettingsService settingsService) :
 
         try
         {
-            await using var stream = File.OpenRead(path);
-            var loaded = await JsonSerializer.DeserializeAsync<PendingSubmissionStore>(stream, JsonOptions, cancellationToken);
+            PendingSubmissionStore? loaded;
+            await using (var stream = File.OpenRead(path))
+            {
+                loaded = await JsonSerializer.DeserializeAsync<PendingSubmissionStore>(stream, JsonOptions, cancellationToken);
+            }
+
             if (loaded?.Items is null)
             {
                 return new PendingSubmissionStore();
             }
 
-            loaded.Items = loaded.Items
-                .Where(x => x is not null)
-                .ToList();
-            return loaded;
+            var normalized = NormalizeLoadedStore(loaded);
+            if (NeedsPersistRewrite(loaded))
+            {
+                await SaveStoreUnsafeAsync(normalized, cancellationToken);
+            }
+
+            return normalized;
         }
         catch
         {
@@ -207,11 +214,12 @@ public sealed class PendingSubmissionService(ISettingsService settingsService) :
         var path = GetStorePath();
         var directory = Path.GetDirectoryName(path)!;
         Directory.CreateDirectory(directory);
+        var persistSnapshot = PreparePersistSnapshot(store);
 
         var tempPath = $"{path}.tmp";
         await using (var stream = File.Create(tempPath))
         {
-            await JsonSerializer.SerializeAsync(stream, store, JsonOptions, cancellationToken);
+            await JsonSerializer.SerializeAsync(stream, persistSnapshot, JsonOptions, cancellationToken);
         }
 
         File.Move(tempPath, path, true);
@@ -246,9 +254,71 @@ public sealed class PendingSubmissionService(ISettingsService settingsService) :
         items.RemoveRange(0, removeCount);
     }
 
+    private static PendingSubmissionStore NormalizeLoadedStore(PendingSubmissionStore source)
+    {
+        return new PendingSubmissionStore
+        {
+            Items = (source.Items ?? [])
+                .Where(item => item is not null)
+                .Select(ClonePendingSubmissionItem)
+                .Select(item =>
+                {
+                    item.ApiBaseUrl = LocalSecretProtector.UnprotectEndpoint(item.ApiBaseUrl);
+                    return item;
+                })
+                .ToList()
+        };
+    }
+
+    private static PendingSubmissionStore PreparePersistSnapshot(PendingSubmissionStore source)
+    {
+        return new PendingSubmissionStore
+        {
+            Items = (source.Items ?? [])
+                .Where(item => item is not null)
+                .Select(ClonePendingSubmissionItem)
+                .Select(item =>
+                {
+                    item.ApiBaseUrl = LocalSecretProtector.ProtectEndpoint(item.ApiBaseUrl);
+                    return item;
+                })
+                .ToList()
+        };
+    }
+
+    private static bool NeedsPersistRewrite(PendingSubmissionStore source)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return false;
+        }
+
+        return (source.Items ?? []).Any(item =>
+        {
+            var apiBaseUrl = (item.ApiBaseUrl ?? string.Empty).Trim();
+            return !string.IsNullOrWhiteSpace(apiBaseUrl) &&
+                   !LocalSecretProtector.IsProtectedEndpoint(apiBaseUrl);
+        });
+    }
+
     private static string NormalizeApiBaseUrl(string? apiBaseUrl)
     {
         return (apiBaseUrl ?? string.Empty).Trim().TrimEnd('/');
+    }
+
+    private static PendingSubmissionItem ClonePendingSubmissionItem(PendingSubmissionItem source)
+    {
+        return new PendingSubmissionItem
+        {
+            Id = source.Id,
+            Type = source.Type,
+            ApiBaseUrl = source.ApiBaseUrl,
+            CrashReport = source.CrashReport is null ? null : CloneCrashReport(source.CrashReport),
+            InstallTelemetry = source.InstallTelemetry is null ? null : CloneInstallTelemetry(source.InstallTelemetry),
+            CreatedAtUtc = source.CreatedAtUtc,
+            LastAttemptAtUtc = source.LastAttemptAtUtc,
+            AttemptCount = source.AttemptCount
+        };
     }
 
     private static PublicCrashReportCreateRequest CloneCrashReport(PublicCrashReportCreateRequest request)
@@ -267,6 +337,15 @@ public sealed class PendingSubmissionService(ISettingsService settingsService) :
             LogExcerpt = request.LogExcerpt,
             OccurredAtUtc = request.OccurredAtUtc,
             Metadata = request.Metadata?.Clone()
+        };
+    }
+
+    private static PublicInstallTelemetryTrackRequest CloneInstallTelemetry(PublicInstallTelemetryTrackRequest request)
+    {
+        return new PublicInstallTelemetryTrackRequest
+        {
+            ProjectName = request.ProjectName,
+            LauncherVersion = request.LauncherVersion
         };
     }
 }

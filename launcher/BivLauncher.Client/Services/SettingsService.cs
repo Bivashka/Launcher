@@ -1,5 +1,4 @@
 using BivLauncher.Client.Models;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
@@ -10,8 +9,6 @@ public sealed class SettingsService : ISettingsService
     private const string DefaultProjectDirectoryName = "BivLauncher";
     private const string PortableModeEnvVar = "BIVLAUNCHER_PORTABLE_MODE";
     private const string PortableModeMarkerFileName = "portable-mode.flag";
-    private const string ProtectedTokenPrefix = "enc:v1:dpapi:";
-    private static readonly byte[] TokenProtectionEntropy = Encoding.UTF8.GetBytes("BivLauncher.TokenProtection.v1");
     private static readonly string ApplicationDirectory = ResolveApplicationDirectory();
     private readonly object _syncRoot = new();
     private string _projectDirectoryName = DefaultProjectDirectoryName;
@@ -52,11 +49,24 @@ public sealed class SettingsService : ISettingsService
             return defaults;
         }
 
-        await using var stream = File.OpenRead(path);
-        var loaded = await JsonSerializer.DeserializeAsync<LauncherSettings>(stream, JsonOptions, cancellationToken);
-        return loaded is null
-            ? CreateDefaultSettings()
-            : NormalizeLoadedSettings(loaded);
+        LauncherSettings? loaded;
+        await using (var stream = File.OpenRead(path))
+        {
+            loaded = await JsonSerializer.DeserializeAsync<LauncherSettings>(stream, JsonOptions, cancellationToken);
+        }
+
+        if (loaded is null)
+        {
+            return CreateDefaultSettings();
+        }
+
+        var normalized = NormalizeLoadedSettings(loaded);
+        if (NeedsPersistRewrite(loaded))
+        {
+            await SaveAsync(normalized, cancellationToken);
+        }
+
+        return normalized;
     }
 
     public async Task SaveAsync(LauncherSettings settings, CancellationToken cancellationToken = default)
@@ -232,12 +242,15 @@ public sealed class SettingsService : ISettingsService
     private static LauncherSettings PreparePersistSnapshot(LauncherSettings settings)
     {
         var snapshot = CloneSettings(settings);
+        snapshot.ApiBaseUrl = ProtectEndpoint(snapshot.ApiBaseUrl);
         snapshot.PlayerAuthToken = ProtectToken(snapshot.PlayerAuthToken);
+        snapshot.PlayerAuthApiBaseUrl = ProtectEndpoint(snapshot.PlayerAuthApiBaseUrl);
         snapshot.PlayerAccounts = snapshot.PlayerAccounts
             .Select(account =>
             {
                 var cloned = CloneStoredPlayerAccount(account);
                 cloned.AuthToken = ProtectToken(cloned.AuthToken);
+                cloned.ApiBaseUrl = ProtectEndpoint(cloned.ApiBaseUrl);
                 return cloned;
             })
             .ToList();
@@ -247,12 +260,15 @@ public sealed class SettingsService : ISettingsService
     private static LauncherSettings NormalizeLoadedSettings(LauncherSettings settings)
     {
         var normalized = CloneSettings(settings);
+        normalized.ApiBaseUrl = UnprotectEndpoint(normalized.ApiBaseUrl);
         normalized.PlayerAuthToken = UnprotectToken(normalized.PlayerAuthToken);
+        normalized.PlayerAuthApiBaseUrl = UnprotectEndpoint(normalized.PlayerAuthApiBaseUrl);
         normalized.PlayerAccounts = normalized.PlayerAccounts
             .Select(account =>
             {
                 var cloned = CloneStoredPlayerAccount(account);
                 cloned.AuthToken = UnprotectToken(cloned.AuthToken);
+                cloned.ApiBaseUrl = UnprotectEndpoint(cloned.ApiBaseUrl);
                 return cloned;
             })
             .ToList();
@@ -306,69 +322,50 @@ public sealed class SettingsService : ISettingsService
         };
     }
 
-    private static string ProtectToken(string? rawToken)
+    private static bool NeedsPersistRewrite(LauncherSettings settings)
     {
-        var token = (rawToken ?? string.Empty).Trim();
-        if (string.IsNullOrWhiteSpace(token))
-        {
-            return string.Empty;
-        }
+        return HasPlainEndpoint(settings.ApiBaseUrl) ||
+               HasPlainToken(settings.PlayerAuthToken) ||
+               HasPlainEndpoint(settings.PlayerAuthApiBaseUrl) ||
+               (settings.PlayerAccounts ?? []).Any(account =>
+                   HasPlainToken(account.AuthToken) ||
+                   HasPlainEndpoint(account.ApiBaseUrl));
+    }
 
-        if (token.StartsWith(ProtectedTokenPrefix, StringComparison.Ordinal))
-        {
-            return token;
-        }
+    private static bool HasPlainToken(string? value)
+    {
+        var normalized = (value ?? string.Empty).Trim();
+        return !string.IsNullOrWhiteSpace(normalized) && !LocalSecretProtector.IsProtectedToken(normalized);
+    }
 
+    private static bool HasPlainEndpoint(string? value)
+    {
         if (!OperatingSystem.IsWindows())
         {
-            return string.Empty;
+            return false;
         }
 
-        try
-        {
-            var tokenBytes = Encoding.UTF8.GetBytes(token);
-            var protectedBytes = ProtectedData.Protect(tokenBytes, TokenProtectionEntropy, DataProtectionScope.CurrentUser);
-            return ProtectedTokenPrefix + Convert.ToBase64String(protectedBytes);
-        }
-        catch
-        {
-            return string.Empty;
-        }
+        var normalized = (value ?? string.Empty).Trim();
+        return !string.IsNullOrWhiteSpace(normalized) && !LocalSecretProtector.IsProtectedEndpoint(normalized);
+    }
+
+    private static string ProtectToken(string? rawToken)
+    {
+        return LocalSecretProtector.ProtectToken(rawToken);
     }
 
     private static string UnprotectToken(string? persistedToken)
     {
-        var value = (persistedToken ?? string.Empty).Trim();
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return string.Empty;
-        }
+        return LocalSecretProtector.UnprotectToken(persistedToken);
+    }
 
-        if (!value.StartsWith(ProtectedTokenPrefix, StringComparison.Ordinal))
-        {
-            return value;
-        }
+    private static string ProtectEndpoint(string? rawEndpoint)
+    {
+        return LocalSecretProtector.ProtectEndpoint(rawEndpoint);
+    }
 
-        if (!OperatingSystem.IsWindows())
-        {
-            return string.Empty;
-        }
-
-        var payload = value[ProtectedTokenPrefix.Length..].Trim();
-        if (string.IsNullOrWhiteSpace(payload))
-        {
-            return string.Empty;
-        }
-
-        try
-        {
-            var protectedBytes = Convert.FromBase64String(payload);
-            var tokenBytes = ProtectedData.Unprotect(protectedBytes, TokenProtectionEntropy, DataProtectionScope.CurrentUser);
-            return Encoding.UTF8.GetString(tokenBytes).Trim();
-        }
-        catch
-        {
-            return string.Empty;
-        }
+    private static string UnprotectEndpoint(string? persistedEndpoint)
+    {
+        return LocalSecretProtector.UnprotectEndpoint(persistedEndpoint);
     }
 }
