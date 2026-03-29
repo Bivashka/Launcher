@@ -5,6 +5,7 @@ using System.Globalization;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Net.Http;
+using System.Reflection;
 
 namespace BivLauncher.Client.Services;
 
@@ -53,9 +54,14 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
             throw new InvalidOperationException("Launch route port is out of range.");
         }
 
-        var javaExecutable = ResolveJavaExecutable(settings.JavaMode, manifest.JavaRuntime, instanceDirectory);
+        var usePositionalLegacyArgs = ShouldUseLegacyPositionalArguments(route, manifest, instanceDirectory);
+        var javaExecutable = ResolveJavaExecutable(
+            settings.JavaMode,
+            manifest.JavaRuntime,
+            instanceDirectory,
+            requireLegacyJava8Compatibility: usePositionalLegacyArgs);
         logService.LogInfo(
-            $"Java executable selected: {DescribeJavaExecutableForLog(javaExecutable, instanceDirectory)} (mode={settings.JavaMode}).");
+            $"Java executable selected: {DescribeJavaExecutableForLog(javaExecutable, instanceDirectory)} (mode={settings.JavaMode}, legacyCompat={usePositionalLegacyArgs}).");
         var jvmArgs = SplitArgs(manifest.JvmArgsDefault)
             .Where(x => !x.StartsWith("-Xmx", StringComparison.OrdinalIgnoreCase) &&
                         !x.StartsWith("-Xms", StringComparison.OrdinalIgnoreCase))
@@ -63,7 +69,6 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
 
         jvmArgs.Insert(0, $"-Xmx{settings.RamMb}M");
         jvmArgs.Insert(0, "-Xms1024M");
-        var usePositionalLegacyArgs = ShouldUseLegacyPositionalArguments(route, manifest, instanceDirectory);
         await TryAttachClientAuthlibAgentAsync(
             jvmArgs,
             settings,
@@ -318,15 +323,26 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
         }
     }
 
-    private static string ResolveJavaExecutable(string javaMode, string? javaRuntime, string instanceDirectory)
+    private static string ResolveJavaExecutable(
+        string javaMode,
+        string? javaRuntime,
+        string instanceDirectory,
+        bool requireLegacyJava8Compatibility)
     {
         var bundledJavaExecutable = ResolveBundledJavaExecutableOrEmpty(javaRuntime, instanceDirectory);
         var systemJavaExecutable = ResolveSystemJavaExecutableOrEmpty();
+        var bundledJavaMajorVersion = ResolveJavaMajorVersion(bundledJavaExecutable);
+        var systemJavaMajorVersion = ResolveJavaMajorVersion(systemJavaExecutable);
 
         if (javaMode.Equals("Bundled", StringComparison.OrdinalIgnoreCase))
         {
             if (!string.IsNullOrWhiteSpace(bundledJavaExecutable))
             {
+                EnsureJavaCompatibility(
+                    bundledJavaExecutable,
+                    bundledJavaMajorVersion,
+                    requireLegacyJava8Compatibility,
+                    javaMode);
                 return bundledJavaExecutable;
             }
 
@@ -341,13 +357,45 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
 
         if (javaMode.Equals("System", StringComparison.OrdinalIgnoreCase))
         {
-            return !string.IsNullOrWhiteSpace(systemJavaExecutable)
-                ? systemJavaExecutable
-                : "java";
+            if (!string.IsNullOrWhiteSpace(systemJavaExecutable))
+            {
+                EnsureJavaCompatibility(
+                    systemJavaExecutable,
+                    systemJavaMajorVersion,
+                    requireLegacyJava8Compatibility,
+                    javaMode);
+                return systemJavaExecutable;
+            }
+
+            if (requireLegacyJava8Compatibility)
+            {
+                throw new InvalidOperationException(
+                    "Legacy client requires Java 8 or older, but system Java was not found. Install Java 8 or switch to Bundled mode with a Java 8 runtime.");
+            }
+
+            return "java";
         }
 
         // Keep Auto mode system-first. Some legacy clients rely on the machine JRE
         // for TLS/certificate compatibility during authlib/Yggdrasil server login.
+        if (requireLegacyJava8Compatibility)
+        {
+            if (!string.IsNullOrWhiteSpace(systemJavaExecutable) &&
+                IsJavaCompatibleWithLegacyLaunchwrapper(systemJavaMajorVersion))
+            {
+                return systemJavaExecutable;
+            }
+
+            if (!string.IsNullOrWhiteSpace(bundledJavaExecutable) &&
+                IsJavaCompatibleWithLegacyLaunchwrapper(bundledJavaMajorVersion))
+            {
+                return bundledJavaExecutable;
+            }
+
+            throw new InvalidOperationException(
+                BuildLegacyJavaCompatibilityError(systemJavaExecutable, systemJavaMajorVersion, bundledJavaExecutable, bundledJavaMajorVersion));
+        }
+
         if (!string.IsNullOrWhiteSpace(systemJavaExecutable))
         {
             return systemJavaExecutable;
@@ -414,6 +462,120 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
         }
 
         return string.Empty;
+    }
+
+    private static void EnsureJavaCompatibility(
+        string javaExecutable,
+        int javaMajorVersion,
+        bool requireLegacyJava8Compatibility,
+        string javaMode)
+    {
+        if (!requireLegacyJava8Compatibility ||
+            string.IsNullOrWhiteSpace(javaExecutable) ||
+            IsJavaCompatibleWithLegacyLaunchwrapper(javaMajorVersion))
+        {
+            return;
+        }
+
+        var displayVersion = javaMajorVersion > 0
+            ? $"Java {javaMajorVersion}"
+            : "an unknown Java version";
+        throw new InvalidOperationException(
+            $"Legacy client requires Java 8 or older, but {javaMode} mode selected {displayVersion}. Choose Java 8 or configure a Java 8 bundled runtime.");
+    }
+
+    private static bool IsJavaCompatibleWithLegacyLaunchwrapper(int javaMajorVersion)
+    {
+        return javaMajorVersion <= 0 || javaMajorVersion <= 8;
+    }
+
+    private static string BuildLegacyJavaCompatibilityError(
+        string systemJavaExecutable,
+        int systemJavaMajorVersion,
+        string bundledJavaExecutable,
+        int bundledJavaMajorVersion)
+    {
+        var details = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(systemJavaExecutable))
+        {
+            details.Add($"system={FormatJavaCandidate(systemJavaExecutable, systemJavaMajorVersion)}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(bundledJavaExecutable))
+        {
+            details.Add($"bundled={FormatJavaCandidate(bundledJavaExecutable, bundledJavaMajorVersion)}");
+        }
+
+        var suffix = details.Count == 0
+            ? "No Java runtime was found."
+            : $"Detected: {string.Join(", ", details)}.";
+        return $"Legacy client requires Java 8 or older. {suffix} Install Java 8 or attach a Java 8 bundled runtime to the profile.";
+    }
+
+    private static string FormatJavaCandidate(string javaExecutable, int javaMajorVersion)
+    {
+        var label = javaMajorVersion > 0 ? $"Java {javaMajorVersion}" : "unknown version";
+        return $"{label} ({javaExecutable})";
+    }
+
+    private static int ResolveJavaMajorVersion(string javaExecutable)
+    {
+        if (string.IsNullOrWhiteSpace(javaExecutable) || !Path.IsPathRooted(javaExecutable))
+        {
+            return 0;
+        }
+
+        try
+        {
+            var javaHome = Directory.GetParent(javaExecutable)?.Parent?.FullName;
+            if (string.IsNullOrWhiteSpace(javaHome))
+            {
+                return 0;
+            }
+
+            var releaseFilePath = Path.Combine(javaHome, "release");
+            if (!File.Exists(releaseFilePath))
+            {
+                return 0;
+            }
+
+            foreach (var line in File.ReadLines(releaseFilePath))
+            {
+                if (!line.StartsWith("JAVA_VERSION=", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var rawVersion = line["JAVA_VERSION=".Length..].Trim().Trim('"');
+                return ParseJavaMajorVersion(rawVersion);
+            }
+        }
+        catch
+        {
+        }
+
+        return 0;
+    }
+
+    private static int ParseJavaMajorVersion(string rawVersion)
+    {
+        var normalized = (rawVersion ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return 0;
+        }
+
+        if (normalized.StartsWith("1.", StringComparison.Ordinal))
+        {
+            normalized = normalized["1.".Length..];
+        }
+
+        var digits = new string(normalized.TakeWhile(char.IsDigit).ToArray());
+        return int.TryParse(digits, NumberStyles.Integer, CultureInfo.InvariantCulture, out var majorVersion) &&
+               majorVersion > 0
+            ? majorVersion
+            : 0;
     }
 
     private string ResolveGameJar(LauncherManifest manifest, string instanceDirectory, string preferredJarPath)
@@ -1533,9 +1695,44 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
         }
 
         apiBaseUrl = (settings.ApiBaseUrl ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(apiBaseUrl))
+        {
+            return apiBaseUrl.TrimEnd('/');
+        }
+
+        apiBaseUrl = ResolveConfiguredLauncherApiBaseUrl();
         return string.IsNullOrWhiteSpace(apiBaseUrl)
             ? string.Empty
             : apiBaseUrl.TrimEnd('/');
+    }
+
+    private static string ResolveConfiguredLauncherApiBaseUrl()
+    {
+        var environmentBaseUrl = NormalizeBaseUrlOrEmpty(Environment.GetEnvironmentVariable("BIVLAUNCHER_API_BASE_URL"));
+        if (!string.IsNullOrWhiteSpace(environmentBaseUrl))
+        {
+            return environmentBaseUrl;
+        }
+
+        var assembly = Assembly.GetEntryAssembly() ?? typeof(GameLaunchService).Assembly;
+        var bundledBaseUrl = assembly
+            .GetCustomAttributes<AssemblyMetadataAttribute>()
+            .FirstOrDefault(attribute => string.Equals(
+                attribute.Key,
+                "BivLauncher.ApiBaseUrl",
+                StringComparison.OrdinalIgnoreCase))?
+            .Value;
+        return NormalizeBaseUrlOrEmpty(bundledBaseUrl);
+    }
+
+    private static string NormalizeBaseUrlOrEmpty(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        return value.Trim().TrimEnd('/');
     }
 
     private static string BuildYggdrasilBaseUrl(string apiBaseUrl)
