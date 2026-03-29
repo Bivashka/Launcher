@@ -63,6 +63,7 @@ public partial class MainWindowViewModel : ViewModelBase
     private string _playerAuthExternalId = string.Empty;
     private List<string> _playerAuthRoles = [];
     private string _playerAuthApiBaseUrl = string.Empty;
+    private readonly Dictionary<string, string> _profileBundledRuntimeKeys = new(StringComparer.OrdinalIgnoreCase);
     private DateTime _lastServerOnlineRefreshUtc;
 
     private LauncherSettings _settings = new();
@@ -1362,8 +1363,15 @@ public partial class MainWindowViewModel : ViewModelBase
 
         var allServers = new List<ManagedServerItem>();
         var orderedProfiles = bootstrap.Profiles.OrderBy(profile => profile.Priority);
+        _profileBundledRuntimeKeys.Clear();
         foreach (var profile in orderedProfiles)
         {
+            var normalizedBundledRuntimeKey = (profile.BundledRuntimeKey ?? string.Empty).Trim();
+            if (!string.IsNullOrWhiteSpace(profile.Slug))
+            {
+                _profileBundledRuntimeKeys[profile.Slug.Trim()] = normalizedBundledRuntimeKey;
+            }
+
             var orderedServers = profile.Servers.OrderBy(server => server.Order);
             foreach (var server in orderedServers)
             {
@@ -1484,6 +1492,7 @@ public partial class MainWindowViewModel : ViewModelBase
                     SelectedServer.ProfileSlug,
                     _playerAuthToken,
                     _playerAuthTokenType);
+                ApplyProfileRuntimeFallback(manifest, SelectedServer.ProfileSlug);
 
                 var progress = new Progress<InstallProgressInfo>(info =>
                 {
@@ -1551,6 +1560,7 @@ public partial class MainWindowViewModel : ViewModelBase
                     selectedServer.ProfileSlug,
                     _playerAuthToken,
                     _playerAuthTokenType);
+                ApplyProfileRuntimeFallback(manifest, selectedServer.ProfileSlug);
 
                 StartFileSyncProgress();
                 var progress = new Progress<InstallProgressInfo>(info =>
@@ -3315,6 +3325,29 @@ public partial class MainWindowViewModel : ViewModelBase
         }
 
         return changed;
+    }
+
+    private void ApplyProfileRuntimeFallback(LauncherManifest manifest, string profileSlug)
+    {
+        if (manifest is null || string.IsNullOrWhiteSpace(profileSlug))
+        {
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(manifest.JavaRuntimeArtifactKey))
+        {
+            return;
+        }
+
+        if (!_profileBundledRuntimeKeys.TryGetValue(profileSlug.Trim(), out var bundledRuntimeKey) ||
+            string.IsNullOrWhiteSpace(bundledRuntimeKey))
+        {
+            return;
+        }
+
+        manifest.JavaRuntimeArtifactKey = bundledRuntimeKey.Trim();
+        _logService.LogInfo(
+            $"Manifest runtime fallback applied from bootstrap profile key for '{profileSlug}': {bundledRuntimeKey}.");
     }
 
     private static string NormalizeJavaMode(string? javaMode)
