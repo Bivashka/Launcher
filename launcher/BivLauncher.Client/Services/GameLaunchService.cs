@@ -35,6 +35,10 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
         "sessionserver.mojang.com",
         "session.minecraft.net"
     ];
+    private static readonly SemaphoreSlim LegacyJavaRuntimeDownloadLock = new(1, 1);
+    private const string LegacyJavaRuntimeCacheDirectoryName = "java-runtime";
+    private const string LegacyJavaRuntimeCacheSlot = "win-x64-jre8";
+    private const string DefaultLegacyJavaRuntimeWinX64Url = "https://api.adoptium.net/v3/binary/latest/8/ga/windows/x64/jre/hotspot/normal/eclipse";
 
     public async Task<LaunchResult> LaunchAsync(
         LauncherManifest manifest,
@@ -55,11 +59,12 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
         }
 
         var usePositionalLegacyArgs = ShouldUseLegacyPositionalArguments(route, manifest, instanceDirectory);
-        var javaExecutable = ResolveJavaExecutable(
+        var javaExecutable = await ResolveJavaExecutableAsync(
             settings.JavaMode,
             manifest.JavaRuntime,
             instanceDirectory,
-            requireLegacyJava8Compatibility: usePositionalLegacyArgs);
+            requireLegacyJava8Compatibility: usePositionalLegacyArgs,
+            cancellationToken);
         logService.LogInfo(
             $"Java executable selected: {DescribeJavaExecutableForLog(javaExecutable, instanceDirectory)} (mode={settings.JavaMode}, legacyCompat={usePositionalLegacyArgs}).");
         var jvmArgs = SplitArgs(manifest.JvmArgsDefault)
@@ -323,11 +328,12 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
         }
     }
 
-    private static string ResolveJavaExecutable(
+    private async Task<string> ResolveJavaExecutableAsync(
         string javaMode,
         string? javaRuntime,
         string instanceDirectory,
-        bool requireLegacyJava8Compatibility)
+        bool requireLegacyJava8Compatibility,
+        CancellationToken cancellationToken)
     {
         var bundledJavaExecutable = ResolveBundledJavaExecutableOrEmpty(javaRuntime, instanceDirectory);
         var systemJavaExecutable = ResolveSystemJavaExecutableOrEmpty();
@@ -346,9 +352,24 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
                 return bundledJavaExecutable;
             }
 
+            if (requireLegacyJava8Compatibility)
+            {
+                var downloadedLegacyJavaExecutable = await EnsureLegacyBundledJavaRuntimeAsync(cancellationToken);
+                if (!string.IsNullOrWhiteSpace(downloadedLegacyJavaExecutable))
+                {
+                    var downloadedLegacyJavaMajorVersion = ResolveJavaMajorVersion(downloadedLegacyJavaExecutable);
+                    EnsureJavaCompatibility(
+                        downloadedLegacyJavaExecutable,
+                        downloadedLegacyJavaMajorVersion,
+                        requireLegacyJava8Compatibility,
+                        javaMode);
+                    return downloadedLegacyJavaExecutable;
+                }
+            }
+
             if (string.IsNullOrWhiteSpace(javaRuntime))
             {
-                throw new InvalidOperationException("Bundled Java mode selected but manifest has no JavaRuntime.");
+                throw new InvalidOperationException("Bundled Java mode selected but no bundled runtime is available.");
             }
 
             var runtimePath = Path.Combine(instanceDirectory, javaRuntime.Replace('/', Path.DirectorySeparatorChar));
@@ -392,6 +413,12 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
                 return bundledJavaExecutable;
             }
 
+            var downloadedLegacyJavaExecutable = await EnsureLegacyBundledJavaRuntimeAsync(cancellationToken);
+            if (!string.IsNullOrWhiteSpace(downloadedLegacyJavaExecutable))
+            {
+                return downloadedLegacyJavaExecutable;
+            }
+
             throw new InvalidOperationException(
                 BuildLegacyJavaCompatibilityError(systemJavaExecutable, systemJavaMajorVersion, bundledJavaExecutable, bundledJavaMajorVersion));
         }
@@ -404,6 +431,99 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
         return !string.IsNullOrWhiteSpace(bundledJavaExecutable)
             ? bundledJavaExecutable
             : "java";
+    }
+
+    private async Task<string> EnsureLegacyBundledJavaRuntimeAsync(CancellationToken cancellationToken)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return string.Empty;
+        }
+
+        var cacheRoot = Path.Combine(_settingsService.GetUpdatesDirectory(), LegacyJavaRuntimeCacheDirectoryName);
+        var runtimeRoot = Path.Combine(cacheRoot, LegacyJavaRuntimeCacheSlot);
+        var cachedJavaExecutable = TryFindJavaExecutableInDirectory(runtimeRoot);
+        var cachedJavaMajorVersion = ResolveJavaMajorVersion(cachedJavaExecutable);
+        if (!string.IsNullOrWhiteSpace(cachedJavaExecutable) &&
+            IsJavaCompatibleWithLegacyLaunchwrapper(cachedJavaMajorVersion))
+        {
+            logService.LogInfo($"Legacy Java runtime cache hit: {NormalizePath(cachedJavaExecutable)}.");
+            return cachedJavaExecutable;
+        }
+
+        await LegacyJavaRuntimeDownloadLock.WaitAsync(cancellationToken);
+        try
+        {
+            cachedJavaExecutable = TryFindJavaExecutableInDirectory(runtimeRoot);
+            cachedJavaMajorVersion = ResolveJavaMajorVersion(cachedJavaExecutable);
+            if (!string.IsNullOrWhiteSpace(cachedJavaExecutable) &&
+                IsJavaCompatibleWithLegacyLaunchwrapper(cachedJavaMajorVersion))
+            {
+                logService.LogInfo($"Legacy Java runtime cache hit: {NormalizePath(cachedJavaExecutable)}.");
+                return cachedJavaExecutable;
+            }
+
+            Directory.CreateDirectory(cacheRoot);
+            var tempDirectory = Path.Combine(cacheRoot, $"{LegacyJavaRuntimeCacheSlot}.tmp-{Guid.NewGuid():N}");
+            var archivePath = Path.Combine(cacheRoot, $"{LegacyJavaRuntimeCacheSlot}.zip");
+
+            TryDeleteDirectory(tempDirectory);
+            Directory.CreateDirectory(tempDirectory);
+
+            logService.LogInfo($"Legacy Java runtime auto-download started: {DefaultLegacyJavaRuntimeWinX64Url}");
+
+            try
+            {
+                using var httpClient = new HttpClient
+                {
+                    Timeout = TimeSpan.FromMinutes(10)
+                };
+
+                using var response = await httpClient.GetAsync(
+                    DefaultLegacyJavaRuntimeWinX64Url,
+                    HttpCompletionOption.ResponseHeadersRead,
+                    cancellationToken);
+                response.EnsureSuccessStatusCode();
+
+                await using (var remoteStream = await response.Content.ReadAsStreamAsync(cancellationToken))
+                await using (var archiveStream = new FileStream(archivePath, FileMode.Create, FileAccess.Write, FileShare.None))
+                {
+                    await remoteStream.CopyToAsync(archiveStream, cancellationToken);
+                }
+
+                ExtractZipArchiveSafely(archivePath, tempDirectory);
+                var extractedJavaExecutable = TryFindJavaExecutableInDirectory(tempDirectory);
+                if (string.IsNullOrWhiteSpace(extractedJavaExecutable))
+                {
+                    throw new InvalidOperationException("Downloaded Java runtime archive does not contain javaw.exe/java.exe.");
+                }
+
+                TryDeleteDirectory(runtimeRoot);
+                Directory.Move(tempDirectory, runtimeRoot);
+
+                var resolvedJavaExecutable = TryFindJavaExecutableInDirectory(runtimeRoot);
+                if (string.IsNullOrWhiteSpace(resolvedJavaExecutable))
+                {
+                    throw new InvalidOperationException("Downloaded Java runtime archive was extracted, but no executable was found.");
+                }
+
+                logService.LogInfo($"Legacy Java runtime auto-download completed: {NormalizePath(resolvedJavaExecutable)}.");
+                return resolvedJavaExecutable;
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"Failed to auto-download Java 8 runtime: {ex.Message}", ex);
+            }
+            finally
+            {
+                TryDeleteDirectory(tempDirectory);
+                TryDeleteFile(archivePath);
+            }
+        }
+        finally
+        {
+            LegacyJavaRuntimeDownloadLock.Release();
+        }
     }
 
     private static string ResolveBundledJavaExecutableOrEmpty(string? javaRuntime, string instanceDirectory)
@@ -483,6 +603,30 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
         }
 
         return string.Empty;
+    }
+
+    private static string TryFindJavaExecutableInDirectory(string rootPath)
+    {
+        if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
+        {
+            return string.Empty;
+        }
+
+        var executableNames = OperatingSystem.IsWindows()
+            ? new[] { "javaw.exe", "java.exe" }
+            : new[] { "java" };
+        var matches = executableNames
+            .SelectMany(executableName =>
+                Directory.EnumerateFiles(rootPath, executableName, SearchOption.AllDirectories))
+            .Select(Path.GetFullPath)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(path => path.EndsWith($"{Path.DirectorySeparatorChar}javaw.exe", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+            .ThenBy(path => path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+            .ThenBy(path => path.Count(ch => ch == Path.DirectorySeparatorChar))
+            .ThenBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return matches.Count > 0 ? matches[0] : string.Empty;
     }
 
     private static string TryFindJavaExecutableInLauncherRoot(string rootPath)
@@ -2610,5 +2754,75 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
     private static string QuoteIfNeeded(string value)
     {
         return value.Contains(' ') ? $"\"{value}\"" : value;
+    }
+
+    private static void ExtractZipArchiveSafely(string archivePath, string destinationDirectory)
+    {
+        using var archive = ZipFile.OpenRead(archivePath);
+        var normalizedDestination = Path.GetFullPath(destinationDirectory);
+        var normalizedDestinationWithSeparator = normalizedDestination.EndsWith(
+            Path.DirectorySeparatorChar.ToString(),
+            StringComparison.Ordinal)
+            ? normalizedDestination
+            : normalizedDestination + Path.DirectorySeparatorChar;
+        Directory.CreateDirectory(normalizedDestination);
+
+        foreach (var entry in archive.Entries)
+        {
+            var destinationPath = Path.GetFullPath(Path.Combine(normalizedDestination, entry.FullName));
+            if (!destinationPath.StartsWith(normalizedDestinationWithSeparator, StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(destinationPath, normalizedDestination, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Downloaded Java runtime archive contains an invalid path.");
+            }
+
+            if (string.IsNullOrEmpty(entry.Name))
+            {
+                Directory.CreateDirectory(destinationPath);
+                continue;
+            }
+
+            var destinationParent = Path.GetDirectoryName(destinationPath);
+            if (!string.IsNullOrWhiteSpace(destinationParent))
+            {
+                Directory.CreateDirectory(destinationParent);
+            }
+
+            using var sourceStream = entry.Open();
+            using var targetStream = new FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None);
+            sourceStream.CopyTo(targetStream);
+        }
+    }
+
+    private static void TryDeleteDirectory(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
+        {
+            return;
+        }
+
+        try
+        {
+            Directory.Delete(path, recursive: true);
+        }
+        catch
+        {
+        }
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        {
+            return;
+        }
+
+        try
+        {
+            File.Delete(path);
+        }
+        catch
+        {
+        }
     }
 }

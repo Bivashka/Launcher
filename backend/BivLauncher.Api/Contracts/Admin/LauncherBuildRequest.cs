@@ -10,6 +10,6 @@ public sealed class LauncherBuildRequest
     public string Version { get; set; } = string.Empty;
     public bool AutoPublishUpdate { get; set; } = true;
     public string ReleaseNotes { get; set; } = string.Empty;
-    public bool BundleJavaRuntime { get; set; } = true;
+    public bool BundleJavaRuntime { get; set; } = false;
     public string JavaRuntimeSourceUrl { get; set; } = string.Empty;
 }
