@@ -53,6 +53,9 @@ public sealed class AdminLauncherController(
     private const string DefaultServerLauncherJarVersion = "1.2.7";
     private const string DefaultServerLauncherBundledAuthlibVersion = "1.5.21";
     private const long DefaultServerLauncherJarMaxBytes = 32L * 1024 * 1024;
+    private const string LauncherBundledRuntimeDirectoryName = "runtime";
+    private const string DefaultLauncherBundledRuntimeWinX64Url = "https://api.adoptium.net/v3/binary/latest/8/ga/windows/x64/jre/hotspot/normal/eclipse";
+    private const long DefaultLauncherBundledRuntimeMaxBytes = 512L * 1024 * 1024;
     private const string LegacySessionDomainSource = "authserver.mojang.com";
     private const string LegacySessionDomainTarget = "session.minecraft.net";
     private const string JarManifestEntry = "META-INF/MANIFEST.MF";
@@ -520,6 +523,40 @@ public sealed class AdminLauncherController(
                     });
                 }
 
+                try
+                {
+                    await EnsureBundledJavaRuntimeAsync(normalized, runtimeIdentifier, publishDirectory, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    runtimeBuildResults.Add(new RuntimeBuildResult(
+                        RuntimeIdentifier: runtimeIdentifier,
+                        ArchiveName: runtimeArchiveName,
+                        ArchivePath: runtimeArchivePath,
+                        PublishDirectory: publishDirectory,
+                        ExitCode: exitCode,
+                        Stdout: runtimeStdout,
+                        Stderr: ex.Message,
+                        SizeBytes: 0));
+                    await WriteAuditAsync(
+                        action: "launcher.build.failed",
+                        normalized,
+                        runtimeArchiveName,
+                        0,
+                        startedAt,
+                        exitCode,
+                        BuildCombinedRuntimeLog(runtimeBuildResults, includeStdErr: false),
+                        BuildCombinedRuntimeLog(runtimeBuildResults, includeStdErr: true),
+                        runtimeBuildResults,
+                        cancellationToken);
+                    return BadRequest(new
+                    {
+                        error = $"Bundled Java runtime attach failed for runtime '{runtimeIdentifier}'.",
+                        runtimeIdentifier,
+                        details = ex.Message
+                    });
+                }
+
                 ZipFile.CreateFromDirectory(publishDirectory, runtimeArchivePath, CompressionLevel.Optimal, includeBaseDirectory: false);
                 var runtimeSizeBytes = new FileInfo(runtimeArchivePath).Length;
                 runtimeBuildResults.Add(new RuntimeBuildResult(
@@ -716,6 +753,8 @@ public sealed class AdminLauncherController(
                 request.PublishSingleFile,
                 request.Version,
                 request.AutoPublishUpdate,
+                request.BundleJavaRuntime,
+                request.JavaRuntimeSourceUrl,
                 request.ReleaseNotes,
                 archiveName,
                 sizeBytes,
@@ -780,7 +819,9 @@ public sealed class AdminLauncherController(
             PublishSingleFile = request.PublishSingleFile,
             Version = (request.Version ?? string.Empty).Trim(),
             AutoPublishUpdate = request.AutoPublishUpdate,
-            ReleaseNotes = (request.ReleaseNotes ?? string.Empty).Trim()
+            ReleaseNotes = (request.ReleaseNotes ?? string.Empty).Trim(),
+            BundleJavaRuntime = request.BundleJavaRuntime,
+            JavaRuntimeSourceUrl = (request.JavaRuntimeSourceUrl ?? string.Empty).Trim()
         };
     }
 
@@ -961,6 +1002,156 @@ public sealed class AdminLauncherController(
         }
 
         return Math.Clamp(seconds, 60, 3600);
+    }
+
+    private async Task EnsureBundledJavaRuntimeAsync(
+        LauncherBuildRequest request,
+        string runtimeIdentifier,
+        string publishDirectory,
+        CancellationToken cancellationToken)
+    {
+        if (!ShouldBundleJavaRuntime(request, runtimeIdentifier))
+        {
+            return;
+        }
+
+        var sourceUrl = ResolveBundledJavaRuntimeSourceUrl(request, runtimeIdentifier);
+        if (!Uri.TryCreate(sourceUrl, UriKind.Absolute, out var sourceUri) ||
+            (sourceUri.Scheme != Uri.UriSchemeHttps && sourceUri.Scheme != Uri.UriSchemeHttp))
+        {
+            throw new InvalidOperationException("Bundled Java runtime source URL must be an absolute http/https URL.");
+        }
+
+        var timeoutSeconds = ResolveBundledJavaRuntimeDownloadTimeoutSeconds();
+        var maxBytes = ResolveBundledJavaRuntimeMaxBytes();
+        var runtimeDirectory = Path.Combine(publishDirectory, LauncherBundledRuntimeDirectoryName);
+        TryDeleteDirectory(runtimeDirectory);
+        Directory.CreateDirectory(runtimeDirectory);
+
+        using var client = httpClientFactory.CreateClient();
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+
+        using var response = await client.GetAsync(
+            sourceUri,
+            HttpCompletionOption.ResponseHeadersRead,
+            timeoutCts.Token);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException(
+                $"Bundled Java runtime download failed with HTTP {(int)response.StatusCode} from '{sourceUrl}'.");
+        }
+
+        await using var stream = await response.Content.ReadAsStreamAsync(timeoutCts.Token);
+        var payload = await ReadWithSizeLimitAsync(stream, maxBytes, timeoutCts.Token);
+        ExtractZipPayloadSafely(payload, runtimeDirectory);
+
+        if (!ContainsBundledJavaExecutable(runtimeDirectory, runtimeIdentifier))
+        {
+            throw new InvalidOperationException(
+                $"Bundled Java runtime archive from '{sourceUrl}' does not contain a launchable Java executable.");
+        }
+    }
+
+    private static bool ShouldBundleJavaRuntime(LauncherBuildRequest request, string runtimeIdentifier)
+    {
+        return request.BundleJavaRuntime &&
+               string.Equals(runtimeIdentifier, "win-x64", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private string ResolveBundledJavaRuntimeSourceUrl(LauncherBuildRequest request, string runtimeIdentifier)
+    {
+        var explicitSourceUrl = (request.JavaRuntimeSourceUrl ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(explicitSourceUrl))
+        {
+            return explicitSourceUrl;
+        }
+
+        if (string.Equals(runtimeIdentifier, "win-x64", StringComparison.OrdinalIgnoreCase))
+        {
+            var configuredSourceUrl = (configuration["LAUNCHER_BUNDLED_RUNTIME_WIN_X64_URL"] ?? string.Empty).Trim();
+            return string.IsNullOrWhiteSpace(configuredSourceUrl)
+                ? DefaultLauncherBundledRuntimeWinX64Url
+                : configuredSourceUrl;
+        }
+
+        return string.Empty;
+    }
+
+    private int ResolveBundledJavaRuntimeDownloadTimeoutSeconds()
+    {
+        var raw = configuration["LAUNCHER_BUNDLED_RUNTIME_DOWNLOAD_TIMEOUT_SECONDS"];
+        if (!int.TryParse(raw, out var seconds))
+        {
+            return 600;
+        }
+
+        return Math.Clamp(seconds, 30, 3600);
+    }
+
+    private long ResolveBundledJavaRuntimeMaxBytes()
+    {
+        var raw = configuration["LAUNCHER_BUNDLED_RUNTIME_MAX_BYTES"];
+        if (!long.TryParse(raw, out var maxBytes))
+        {
+            return DefaultLauncherBundledRuntimeMaxBytes;
+        }
+
+        return Math.Clamp(maxBytes, 1024L * 1024L, 1024L * 1024L * 1024L);
+    }
+
+    private static void ExtractZipPayloadSafely(byte[] payload, string destinationDirectory)
+    {
+        using var input = new MemoryStream(payload, writable: false);
+        using var archive = new ZipArchive(input, ZipArchiveMode.Read, leaveOpen: false);
+        foreach (var entry in archive.Entries)
+        {
+            var normalizedEntryName = entry.FullName.Replace('\\', '/').TrimStart('/');
+            if (string.IsNullOrWhiteSpace(normalizedEntryName))
+            {
+                continue;
+            }
+
+            var absolutePath = Path.GetFullPath(Path.Combine(
+                destinationDirectory,
+                normalizedEntryName.Replace('/', Path.DirectorySeparatorChar)));
+            var normalizedDestinationRoot = Path.GetFullPath(destinationDirectory);
+            if (!absolutePath.StartsWith(normalizedDestinationRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Bundled Java runtime archive contains invalid path traversal entries.");
+            }
+
+            if (normalizedEntryName.EndsWith("/", StringComparison.Ordinal))
+            {
+                Directory.CreateDirectory(absolutePath);
+                continue;
+            }
+
+            var directoryPath = Path.GetDirectoryName(absolutePath);
+            if (!string.IsNullOrWhiteSpace(directoryPath))
+            {
+                Directory.CreateDirectory(directoryPath);
+            }
+
+            using var sourceStream = entry.Open();
+            using var targetStream = System.IO.File.Create(absolutePath);
+            sourceStream.CopyTo(targetStream);
+        }
+    }
+
+    private static bool ContainsBundledJavaExecutable(string runtimeDirectory, string runtimeIdentifier)
+    {
+        if (!Directory.Exists(runtimeDirectory))
+        {
+            return false;
+        }
+
+        var executableNames = runtimeIdentifier.StartsWith("win-", StringComparison.OrdinalIgnoreCase)
+            ? new[] { "javaw.exe", "java.exe" }
+            : new[] { "java" };
+
+        return executableNames.Any(executableName =>
+            Directory.EnumerateFiles(runtimeDirectory, executableName, SearchOption.AllDirectories).Any());
     }
 
     private static string BuildArchiveName(LauncherBuildRequest request, string runtimeIdentifier)
