@@ -320,12 +320,9 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
 
     private static string ResolveJavaExecutable(string javaMode, string? javaRuntime, string instanceDirectory)
     {
-        if (javaMode.Equals("System", StringComparison.OrdinalIgnoreCase))
-        {
-            return "java";
-        }
-
         var bundledJavaExecutable = ResolveBundledJavaExecutableOrEmpty(javaRuntime, instanceDirectory);
+        var systemJavaExecutable = ResolveSystemJavaExecutableOrEmpty();
+
         if (javaMode.Equals("Bundled", StringComparison.OrdinalIgnoreCase))
         {
             if (!string.IsNullOrWhiteSpace(bundledJavaExecutable))
@@ -340,6 +337,20 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
 
             var runtimePath = Path.Combine(instanceDirectory, javaRuntime.Replace('/', Path.DirectorySeparatorChar));
             throw new FileNotFoundException("Bundled Java runtime executable is missing.", runtimePath);
+        }
+
+        if (javaMode.Equals("System", StringComparison.OrdinalIgnoreCase))
+        {
+            return !string.IsNullOrWhiteSpace(systemJavaExecutable)
+                ? systemJavaExecutable
+                : "java";
+        }
+
+        // Keep Auto mode system-first. Some legacy clients rely on the machine JRE
+        // for TLS/certificate compatibility during authlib/Yggdrasil server login.
+        if (!string.IsNullOrWhiteSpace(systemJavaExecutable))
+        {
+            return systemJavaExecutable;
         }
 
         return !string.IsNullOrWhiteSpace(bundledJavaExecutable)
@@ -358,6 +369,51 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
         return File.Exists(runtimePath)
             ? runtimePath
             : string.Empty;
+    }
+
+    private static string ResolveSystemJavaExecutableOrEmpty()
+    {
+        var executableName = OperatingSystem.IsWindows() ? "java.exe" : "java";
+
+        var javaHome = (Environment.GetEnvironmentVariable("JAVA_HOME") ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(javaHome))
+        {
+            try
+            {
+                var candidate = Path.Combine(javaHome.Trim('"'), "bin", executableName);
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        var pathValue = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+        foreach (var rawSegment in pathValue.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            try
+            {
+                var segment = rawSegment.Trim().Trim('"');
+                if (string.IsNullOrWhiteSpace(segment))
+                {
+                    continue;
+                }
+
+                var candidate = Path.Combine(segment, executableName);
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        return string.Empty;
     }
 
     private string ResolveGameJar(LauncherManifest manifest, string instanceDirectory, string preferredJarPath)
