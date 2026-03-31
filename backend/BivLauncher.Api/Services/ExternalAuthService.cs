@@ -159,8 +159,8 @@ public sealed class ExternalAuthService(
                 };
             }
 
-            var externalId = GetString(root, "externalId", "userId", "id");
-            var username = GetString(root, "username", "name");
+            var externalId = GetString(root, "externalId", "userId", "id", "userUuid", "uuid");
+            var username = GetString(root, "username", "name", "login");
             if (string.IsNullOrWhiteSpace(externalId) && string.IsNullOrWhiteSpace(username))
             {
                 return new ExternalAuthResult
