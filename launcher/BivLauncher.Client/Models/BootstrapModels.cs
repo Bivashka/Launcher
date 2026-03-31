@@ -38,6 +38,8 @@ public sealed class BrandingConfig
     public string ListBackgroundColor { get; set; } = string.Empty;
     public string ListBorderColor { get; set; } = string.Empty;
     public string LogoText { get; set; } = "BLP";
+    public string LauncherIconKey { get; set; } = string.Empty;
+    public string LauncherIconUrl { get; set; } = string.Empty;
     public string BackgroundImageUrl { get; set; } = string.Empty;
     public double BackgroundOverlayOpacity { get; set; } = 0.55;
     public string LoginCardPosition { get; set; } = "center";

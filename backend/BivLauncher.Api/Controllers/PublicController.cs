@@ -68,6 +68,7 @@ public sealed class PublicController(
             .ToListAsync(cancellationToken);
 
         var branding = await brandingProvider.GetBrandingAsync(cancellationToken);
+        branding = MapBranding(branding);
         var publicBaseUrl = configuration["PUBLIC_BASE_URL"]
             ?? configuration["PublicBaseUrl"]
             ?? "http://localhost:8080";
@@ -403,5 +404,19 @@ public sealed class PublicController(
             LatestVersion: updateConfig.LatestVersion,
             DownloadUrl: updateConfig.DownloadUrl,
             ReleaseNotes: updateConfig.ReleaseNotes);
+    }
+
+    private BrandingConfig MapBranding(BrandingConfig branding)
+    {
+        var iconKey = (branding.LauncherIconKey ?? string.Empty).Trim();
+        var iconUrl = string.IsNullOrWhiteSpace(iconKey)
+            ? string.Empty
+            : assetUrlService.BuildPublicUrl(iconKey);
+
+        return branding with
+        {
+            LauncherIconKey = iconKey,
+            LauncherIconUrl = iconUrl
+        };
     }
 }

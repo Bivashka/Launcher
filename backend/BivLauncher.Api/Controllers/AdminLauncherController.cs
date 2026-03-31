@@ -16,6 +16,7 @@ public sealed class AdminLauncherController(
     IWebHostEnvironment environment,
     IConfiguration configuration,
     IHttpClientFactory httpClientFactory,
+    IBrandingProvider brandingProvider,
     IObjectStorageService objectStorageService,
     IAssetUrlService assetUrlService,
     ILauncherUpdateConfigProvider launcherUpdateConfigProvider,
@@ -427,6 +428,11 @@ public sealed class AdminLauncherController(
 
         try
         {
+            var launcherApplicationIconPath = runtimeIdentifiers.Any(runtimeIdentifier =>
+                    runtimeIdentifier.StartsWith("win-", StringComparison.OrdinalIgnoreCase))
+                ? await ResolveLauncherApplicationIconPathAsync(workingDirectory, cancellationToken)
+                : string.Empty;
+
             foreach (var runtimeIdentifier in runtimeIdentifiers)
             {
                 var publishDirectory = Path.Combine(publishRootDirectory, runtimeIdentifier);
@@ -436,7 +442,12 @@ public sealed class AdminLauncherController(
                 var runtimeStdout = string.Empty;
                 var runtimeStderr = string.Empty;
 
-                using var process = CreatePublishProcess(projectPath, publishDirectory, normalized, runtimeIdentifier);
+                using var process = CreatePublishProcess(
+                    projectPath,
+                    publishDirectory,
+                    normalized,
+                    runtimeIdentifier,
+                    launcherApplicationIconPath);
                 if (!process.Start())
                 {
                     return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to start dotnet publish process." });
@@ -671,7 +682,8 @@ public sealed class AdminLauncherController(
         string projectPath,
         string publishDirectory,
         LauncherBuildRequest request,
-        string runtimeIdentifier)
+        string runtimeIdentifier,
+        string launcherApplicationIconPath)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -703,6 +715,12 @@ public sealed class AdminLauncherController(
             startInfo.ArgumentList.Add("/p:IncludeNativeLibrariesForSelfExtract=true");
         }
 
+        if (runtimeIdentifier.StartsWith("win-", StringComparison.OrdinalIgnoreCase) &&
+            !string.IsNullOrWhiteSpace(launcherApplicationIconPath))
+        {
+            startInfo.ArgumentList.Add($"/p:ApplicationIcon={launcherApplicationIconPath}");
+        }
+
         if (!string.IsNullOrWhiteSpace(request.Version))
         {
             startInfo.ArgumentList.Add($"/p:Version={request.Version}");
@@ -724,6 +742,34 @@ public sealed class AdminLauncherController(
         {
             StartInfo = startInfo
         };
+    }
+
+    private async Task<string> ResolveLauncherApplicationIconPathAsync(string workingDirectory, CancellationToken cancellationToken)
+    {
+        var branding = await brandingProvider.GetBrandingAsync(cancellationToken);
+        var iconKey = (branding.LauncherIconKey ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(iconKey))
+        {
+            return string.Empty;
+        }
+
+        var storedIcon = await objectStorageService.GetAsync(iconKey, cancellationToken);
+        if (storedIcon is null || storedIcon.Data.Length == 0)
+        {
+            throw new InvalidOperationException($"Launcher icon '{iconKey}' is configured, but the asset is missing from storage.");
+        }
+
+        var extension = Path.GetExtension(iconKey);
+        if (!string.Equals(extension, ".ico", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Launcher icon must be uploaded as a .ico file.");
+        }
+
+        var iconDirectory = Path.Combine(workingDirectory, "branding");
+        Directory.CreateDirectory(iconDirectory);
+        var iconPath = Path.Combine(iconDirectory, "launcher-icon.ico");
+        await System.IO.File.WriteAllBytesAsync(iconPath, storedIcon.Data, cancellationToken);
+        return iconPath;
     }
 
     private async Task WriteAuditAsync(

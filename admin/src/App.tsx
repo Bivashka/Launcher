@@ -166,6 +166,8 @@ type BrandingSettings = {
   listBackgroundColor: string
   listBorderColor: string
   logoText: string
+  launcherIconKey: string
+  launcherIconUrl: string
   backgroundImageUrl: string
   backgroundOverlayOpacity: number
   loginCardPosition: 'left' | 'center' | 'right'
@@ -755,6 +757,8 @@ const defaultBrandingSettings: BrandingSettings = {
   listBackgroundColor: '#0D1B2FD9',
   listBorderColor: '#3E669A',
   logoText: 'BLP',
+  launcherIconKey: '',
+  launcherIconUrl: '',
   backgroundImageUrl: '',
   backgroundOverlayOpacity: 0.55,
   loginCardPosition: 'center',
@@ -1468,6 +1472,7 @@ function App() {
   const [runtimeCleanupDryRun, setRuntimeCleanupDryRun] = useState(true)
   const [runtimeCleanupResult, setRuntimeCleanupResult] = useState<RuntimeCleanupResponse | null>(null)
   const [brandingBackgroundFile, setBrandingBackgroundFile] = useState<File | null>(null)
+  const [brandingIconFile, setBrandingIconFile] = useState<File | null>(null)
   const [cosmeticsUser, setCosmeticsUser] = useState('')
   const [skinFile, setSkinFile] = useState<File | null>(null)
   const [capeFile, setCapeFile] = useState<File | null>(null)
@@ -3695,6 +3700,8 @@ function App() {
           listBackgroundColor: brandingSettings.listBackgroundColor.trim(),
           listBorderColor: brandingSettings.listBorderColor.trim(),
           logoText: brandingSettings.logoText.trim(),
+          launcherIconKey: brandingSettings.launcherIconKey.trim(),
+          launcherIconUrl: brandingSettings.launcherIconUrl.trim(),
           backgroundImageUrl: brandingSettings.backgroundImageUrl.trim(),
           backgroundOverlayOpacity: Math.min(0.95, Math.max(0, Number(brandingSettings.backgroundOverlayOpacity) || 0.55)),
           loginCardPosition: brandingSettings.loginCardPosition,
@@ -4128,6 +4135,63 @@ function App() {
       setNotice('Branding background uploaded and applied.')
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : 'Background upload failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function onUploadBrandingIcon() {
+    if (!token) {
+      setError('Missing admin token')
+      return
+    }
+
+    if (!brandingIconFile) {
+      setError('Select a launcher icon file first.')
+      return
+    }
+
+    if (!brandingIconFile.name.toLowerCase().endsWith('.ico')) {
+      setError('Launcher icon must be a .ico file.')
+      return
+    }
+
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      const formData = new FormData()
+      formData.append('file', brandingIconFile)
+
+      const response = await fetch(`${apiBaseUrl}/api/admin/settings/branding/icon`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: formData,
+      })
+
+      if (!response.ok) {
+        const text = await response.text()
+        let parsedError = ''
+        if (text) {
+          try {
+            const parsed = JSON.parse(text) as ApiError
+            parsedError = parsed.error ?? parsed.title ?? ''
+          } catch {
+            parsedError = text
+          }
+        }
+
+        throw new Error(parsedError || 'Launcher icon upload failed.')
+      }
+
+      const saved = (await response.json()) as BrandingSettings
+      setBrandingSettings(saved)
+      setBrandingIconFile(null)
+      setNotice('Launcher icon uploaded. New launcher builds will use it for the EXE icon.')
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : 'Launcher icon upload failed')
     } finally {
       setBusy(false)
     }
@@ -7407,6 +7471,39 @@ function App() {
                     onChange={(event) => setBrandingSettings((prev) => ({ ...prev, logoText: event.target.value }))}
                   />
                 </div>
+                <small>Current launcher icon: {brandingSettings.launcherIconUrl || '(none)'}</small>
+                {brandingSettings.launcherIconUrl && (
+                  <div className="grid-inline">
+                    <img
+                      src={brandingSettings.launcherIconUrl}
+                      alt="Launcher icon preview"
+                      style={{ width: '40px', height: '40px', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.12)' }}
+                    />
+                    <small>
+                      Used for window/taskbar after launcher refresh and for desktop EXE icon after the next launcher build.
+                    </small>
+                  </div>
+                )}
+                <div className="grid-inline">
+                  <input
+                    type="file"
+                    accept=".ico"
+                    onChange={(event) => setBrandingIconFile(event.target.files?.[0] ?? null)}
+                  />
+                  <button type="button" onClick={onUploadBrandingIcon} disabled={busy || !token || !brandingIconFile}>
+                    Upload launcher icon (.ico)
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setBrandingIconFile(null)
+                    setBrandingSettings((prev) => ({ ...prev, launcherIconKey: '', launcherIconUrl: '' }))
+                  }}
+                  disabled={busy || !token}
+                >
+                  Clear launcher icon
+                </button>
                 <small>Current background image: {brandingSettings.backgroundImageUrl || '(none)'}</small>
                 <div className="grid-inline">
                   <input
@@ -7571,6 +7668,12 @@ function App() {
                       <small>
                         {brandingSettings.backgroundImageUrl || '(none)'} | {brandingSettings.backgroundOverlayOpacity}
                       </small>
+                    </span>
+                  </li>
+                  <li>
+                    <span className="list-text">
+                      Launcher icon
+                      <small>{brandingSettings.launcherIconUrl || '(none)'}</small>
                     </span>
                   </li>
                   <li>

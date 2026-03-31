@@ -35,6 +35,7 @@ public partial class MainWindowViewModel : ViewModelBase
     private readonly HttpClient _iconHttpClient = new() { Timeout = TimeSpan.FromSeconds(20) };
     private readonly Dictionary<string, IImage?> _iconCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, IImage?> _brandingImageCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, byte[]?> _windowIconCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly Queue<string> _liveLogLines = new();
     private readonly SemaphoreSlim _serverOnlineRefreshLock = new(1, 1);
     private readonly DispatcherTimer _serverOnlineRefreshTimer;
@@ -65,6 +66,7 @@ public partial class MainWindowViewModel : ViewModelBase
     private string _playerAuthApiBaseUrl = string.Empty;
     private readonly Dictionary<string, string> _profileBundledRuntimeKeys = new(StringComparer.OrdinalIgnoreCase);
     private DateTime _lastServerOnlineRefreshUtc;
+    private Avalonia.Controls.WindowIcon? _defaultWindowIcon;
 
     private LauncherSettings _settings = new();
 
@@ -3100,6 +3102,7 @@ public partial class MainWindowViewModel : ViewModelBase
         LoginCardWidth = Math.Clamp(requestedWidth, 340, 640);
 
         BrandingBackgroundImage = await ResolveBrandingImageAsync(apiBaseUrl, branding.BackgroundImageUrl);
+        await ApplyLauncherWindowIconAsync(apiBaseUrl, branding.LauncherIconUrl);
     }
 
     private static bool ArePathsEqual(string? left, string? right)
@@ -3694,6 +3697,57 @@ public partial class MainWindowViewModel : ViewModelBase
             _brandingImageCache[absoluteUrl] = null;
             return null;
         }
+    }
+
+    private async Task ApplyLauncherWindowIconAsync(string apiBaseUrl, string? launcherIconUrl)
+    {
+        var mainWindow = (Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.MainWindow;
+        if (mainWindow is null)
+        {
+            return;
+        }
+
+        _defaultWindowIcon ??= mainWindow.Icon;
+
+        var brandingIcon = await ResolveLauncherWindowIconAsync(apiBaseUrl, launcherIconUrl);
+        mainWindow.Icon = brandingIcon ?? _defaultWindowIcon;
+    }
+
+    private async Task<Avalonia.Controls.WindowIcon?> ResolveLauncherWindowIconAsync(string apiBaseUrl, string? launcherIconUrl)
+    {
+        var absoluteUrl = ToAbsoluteUrl(apiBaseUrl, launcherIconUrl);
+        if (string.IsNullOrWhiteSpace(absoluteUrl))
+        {
+            return null;
+        }
+
+        if (_windowIconCache.TryGetValue(absoluteUrl, out var cachedPayload))
+        {
+            return CreateWindowIcon(cachedPayload);
+        }
+
+        try
+        {
+            var payload = await _iconHttpClient.GetByteArrayAsync(absoluteUrl);
+            _windowIconCache[absoluteUrl] = payload;
+            return CreateWindowIcon(payload);
+        }
+        catch
+        {
+            _windowIconCache[absoluteUrl] = null;
+            return null;
+        }
+    }
+
+    private static Avalonia.Controls.WindowIcon? CreateWindowIcon(byte[]? payload)
+    {
+        if (payload is null || payload.Length == 0)
+        {
+            return null;
+        }
+
+        var stream = new MemoryStream(payload, writable: false);
+        return new Avalonia.Controls.WindowIcon(stream);
     }
 
     private static string ToAbsoluteUrl(string apiBaseUrl, string? maybeUrl)

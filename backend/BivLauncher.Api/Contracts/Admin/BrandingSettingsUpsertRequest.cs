@@ -81,6 +81,12 @@ public sealed class BrandingSettingsUpsertRequest
     [MaxLength(32)]
     public string LogoText { get; set; } = string.Empty;
 
+    [MaxLength(512)]
+    public string LauncherIconKey { get; set; } = string.Empty;
+
+    [MaxLength(1024)]
+    public string LauncherIconUrl { get; set; } = string.Empty;
+
     [MaxLength(1024)]
     public string BackgroundImageUrl { get; set; } = string.Empty;
 

@@ -56,6 +56,53 @@ public sealed class PublicControllerTests
     }
 
     [Fact]
+    public async Task Bootstrap_WhenBrandingHasLauncherIconKey_ReturnsResolvedLauncherIconUrl()
+    {
+        await using var fixture = await TestFixture.CreateAsync();
+        await fixture.SeedProfileAsync("public", isPrivate: false, allowedPlayerUsernames: string.Empty);
+
+        var controller = fixture.CreateController(
+            brandingProvider: new StubBrandingProvider(
+                new BrandingConfig(
+                    ProductName: "BivLauncher",
+                    LauncherDirectoryName: "BivLauncher",
+                    DeveloperName: "BivLauncher",
+                    Tagline: string.Empty,
+                    SupportUrl: string.Empty,
+                    PrimaryColor: string.Empty,
+                    AccentColor: string.Empty,
+                    SurfaceColor: string.Empty,
+                    SurfaceBorderColor: string.Empty,
+                    TextPrimaryColor: string.Empty,
+                    TextSecondaryColor: string.Empty,
+                    PrimaryButtonColor: string.Empty,
+                    PrimaryButtonBorderColor: string.Empty,
+                    PrimaryButtonTextColor: string.Empty,
+                    PlayButtonColor: string.Empty,
+                    PlayButtonBorderColor: string.Empty,
+                    PlayButtonTextColor: string.Empty,
+                    InputBackgroundColor: string.Empty,
+                    InputBorderColor: string.Empty,
+                    InputTextColor: string.Empty,
+                    ListBackgroundColor: string.Empty,
+                    ListBorderColor: string.Empty,
+                    LogoText: "BLP",
+                    LauncherIconKey: "branding/icon/custom.ico",
+                    LauncherIconUrl: string.Empty,
+                    BackgroundImageUrl: string.Empty,
+                    BackgroundOverlayOpacity: 0.55,
+                    LoginCardPosition: "center",
+                    LoginCardWidth: 460)));
+
+        var response = await controller.Bootstrap(CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(response.Result);
+        var payload = Assert.IsType<BootstrapResponse>(ok.Value);
+        Assert.Equal("branding/icon/custom.ico", payload.Branding.LauncherIconKey);
+        Assert.Equal("https://cdn.local/branding/icon/custom.ico", payload.Branding.LauncherIconUrl);
+    }
+
+    [Fact]
     public async Task Manifest_WhenProfileIsPrivateAndUserIsNotAllowlisted_ReturnsNotFound()
     {
         await using var fixture = await TestFixture.CreateAsync();
@@ -174,11 +221,11 @@ public sealed class PublicControllerTests
             await _objectStorage.UploadJsonAsync(profile.LatestManifestKey, manifest);
         }
 
-        public PublicController CreateController(string username = "")
+        public PublicController CreateController(string username = "", IBrandingProvider? brandingProvider = null)
         {
             var controller = new PublicController(
                 DbContext,
-                new StubBrandingProvider(),
+                brandingProvider ?? new StubBrandingProvider(),
                 new StubBuildPipelineService(),
                 new StubLauncherUpdateConfigProvider(),
                 new ConfigurationBuilder().AddInMemoryCollection().Build(),
@@ -214,11 +261,11 @@ public sealed class PublicControllerTests
         }
     }
 
-    private sealed class StubBrandingProvider : IBrandingProvider
+    private sealed class StubBrandingProvider(BrandingConfig? branding = null) : IBrandingProvider
     {
         public Task<BrandingConfig> GetBrandingAsync(CancellationToken cancellationToken = default)
         {
-            return Task.FromResult(new BrandingConfig(
+            return Task.FromResult(branding ?? new BrandingConfig(
                 ProductName: "BivLauncher",
                 LauncherDirectoryName: "BivLauncher",
                 DeveloperName: "BivLauncher",
@@ -242,6 +289,8 @@ public sealed class PublicControllerTests
                 ListBackgroundColor: string.Empty,
                 ListBorderColor: string.Empty,
                 LogoText: "BLP",
+                LauncherIconKey: string.Empty,
+                LauncherIconUrl: string.Empty,
                 BackgroundImageUrl: string.Empty,
                 BackgroundOverlayOpacity: 0.55,
                 LoginCardPosition: "center",

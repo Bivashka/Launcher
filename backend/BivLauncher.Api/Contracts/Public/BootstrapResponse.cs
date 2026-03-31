@@ -32,6 +32,8 @@ public sealed record BrandingConfig(
     string ListBackgroundColor,
     string ListBorderColor,
     string LogoText,
+    string LauncherIconKey,
+    string LauncherIconUrl,
     string BackgroundImageUrl,
     double BackgroundOverlayOpacity,
     string LoginCardPosition,

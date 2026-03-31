@@ -17,7 +17,10 @@ public sealed class AdminBrandingSettingsController(
     IAdminAuditService auditService,
     ILogger<AdminBrandingSettingsController> logger) : ControllerBase
 {
+    private const long MaxBackgroundImageBytes = 20L * 1024L * 1024L;
+    private const long MaxLauncherIconBytes = 2L * 1024L * 1024L;
     private static readonly HashSet<string> AllowedImageExtensions = [".png", ".jpg", ".jpeg", ".webp", ".gif"];
+    private static readonly HashSet<string> AllowedLauncherIconExtensions = [".ico"];
 
     [HttpGet]
     public async Task<ActionResult<BrandingSettingsDto>> Get(CancellationToken cancellationToken)
@@ -31,6 +34,11 @@ public sealed class AdminBrandingSettingsController(
         [FromBody] BrandingSettingsUpsertRequest request,
         CancellationToken cancellationToken)
     {
+        var launcherIconKey = request.LauncherIconKey.Trim();
+        var launcherIconUrl = string.IsNullOrWhiteSpace(launcherIconKey)
+            ? string.Empty
+            : assetUrlService.BuildPublicUrl(launcherIconKey);
+
         var branding = new BrandingConfig(
             ProductName: request.ProductName.Trim(),
             LauncherDirectoryName: request.LauncherDirectoryName.Trim(),
@@ -55,6 +63,8 @@ public sealed class AdminBrandingSettingsController(
             ListBackgroundColor: request.ListBackgroundColor.Trim(),
             ListBorderColor: request.ListBorderColor.Trim(),
             LogoText: request.LogoText.Trim(),
+            LauncherIconKey: launcherIconKey,
+            LauncherIconUrl: launcherIconUrl,
             BackgroundImageUrl: request.BackgroundImageUrl.Trim(),
             BackgroundOverlayOpacity: request.BackgroundOverlayOpacity,
             LoginCardPosition: request.LoginCardPosition.Trim(),
@@ -75,6 +85,7 @@ public sealed class AdminBrandingSettingsController(
                 saved.LogoText,
                 saved.LoginCardPosition,
                 saved.LoginCardWidth,
+                hasLauncherIcon = !string.IsNullOrWhiteSpace(saved.LauncherIconKey),
                 hasBackgroundImage = !string.IsNullOrWhiteSpace(saved.BackgroundImageUrl),
                 saved.PrimaryColor,
                 saved.AccentColor
@@ -84,7 +95,7 @@ public sealed class AdminBrandingSettingsController(
     }
 
     [HttpPost("background")]
-    [RequestSizeLimit(20L * 1024L * 1024L)]
+    [RequestSizeLimit(MaxBackgroundImageBytes)]
     public async Task<ActionResult<BrandingSettingsDto>> UploadBackgroundImage(
         [FromForm] IFormFile? file = null,
         CancellationToken cancellationToken = default)
@@ -94,7 +105,7 @@ public sealed class AdminBrandingSettingsController(
             return BadRequest(new { error = "Background image file is required." });
         }
 
-        if (file.Length > 20L * 1024L * 1024L)
+        if (file.Length > MaxBackgroundImageBytes)
         {
             return BadRequest(new { error = "Background image is too large. Max size is 20 MB." });
         }
@@ -167,6 +178,89 @@ public sealed class AdminBrandingSettingsController(
         return Ok(Map(saved));
     }
 
+    [HttpPost("icon")]
+    [RequestSizeLimit(MaxLauncherIconBytes)]
+    public async Task<ActionResult<BrandingSettingsDto>> UploadLauncherIcon(
+        [FromForm] IFormFile? file = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (file is null || file.Length <= 0)
+        {
+            return BadRequest(new { error = "Launcher icon file is required." });
+        }
+
+        if (file.Length > MaxLauncherIconBytes)
+        {
+            return BadRequest(new { error = "Launcher icon is too large. Max size is 2 MB." });
+        }
+
+        var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+        if (!AllowedLauncherIconExtensions.Contains(extension))
+        {
+            return BadRequest(new { error = "Unsupported icon format. Allowed: .ico" });
+        }
+
+        var key = BuildLauncherIconStorageKey(extension);
+        const string contentType = "image/x-icon";
+
+        try
+        {
+            await using (var stream = file.OpenReadStream())
+            {
+                await objectStorageService.UploadAsync(key, stream, contentType, cancellationToken: cancellationToken);
+            }
+        }
+        catch (InvalidOperationException ex)
+        {
+            logger.LogWarning(ex, "Branding launcher icon upload rejected due to storage configuration.");
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+            {
+                error = $"Storage backend is unavailable: {ex.Message}"
+            });
+        }
+        catch (HttpRequestException ex)
+        {
+            logger.LogWarning(ex, "Branding launcher icon upload failed due to storage connectivity issue.");
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+            {
+                error = "Storage backend is unreachable. Check S3/MinIO endpoint and connectivity."
+            });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Branding launcher icon upload failed unexpectedly.");
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                error = "Launcher icon upload failed unexpectedly."
+            });
+        }
+
+        var current = await brandingProvider.GetBrandingAsync(cancellationToken);
+        var updated = current with
+        {
+            LauncherIconKey = key,
+            LauncherIconUrl = assetUrlService.BuildPublicUrl(key)
+        };
+        var saved = await brandingProvider.SaveBrandingAsync(updated, cancellationToken);
+
+        var actor = User.Identity?.Name ?? "admin";
+        await auditService.WriteAsync(
+            action: "settings.branding.icon.upload",
+            actor: actor,
+            entityType: "settings",
+            entityId: "branding",
+            details: new
+            {
+                key,
+                fileName = file.FileName,
+                fileSizeBytes = file.Length,
+                contentType
+            },
+            cancellationToken: cancellationToken);
+
+        return Ok(Map(saved));
+    }
+
     private static string BuildBackgroundStorageKey(string extension)
     {
         var timestamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
@@ -174,8 +268,20 @@ public sealed class AdminBrandingSettingsController(
         return $"branding/background/{timestamp}_{suffix}{extension}";
     }
 
-    private static BrandingSettingsDto Map(BrandingConfig branding)
+    private static string BuildLauncherIconStorageKey(string extension)
     {
+        var timestamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        return $"branding/icon/{timestamp}_{suffix}{extension}";
+    }
+
+    private BrandingSettingsDto Map(BrandingConfig branding)
+    {
+        var launcherIconKey = (branding.LauncherIconKey ?? string.Empty).Trim();
+        var launcherIconUrl = string.IsNullOrWhiteSpace(launcherIconKey)
+            ? string.Empty
+            : assetUrlService.BuildPublicUrl(launcherIconKey);
+
         return new BrandingSettingsDto(
             branding.ProductName,
             branding.LauncherDirectoryName,
@@ -200,6 +306,8 @@ public sealed class AdminBrandingSettingsController(
             branding.ListBackgroundColor,
             branding.ListBorderColor,
             branding.LogoText,
+            launcherIconKey,
+            launcherIconUrl,
             branding.BackgroundImageUrl,
             branding.BackgroundOverlayOpacity,
             branding.LoginCardPosition,

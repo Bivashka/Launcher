@@ -6,7 +6,6 @@
         mc:Ignorable="d"
         x:Class="BivLauncher.Client.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
-        Icon="/Assets/avalonia-logo.ico"
         Title="{Binding ProductName}"
         Width="1240"
         Height="780"
