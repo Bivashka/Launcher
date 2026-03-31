@@ -1195,6 +1195,14 @@ if ! grep -qE '^LAUNCHER_STRICT_SECURITY=' "$ENV_FILE" 2>/dev/null; then
   write_env_value "LAUNCHER_STRICT_SECURITY" "true"
 fi
 
+if ! grep -qE '^BRANDING_FILE_PATH=' "$ENV_FILE" 2>/dev/null; then
+  write_env_value "BRANDING_FILE_PATH" "/app/storage/branding.json"
+fi
+
+if ! grep -qE '^LAUNCHER_UPDATE_FILE_PATH=' "$ENV_FILE" 2>/dev/null; then
+  write_env_value "LAUNCHER_UPDATE_FILE_PATH" "/app/storage/launcher-update.json"
+fi
+
 if [ "$DRY_RUN" = "1" ]; then
   append_check_result "meta" "Port pre-check" "local-listen-ports" "skipped(dry-run)"
 elif [ "$SKIP_PORT_CHECK" = "1" ]; then

@@ -56,6 +56,7 @@ services:
       DEV_SUPPORT_DISCORD: ${DEV_SUPPORT_DISCORD:-bivashka}
       DEV_SUPPORT_WEBSITE: ${DEV_SUPPORT_WEBSITE:-https://github.com/bivashka}
       DEV_SUPPORT_NOTES: ${DEV_SUPPORT_NOTES:-Official developer support contact. Not editable from admin UI.}
+      BRANDING_FILE_PATH: ${BRANDING_FILE_PATH:-/app/storage/branding.json}
       NEWS_SYNC_ENABLED: ${NEWS_SYNC_ENABLED:-false}
       NEWS_SYNC_INTERVAL_MINUTES: ${NEWS_SYNC_INTERVAL_MINUTES:-60}
       NEWS_RETENTION_ENABLED: ${NEWS_RETENTION_ENABLED:-false}

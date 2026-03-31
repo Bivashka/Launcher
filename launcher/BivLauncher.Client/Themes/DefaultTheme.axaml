@@ -98,6 +98,61 @@
     <Setter Property="BoxShadow" Value="0 18 40 0 #030E1F8C" />
   </Style>
 
+  <Style Selector="Border.banNoticeCard">
+    <Setter Property="Padding" Value="24" />
+    <Setter Property="CornerRadius" Value="24" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="BorderBrush" Value="#FF8C76" />
+    <Setter Property="Background">
+      <Setter.Value>
+        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+          <GradientStop Offset="0" Color="#31120FD9" />
+          <GradientStop Offset="0.6" Color="#21121BD9" />
+          <GradientStop Offset="1" Color="#161A2AD9" />
+        </LinearGradientBrush>
+      </Setter.Value>
+    </Setter>
+    <Setter Property="BoxShadow" Value="0 26 54 0 #02060EAA" />
+  </Style>
+
+  <Style Selector="Border.banNoticeGlyph">
+    <Setter Property="Width" Value="64" />
+    <Setter Property="Height" Value="64" />
+    <Setter Property="CornerRadius" Value="20" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="BorderBrush" Value="#FFB097" />
+    <Setter Property="Background">
+      <Setter.Value>
+        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+          <GradientStop Offset="0" Color="#D75D43" />
+          <GradientStop Offset="1" Color="#8E2D2A" />
+        </LinearGradientBrush>
+      </Setter.Value>
+    </Setter>
+    <Setter Property="BoxShadow" Value="0 10 22 0 #2F090C88" />
+  </Style>
+
+  <Style Selector="Border.banNoticePill">
+    <Setter Property="HorizontalAlignment" Value="Left" />
+    <Setter Property="Padding" Value="10,5" />
+    <Setter Property="CornerRadius" Value="999" />
+    <Setter Property="Background" Value="#5A201ED9" />
+    <Setter Property="BorderBrush" Value="#D97864" />
+    <Setter Property="BorderThickness" Value="1" />
+  </Style>
+
+  <Style Selector="TextBlock.banNoticeMessage">
+    <Setter Property="FontSize" Value="14" />
+    <Setter Property="LineHeight" Value="22" />
+    <Setter Property="Foreground" Value="#FCEEE8" />
+  </Style>
+
+  <Style Selector="Button.banNoticeButton">
+    <Setter Property="HorizontalAlignment" Value="Left" />
+    <Setter Property="Padding" Value="16,10" />
+    <Setter Property="MinWidth" Value="170" />
+  </Style>
+
   <Style Selector="Border.settingsDrawer">
     <Setter Property="Margin" Value="0" />
     <Setter Property="Padding" Value="18" />

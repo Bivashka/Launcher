@@ -54,6 +54,7 @@ public sealed class BrandingProvider(
     public async Task<BrandingConfig> GetBrandingAsync(CancellationToken cancellationToken = default)
     {
         var brandingPath = GetBrandingPath();
+        TryMigrateLegacyBrandingFile(brandingPath);
 
         if (!File.Exists(brandingPath))
         {
@@ -92,6 +93,47 @@ public sealed class BrandingProvider(
         return Path.IsPathRooted(configuredPath)
             ? configuredPath
             : Path.Combine(environment.ContentRootPath, configuredPath);
+    }
+
+    private void TryMigrateLegacyBrandingFile(string brandingPath)
+    {
+        if (File.Exists(brandingPath))
+        {
+            return;
+        }
+
+        var legacyPath = Path.Combine(environment.ContentRootPath, "branding.json");
+        if (string.Equals(
+                Path.GetFullPath(legacyPath),
+                Path.GetFullPath(brandingPath),
+                StringComparison.OrdinalIgnoreCase) ||
+            !File.Exists(legacyPath))
+        {
+            return;
+        }
+
+        try
+        {
+            var directory = Path.GetDirectoryName(brandingPath);
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            File.Copy(legacyPath, brandingPath, overwrite: false);
+            logger.LogInformation(
+                "Branding file migrated from legacy path {LegacyPath} to {BrandingPath}.",
+                legacyPath,
+                brandingPath);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Branding migration from legacy path {LegacyPath} to {BrandingPath} failed.",
+                legacyPath,
+                brandingPath);
+        }
     }
 
     private static BrandingConfig NormalizeBranding(BrandingConfig branding)

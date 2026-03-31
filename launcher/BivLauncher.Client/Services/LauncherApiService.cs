@@ -384,6 +384,29 @@ public sealed class LauncherApiService : ILauncherApiService
         return null;
     }
 
+    private static string? ExtractErrorCode(string body)
+    {
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("code", out var codeElement) && codeElement.ValueKind == JsonValueKind.String)
+            {
+                return codeElement.GetString();
+            }
+        }
+        catch
+        {
+        }
+
+        return null;
+    }
+
     private static string BuildErrorMessage(string operation, HttpResponseMessage response, string body)
     {
         var explicitError = ExtractError(body);
@@ -409,7 +432,8 @@ public sealed class LauncherApiService : ILauncherApiService
     private static LauncherApiException CreateApiException(string operation, HttpResponseMessage response, string body)
     {
         var message = BuildErrorMessage(operation, response, body);
-        return new LauncherApiException(message, response.StatusCode, ResolveRetryAfter(response));
+        var errorCode = ExtractErrorCode(body) ?? string.Empty;
+        return new LauncherApiException(message, response.StatusCode, ResolveRetryAfter(response), errorCode);
     }
 
     private static TimeSpan? ResolveRetryAfter(HttpResponseMessage response)

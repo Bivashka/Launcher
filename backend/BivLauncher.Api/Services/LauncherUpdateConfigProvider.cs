@@ -26,6 +26,7 @@ public sealed class LauncherUpdateConfigProvider(
     public async Task<LauncherUpdateConfig?> GetAsync(CancellationToken cancellationToken = default)
     {
         var path = GetConfigPath();
+        TryMigrateLegacyConfig(path);
         if (File.Exists(path))
         {
             try
@@ -79,6 +80,47 @@ public sealed class LauncherUpdateConfigProvider(
         return Path.IsPathRooted(configuredPath)
             ? configuredPath
             : Path.Combine(_environment.ContentRootPath, configuredPath);
+    }
+
+    private void TryMigrateLegacyConfig(string path)
+    {
+        if (File.Exists(path))
+        {
+            return;
+        }
+
+        var legacyPath = Path.Combine(_environment.ContentRootPath, "launcher-update.json");
+        if (string.Equals(
+                Path.GetFullPath(legacyPath),
+                Path.GetFullPath(path),
+                StringComparison.OrdinalIgnoreCase) ||
+            !File.Exists(legacyPath))
+        {
+            return;
+        }
+
+        try
+        {
+            var directory = Path.GetDirectoryName(path);
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            File.Copy(legacyPath, path, overwrite: false);
+            _logger.LogInformation(
+                "Launcher update config migrated from legacy path {LegacyPath} to {Path}.",
+                legacyPath,
+                path);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Launcher update config migration from legacy path {LegacyPath} to {Path} failed.",
+                legacyPath,
+                path);
+        }
     }
 
     private static LauncherUpdateConfig? Normalize(LauncherUpdateConfig? raw)

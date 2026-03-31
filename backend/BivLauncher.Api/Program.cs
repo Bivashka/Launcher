@@ -160,6 +160,12 @@ builder.Services.PostConfigure<BuildPipelineOptions>(options =>
     options.DefaultGameArgs = builder.Configuration["BUILD_DEFAULT_GAME_ARGS"] ?? options.DefaultGameArgs;
 });
 
+builder.Services.PostConfigure<BrandingOptions>(options =>
+{
+    options.FilePath = (builder.Configuration["BRANDING_FILE_PATH"] ?? options.FilePath ?? string.Empty).Trim();
+    options.FilePath = string.IsNullOrWhiteSpace(options.FilePath) ? "branding.json" : options.FilePath;
+});
+
 builder.Services.PostConfigure<LauncherUpdateOptions>(options =>
 {
     options.LatestVersion = (builder.Configuration["LAUNCHER_LATEST_VERSION"] ?? options.LatestVersion ?? string.Empty).Trim();

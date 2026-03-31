@@ -810,6 +810,12 @@ public sealed class AdminLauncherController(
         }
         runtime = runtimeIdentifiers[0];
 
+        var version = (request.Version ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(version) && request.AutoPublishUpdate)
+        {
+            version = ResolveUpdateVersion(string.Empty);
+        }
+
         return new LauncherBuildRequest
         {
             RuntimeIdentifier = runtime,
@@ -817,7 +823,7 @@ public sealed class AdminLauncherController(
             Configuration = configuration,
             SelfContained = request.SelfContained,
             PublishSingleFile = request.PublishSingleFile,
-            Version = (request.Version ?? string.Empty).Trim(),
+            Version = version,
             AutoPublishUpdate = request.AutoPublishUpdate,
             ReleaseNotes = (request.ReleaseNotes ?? string.Empty).Trim(),
             BundleJavaRuntime = request.BundleJavaRuntime,

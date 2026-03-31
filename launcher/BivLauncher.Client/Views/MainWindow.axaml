@@ -500,6 +500,56 @@
             </Border>
           </Grid>
         </Border>
+
+        <Border IsVisible="{Binding IsBanNoticeVisible}"
+                Background="#B5070C12">
+          <Grid>
+            <Border Classes="banNoticeCard"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Width="560"
+                    MaxWidth="640">
+              <Grid ColumnDefinitions="Auto,*"
+                    ColumnSpacing="18">
+                <Border Classes="banNoticeGlyph">
+                  <TextBlock Text="!"
+                             FontSize="28"
+                             FontWeight="Bold"
+                             HorizontalAlignment="Center"
+                             VerticalAlignment="Center"
+                             Foreground="#FFF7F3" />
+                </Border>
+
+                <StackPanel Grid.Column="1" Spacing="12">
+                  <Border Classes="banNoticePill">
+                    <TextBlock Text="{Binding BanNoticeEyebrowText}"
+                               FontSize="12"
+                               FontWeight="SemiBold"
+                               LetterSpacing="1.5"
+                               Foreground="#FFDCCF" />
+                  </Border>
+
+                  <TextBlock Classes="sectionTitle"
+                             Text="{Binding BanNoticeTitle}"
+                             Foreground="{Binding PrimaryTextBrush}"
+                             TextWrapping="Wrap" />
+
+                  <TextBlock Classes="banNoticeMessage"
+                             Text="{Binding BanNoticeMessage}"
+                             Foreground="{Binding PrimaryTextBrush}"
+                             TextWrapping="Wrap" />
+
+                  <Button Classes="banNoticeButton"
+                          Content="{Binding BanNoticeDismissButtonText}"
+                          Background="{Binding PrimaryButtonBackgroundBrush}"
+                          BorderBrush="{Binding PrimaryButtonBorderBrush}"
+                          Foreground="{Binding PrimaryButtonForegroundBrush}"
+                          Command="{Binding DismissBanNoticeCommand}" />
+                </StackPanel>
+              </Grid>
+            </Border>
+          </Grid>
+        </Border>
       </Grid>
     </Grid>
   </Grid>

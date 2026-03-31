@@ -99,7 +99,7 @@ public sealed class PublicAuthController(
 
         if (account.Banned)
         {
-            return StatusCode(StatusCodes.Status403Forbidden, new { error = "Account is banned." });
+            return BanResponse("account_ban", "Account is banned.");
         }
 
         var now = DateTime.UtcNow;
@@ -114,7 +114,7 @@ public sealed class PublicAuthController(
 
         if (activeAccountBan is not null)
         {
-            return StatusCode(StatusCodes.Status403Forbidden, new { error = $"Account is banned: {activeAccountBan}" });
+            return BanResponse("account_ban", $"Account is banned: {activeAccountBan}");
         }
 
         var normalizedDeviceUserName = NormalizeDeviceUserName(account.DeviceUserName);
@@ -131,7 +131,7 @@ public sealed class PublicAuthController(
 
             if (activeDeviceUserBan is not null)
             {
-                return StatusCode(StatusCodes.Status403Forbidden, new { error = $"Device user banned: {activeDeviceUserBan}" });
+                return BanResponse("device_user_ban", $"Device user banned: {activeDeviceUserBan}");
             }
         }
 
@@ -234,7 +234,7 @@ public sealed class PublicAuthController(
 
             if (activeHardwareBan is not null)
             {
-                return StatusCode(StatusCodes.Status403Forbidden, new { error = $"Hardware banned: {activeHardwareBan}" });
+                return BanResponse("hardware_ban", $"Hardware banned: {activeHardwareBan}");
             }
         }
 
@@ -251,7 +251,7 @@ public sealed class PublicAuthController(
 
             if (activeDeviceUserBan is not null)
             {
-                return StatusCode(StatusCodes.Status403Forbidden, new { error = $"Device user banned: {activeDeviceUserBan}" });
+                return BanResponse("device_user_ban", $"Device user banned: {activeDeviceUserBan}");
             }
         }
 
@@ -291,7 +291,7 @@ public sealed class PublicAuthController(
 
             if (authResult.Banned)
             {
-                return StatusCode(StatusCodes.Status403Forbidden, new { error = "Account is banned." });
+                return BanResponse("account_ban", "Account is banned.");
             }
 
             var normalizedExternalId = string.IsNullOrWhiteSpace(authResult.ExternalId)
@@ -390,7 +390,7 @@ public sealed class PublicAuthController(
 
         if (account.Banned)
         {
-            return StatusCode(StatusCodes.Status403Forbidden, new { error = "Account is banned." });
+            return BanResponse("account_ban", "Account is banned.");
         }
 
         var activeAccountBan = await dbContext.HardwareBans
@@ -403,7 +403,7 @@ public sealed class PublicAuthController(
             .FirstOrDefaultAsync(cancellationToken);
         if (activeAccountBan is not null)
         {
-            return StatusCode(StatusCodes.Status403Forbidden, new { error = $"Account is banned: {activeAccountBan}" });
+            return BanResponse("account_ban", $"Account is banned: {activeAccountBan}");
         }
 
         var isTwoFactorEnabled = await dbContext.TwoFactorConfigs
@@ -507,6 +507,15 @@ public sealed class PublicAuthController(
             TwoFactorProvisioningUri: provisioningUri,
             TwoFactorSecret: secret,
             Message: message);
+    }
+
+    private ObjectResult BanResponse(string code, string error)
+    {
+        return StatusCode(StatusCodes.Status403Forbidden, new
+        {
+            error,
+            code
+        });
     }
 
     private bool IsLauncherClientAllowed(out string error)

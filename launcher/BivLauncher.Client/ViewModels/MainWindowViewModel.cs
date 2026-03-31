@@ -109,6 +109,7 @@ public partial class MainWindowViewModel : ViewModelBase
         OpenLogsFolderCommand = new RelayCommand(OpenLogsFolder);
         ToggleSettingsCommand = new RelayCommand(ToggleSettings, CanToggleSettings);
         CloseSettingsCommand = new RelayCommand(() => IsSettingsOpen = false);
+        DismissBanNoticeCommand = new RelayCommand(ClearBanNotice);
         OpenUpdateUrlCommand = new RelayCommand(OpenUpdateUrl, CanOpenUpdateUrl);
         DownloadUpdateCommand = new AsyncRelayCommand(DownloadUpdateAsync, CanDownloadUpdate);
         InstallUpdateCommand = new AsyncRelayCommand(InstallUpdateAsync, CanInstallUpdate);
@@ -150,6 +151,7 @@ public partial class MainWindowViewModel : ViewModelBase
     public IRelayCommand OpenLogsFolderCommand { get; }
     public IRelayCommand ToggleSettingsCommand { get; }
     public IRelayCommand CloseSettingsCommand { get; }
+    public IRelayCommand DismissBanNoticeCommand { get; }
     public IRelayCommand OpenUpdateUrlCommand { get; }
     public IAsyncRelayCommand DownloadUpdateCommand { get; }
     public IAsyncRelayCommand InstallUpdateCommand { get; }
@@ -324,6 +326,15 @@ public partial class MainWindowViewModel : ViewModelBase
     private bool _isPlayerLoggedIn;
 
     [ObservableProperty]
+    private bool _isBanNoticeVisible;
+
+    [ObservableProperty]
+    private string _banNoticeTitle = string.Empty;
+
+    [ObservableProperty]
+    private string _banNoticeMessage = string.Empty;
+
+    [ObservableProperty]
     private bool _isTwoFactorStepActive;
 
     [ObservableProperty]
@@ -410,6 +421,8 @@ public partial class MainWindowViewModel : ViewModelBase
     public string LogoutButtonText => _languageCode == "en" ? "Logout" : "Выйти";
     public string SwitchAccountButtonText => _languageCode == "en" ? "Switch" : "Переключить";
     public string SavedAccountsLabelText => _languageCode == "en" ? "Saved accounts" : "Сохранённые аккаунты";
+    public string BanNoticeEyebrowText => _languageCode == "en" ? "ACCESS RESTRICTED" : "ДОСТУП ОГРАНИЧЕН";
+    public string BanNoticeDismissButtonText => _languageCode == "en" ? "Close notice" : "Закрыть уведомление";
     public string TwoFactorHintText => BuildTwoFactorHintText();
     public string SkinStatusText => F("status.skin", BoolWord(HasSkin));
     public string CapeStatusText => F("status.cape", BoolWord(HasCape));
@@ -2044,6 +2057,7 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         await RunBusyAsync(async () =>
         {
+            ClearBanNotice();
             var enteredUsername = PlayerUsername.Trim();
             var enteredPassword = PlayerPassword;
             var usePendingCredentials = IsTwoFactorStepActive &&
@@ -2187,13 +2201,21 @@ public partial class MainWindowViewModel : ViewModelBase
             catch (LauncherApiException apiException) when (
                 apiException.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
             {
+                var isBanNotice = TryShowBanNotice(apiException);
                 RemoveStoredAccount(account.Username);
                 IsPlayerLoggedIn = false;
                 await PersistSettingsSnapshotAsync();
                 await RefreshCoreAsync();
-                StatusText = _languageCode == "en"
-                    ? "Saved account session expired. Login again."
-                    : "Сессия аккаунта истекла. Войдите заново.";
+                if (isBanNotice)
+                {
+                    StatusText = BanNoticeMessage;
+                }
+                else
+                {
+                    StatusText = _languageCode == "en"
+                        ? "Saved account session expired. Login again."
+                        : "Сессия аккаунта истекла. Войдите заново.";
+                }
             }
         });
     }
@@ -2202,6 +2224,7 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         await RunBusyAsync(async () =>
         {
+            ClearBanNotice();
             var tokenToRevoke = _playerAuthToken;
             var tokenTypeToRevoke = _playerAuthTokenType;
 
@@ -2235,6 +2258,7 @@ public partial class MainWindowViewModel : ViewModelBase
             return;
         }
 
+        ClearBanNotice();
         _allowAutoSessionRestore = false;
         IsPlayerLoggedIn = false;
         ResetTwoFactorState();
@@ -2358,6 +2382,7 @@ public partial class MainWindowViewModel : ViewModelBase
         catch (LauncherApiException apiException) when (
             apiException.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
         {
+            var isBanNotice = TryShowBanNotice(apiException);
             if (!string.IsNullOrWhiteSpace(fallbackStoredUsername))
             {
                 RemoveStoredAccount(fallbackStoredUsername);
@@ -2365,6 +2390,10 @@ public partial class MainWindowViewModel : ViewModelBase
 
             ClearAuthenticatedPlayerSession();
             await PersistSettingsSnapshotAsync();
+            if (isBanNotice)
+            {
+                StatusText = BanNoticeMessage;
+            }
             _logService.LogInfo("Stored player session was rejected by API. Login is required.");
         }
         catch (Exception ex)
@@ -2407,6 +2436,7 @@ public partial class MainWindowViewModel : ViewModelBase
         catch (LauncherApiException apiException) when (
             apiException.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
         {
+            var isBanNotice = TryShowBanNotice(apiException);
             if (!string.IsNullOrWhiteSpace(PlayerLoggedInAs))
             {
                 RemoveStoredAccount(PlayerLoggedInAs);
@@ -2414,7 +2444,9 @@ public partial class MainWindowViewModel : ViewModelBase
 
             ClearAuthenticatedPlayerSession();
             await PersistSettingsSnapshotAsync();
-            return "Player session rejected by server (possibly banned). Login is required.";
+            return isBanNotice
+                ? BanNoticeMessage
+                : "Player session rejected by server (possibly banned). Login is required.";
         }
         catch (Exception ex)
         {
@@ -2458,6 +2490,7 @@ public partial class MainWindowViewModel : ViewModelBase
 
         IsPlayerLoggedIn = true;
         IsSettingsOpen = false;
+        ClearBanNotice();
         ResetTwoFactorState();
         PlayerPassword = string.Empty;
         PlayerLoggedInAs = normalizedUsername;
@@ -2686,7 +2719,10 @@ public partial class MainWindowViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            StatusText = BuildStatusErrorText(ex);
+            if (!TryShowBanNotice(ex))
+            {
+                StatusText = BuildStatusErrorText(ex);
+            }
             _logService.LogError(ex.ToString());
         }
         finally
@@ -3437,6 +3473,108 @@ public partial class MainWindowViewModel : ViewModelBase
         return F("status.twoFactorSetup", TwoFactorSetupSecret, TwoFactorSetupUri);
     }
 
+    private void ClearBanNotice()
+    {
+        IsBanNoticeVisible = false;
+        BanNoticeTitle = string.Empty;
+        BanNoticeMessage = string.Empty;
+    }
+
+    private bool TryShowBanNotice(Exception ex)
+    {
+        if (ex is not LauncherApiException apiException ||
+            !TryCreateBanNotice(apiException, out var title, out var message))
+        {
+            return false;
+        }
+
+        BanNoticeTitle = title;
+        BanNoticeMessage = message;
+        IsBanNoticeVisible = true;
+        AuthStatusText = message;
+        StatusText = message;
+        return true;
+    }
+
+    private bool TryCreateBanNotice(LauncherApiException apiException, out string title, out string message)
+    {
+        title = string.Empty;
+        message = string.Empty;
+
+        var errorCode = (apiException.ErrorCode ?? string.Empty).Trim().ToLowerInvariant();
+        var rawMessage = (apiException.Message ?? string.Empty).Trim();
+
+        if (errorCode == "hardware_ban" ||
+            rawMessage.StartsWith("Hardware banned", StringComparison.OrdinalIgnoreCase))
+        {
+            title = _languageCode == "en"
+                ? "HWID access blocked"
+                : "Вход с этого устройства заблокирован";
+            message = BuildBanNoticeMessage(
+                rawMessage,
+                "Hardware banned:",
+                _languageCode == "en"
+                    ? "This device is blocked from signing in."
+                    : "Это устройство заблокировано для входа.");
+            return true;
+        }
+
+        if (errorCode == "device_user_ban" ||
+            rawMessage.StartsWith("Device user banned", StringComparison.OrdinalIgnoreCase))
+        {
+            title = _languageCode == "en"
+                ? "Device account blocked"
+                : "Учётная запись устройства заблокирована";
+            message = BuildBanNoticeMessage(
+                rawMessage,
+                "Device user banned:",
+                _languageCode == "en"
+                    ? "This OS user is blocked from signing in."
+                    : "Для этой системной учётной записи вход заблокирован.");
+            return true;
+        }
+
+        if (errorCode == "account_ban" ||
+            rawMessage.StartsWith("Account is banned", StringComparison.OrdinalIgnoreCase))
+        {
+            title = _languageCode == "en"
+                ? "Account blocked"
+                : "Аккаунт заблокирован";
+            message = BuildBanNoticeMessage(
+                rawMessage,
+                "Account is banned:",
+                _languageCode == "en"
+                    ? "This account cannot sign in."
+                    : "Для этого аккаунта вход запрещён.");
+            return true;
+        }
+
+        return false;
+    }
+
+    private static string BuildBanNoticeMessage(string rawMessage, string prefix, string fallback)
+    {
+        if (!string.IsNullOrWhiteSpace(rawMessage) &&
+            rawMessage.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            var detail = rawMessage[prefix.Length..].Trim();
+            if (!string.IsNullOrWhiteSpace(detail))
+            {
+                return detail;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(rawMessage) &&
+            !string.Equals(rawMessage, prefix, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(rawMessage, prefix.TrimEnd(':'), StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(rawMessage, "Account is banned.", StringComparison.OrdinalIgnoreCase))
+        {
+            return rawMessage;
+        }
+
+        return fallback;
+    }
+
     private string BuildStatusErrorText(Exception ex)
     {
         if (ex is LauncherApiException apiException &&
@@ -3802,6 +3940,8 @@ public partial class MainWindowViewModel : ViewModelBase
         OnPropertyChanged(nameof(LoginButtonText));
         OnPropertyChanged(nameof(AddAccountButtonText));
         OnPropertyChanged(nameof(DeleteAccountButtonText));
+        OnPropertyChanged(nameof(BanNoticeEyebrowText));
+        OnPropertyChanged(nameof(BanNoticeDismissButtonText));
         OnPropertyChanged(nameof(LogoutButtonText));
         OnPropertyChanged(nameof(SwitchAccountButtonText));
         OnPropertyChanged(nameof(SavedAccountsLabelText));
