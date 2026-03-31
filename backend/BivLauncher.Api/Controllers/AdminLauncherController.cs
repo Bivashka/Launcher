@@ -28,6 +28,7 @@ public sealed class AdminLauncherController(
         string ArchiveName,
         string ArchivePath,
         string PublishDirectory,
+        string PrimaryExecutablePath,
         int ExitCode,
         string Stdout,
         string Stderr,
@@ -476,6 +477,7 @@ public sealed class AdminLauncherController(
                         ArchiveName: runtimeArchiveName,
                         ArchivePath: runtimeArchivePath,
                         PublishDirectory: publishDirectory,
+                        PrimaryExecutablePath: string.Empty,
                         ExitCode: exitCode,
                         Stdout: runtimeStdout,
                         Stderr: runtimeStderr,
@@ -509,6 +511,7 @@ public sealed class AdminLauncherController(
                         ArchiveName: runtimeArchiveName,
                         ArchivePath: runtimeArchivePath,
                         PublishDirectory: publishDirectory,
+                        PrimaryExecutablePath: string.Empty,
                         ExitCode: exitCode,
                         Stdout: runtimeStdout,
                         Stderr: runtimeStderr,
@@ -545,6 +548,7 @@ public sealed class AdminLauncherController(
                         ArchiveName: runtimeArchiveName,
                         ArchivePath: runtimeArchivePath,
                         PublishDirectory: publishDirectory,
+                        PrimaryExecutablePath: string.Empty,
                         ExitCode: exitCode,
                         Stdout: runtimeStdout,
                         Stderr: ex.Message,
@@ -568,6 +572,18 @@ public sealed class AdminLauncherController(
                     });
                 }
 
+                var primaryExecutablePath = string.Empty;
+                if (runtimeIdentifier.StartsWith("win-", StringComparison.OrdinalIgnoreCase))
+                {
+                    primaryExecutablePath = ResolvePublishedExecutablePath(publishDirectory, projectPath);
+                    if (ShouldReturnDirectExecutable(normalized, runtimeIdentifier))
+                    {
+                        primaryExecutablePath = RenamePublishedExecutable(
+                            primaryExecutablePath,
+                            BuildExecutableFileName(normalized, runtimeIdentifier));
+                    }
+                }
+
                 ZipFile.CreateFromDirectory(publishDirectory, runtimeArchivePath, CompressionLevel.Optimal, includeBaseDirectory: false);
                 var runtimeSizeBytes = new FileInfo(runtimeArchivePath).Length;
                 runtimeBuildResults.Add(new RuntimeBuildResult(
@@ -575,6 +591,7 @@ public sealed class AdminLauncherController(
                     ArchiveName: runtimeArchiveName,
                     ArchivePath: runtimeArchivePath,
                     PublishDirectory: publishDirectory,
+                    PrimaryExecutablePath: primaryExecutablePath,
                     ExitCode: exitCode,
                     Stdout: runtimeStdout,
                     Stderr: runtimeStderr,
@@ -584,7 +601,7 @@ public sealed class AdminLauncherController(
             if (runtimeBuildResults.Count == 1)
             {
                 var singleRuntimeResult = runtimeBuildResults[0];
-                var fileBytes = await System.IO.File.ReadAllBytesAsync(singleRuntimeResult.ArchivePath, cancellationToken);
+                var archiveBytes = await System.IO.File.ReadAllBytesAsync(singleRuntimeResult.ArchivePath, cancellationToken);
                 var autoPublishWarning = string.Empty;
 
                 if (normalized.AutoPublishUpdate)
@@ -594,14 +611,14 @@ public sealed class AdminLauncherController(
                         await AutoPublishLauncherUpdateAsync(
                             normalized,
                             singleRuntimeResult.ArchiveName,
-                            fileBytes,
+                            archiveBytes,
                             cancellationToken);
                     }
                     catch (Exception ex)
                     {
                         logger.LogWarning(
                             ex,
-                            "Launcher auto-publish failed for archive {ArchiveName}. Build ZIP will still be returned.",
+                            "Launcher auto-publish failed for archive {ArchiveName}. Build artifact will still be returned.",
                             singleRuntimeResult.ArchiveName);
                         autoPublishWarning = $"Launcher auto-publish warning: {ex.Message}";
                     }
@@ -617,11 +634,21 @@ public sealed class AdminLauncherController(
                     Response.Headers.Append("X-Launcher-Update-Publish-Warning", Truncate(autoPublishWarning, 300));
                 }
 
+                var responseFileName = singleRuntimeResult.ArchiveName;
+                var responseBytes = archiveBytes;
+                var responseContentType = "application/zip";
+                if (ShouldReturnDirectExecutable(normalized, singleRuntimeResult.RuntimeIdentifier))
+                {
+                    responseFileName = Path.GetFileName(singleRuntimeResult.PrimaryExecutablePath);
+                    responseBytes = await System.IO.File.ReadAllBytesAsync(singleRuntimeResult.PrimaryExecutablePath, cancellationToken);
+                    responseContentType = "application/octet-stream";
+                }
+
                 await WriteAuditAsync(
                     action: "launcher.build",
                     normalized,
-                    singleRuntimeResult.ArchiveName,
-                    fileBytes.LongLength,
+                    responseFileName,
+                    responseBytes.LongLength,
                     startedAt,
                     singleRuntimeResult.ExitCode,
                     singleRuntimeResult.Stdout,
@@ -629,7 +656,7 @@ public sealed class AdminLauncherController(
                     runtimeBuildResults,
                     cancellationToken);
 
-                return File(fileBytes, "application/zip", singleRuntimeResult.ArchiveName);
+                return File(responseBytes, responseContentType, responseFileName);
             }
 
             var bundleArchiveName = BuildBundleArchiveName(normalized);
@@ -801,6 +828,7 @@ public sealed class AdminLauncherController(
                 request.AutoPublishUpdate,
                 request.BundleJavaRuntime,
                 request.JavaRuntimeSourceUrl,
+                request.OutputName,
                 request.ReleaseNotes,
                 archiveName,
                 sizeBytes,
@@ -873,7 +901,8 @@ public sealed class AdminLauncherController(
             AutoPublishUpdate = request.AutoPublishUpdate,
             ReleaseNotes = (request.ReleaseNotes ?? string.Empty).Trim(),
             BundleJavaRuntime = request.BundleJavaRuntime,
-            JavaRuntimeSourceUrl = (request.JavaRuntimeSourceUrl ?? string.Empty).Trim()
+            JavaRuntimeSourceUrl = (request.JavaRuntimeSourceUrl ?? string.Empty).Trim(),
+            OutputName = NormalizeOutputName(request.OutputName)
         };
     }
 
@@ -1208,14 +1237,127 @@ public sealed class AdminLauncherController(
 
     private static string BuildArchiveName(LauncherBuildRequest request, string runtimeIdentifier)
     {
+        if (!string.IsNullOrWhiteSpace(request.OutputName))
+        {
+            return request.RuntimeIdentifiers.Count > 1
+                ? $"{request.OutputName}-{runtimeIdentifier}.zip"
+                : $"{request.OutputName}.zip";
+        }
+
         var version = string.IsNullOrWhiteSpace(request.Version) ? "dev" : request.Version;
         return $"launcher-{version}-{runtimeIdentifier}.zip";
     }
 
     private static string BuildBundleArchiveName(LauncherBuildRequest request)
     {
+        if (!string.IsNullOrWhiteSpace(request.OutputName))
+        {
+            return $"{request.OutputName}.zip";
+        }
+
         var version = string.IsNullOrWhiteSpace(request.Version) ? "dev" : request.Version;
         return $"launcher-{version}-multi.zip";
+    }
+
+    private static string BuildExecutableFileName(LauncherBuildRequest request, string runtimeIdentifier)
+    {
+        if (!string.IsNullOrWhiteSpace(request.OutputName))
+        {
+            return $"{request.OutputName}.exe";
+        }
+
+        return $"launcher-{runtimeIdentifier}.exe";
+    }
+
+    private static bool ShouldReturnDirectExecutable(LauncherBuildRequest request, string runtimeIdentifier)
+    {
+        return request.RuntimeIdentifiers.Count == 1 &&
+               request.PublishSingleFile &&
+               runtimeIdentifier.StartsWith("win-", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeOutputName(string? rawValue)
+    {
+        var trimmed = (rawValue ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(trimmed))
+        {
+            return string.Empty;
+        }
+
+        if (trimmed.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+        {
+            trimmed = trimmed[..^4].TrimEnd();
+        }
+
+        var invalidChars = Path.GetInvalidFileNameChars()
+            .Concat(['\\', '/', ':', '*', '?', '"', '<', '>', '|'])
+            .Distinct()
+            .ToArray();
+        var sanitized = new string(trimmed
+            .Select(ch => invalidChars.Contains(ch) ? '_' : ch)
+            .ToArray())
+            .Trim()
+            .Trim('.', ' ');
+
+        if (sanitized.Length > 96)
+        {
+            sanitized = sanitized[..96].TrimEnd('.', ' ');
+        }
+
+        var reservedWindowsNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "CON", "PRN", "AUX", "NUL",
+            "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+            "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"
+        };
+        if (reservedWindowsNames.Contains(sanitized))
+        {
+            sanitized = $"{sanitized}_";
+        }
+
+        return string.IsNullOrWhiteSpace(sanitized) ? string.Empty : sanitized;
+    }
+
+    private static string ResolvePublishedExecutablePath(string publishDirectory, string projectPath)
+    {
+        var executableName = $"{Path.GetFileNameWithoutExtension(projectPath)}.exe";
+        var expectedPath = Path.Combine(publishDirectory, executableName);
+        if (System.IO.File.Exists(expectedPath))
+        {
+            return expectedPath;
+        }
+
+        var candidates = Directory.EnumerateFiles(publishDirectory, "*.exe", SearchOption.TopDirectoryOnly).ToList();
+        if (candidates.Count == 1)
+        {
+            return candidates[0];
+        }
+
+        throw new InvalidOperationException($"Published launcher executable was not found in '{publishDirectory}'.");
+    }
+
+    private static string RenamePublishedExecutable(string executablePath, string targetFileName)
+    {
+        if (string.IsNullOrWhiteSpace(targetFileName))
+        {
+            return executablePath;
+        }
+
+        var targetDirectory = Path.GetDirectoryName(executablePath) ?? string.Empty;
+        var targetPath = Path.Combine(targetDirectory, targetFileName);
+        if (string.Equals(executablePath, targetPath, StringComparison.OrdinalIgnoreCase))
+        {
+            return executablePath;
+        }
+
+        if (System.IO.File.Exists(targetPath))
+        {
+            System.IO.File.Delete(targetPath);
+        }
+
+        System.IO.File.Move(executablePath, targetPath);
+        return targetPath;
     }
 
     private static void CreateRuntimeBundleArchive(string bundleArchivePath, IReadOnlyList<RuntimeBuildResult> runtimeBuildResults)

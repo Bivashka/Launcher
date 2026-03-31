@@ -12,4 +12,5 @@ public sealed class LauncherBuildRequest
     public string ReleaseNotes { get; set; } = string.Empty;
     public bool BundleJavaRuntime { get; set; } = false;
     public string JavaRuntimeSourceUrl { get; set; } = string.Empty;
+    public string OutputName { get; set; } = string.Empty;
 }

@@ -85,6 +85,7 @@ type LauncherBuildRequest = {
   version: string
   autoPublishUpdate: boolean
   releaseNotes: string
+  outputName: string
 }
 type CosmeticUploadResponse = { account: string; key: string; url: string }
 type DiscordRpcConfig = {
@@ -1495,6 +1496,7 @@ function App() {
   const [launcherBuildSelfContained, setLauncherBuildSelfContained] = useState(true)
   const [launcherBuildSingleFile, setLauncherBuildSingleFile] = useState(true)
   const [launcherBuildVersion, setLauncherBuildVersion] = useState('')
+  const [launcherBuildOutputName, setLauncherBuildOutputName] = useState('')
   const runtimeMetadataProfile = useMemo(() => {
     if (editingProfileId) {
       return profiles.find((profile) => profile.id === editingProfileId) ?? null
@@ -3992,6 +3994,7 @@ function App() {
     }
 
     const version = launcherBuildVersion.trim()
+    const outputName = launcherBuildOutputName.trim()
     if (version && !/^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$/.test(version)) {
       setError('Version must match pattern ^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$.')
       return
@@ -4023,6 +4026,7 @@ function App() {
         version,
         autoPublishUpdate: !isMultiRuntimeBuild,
         releaseNotes: '',
+        outputName,
       }
 
       const response = await fetch(`${apiBaseUrl}/api/admin/launcher/build`, {
@@ -4068,9 +4072,23 @@ function App() {
       }
 
       const fallbackVersion = version || 'dev'
-      const fallbackName = selectedRuntimeIdentifiers.length === 1
-        ? `launcher-${fallbackVersion}-${primaryRuntimeIdentifier}.zip`
-        : `launcher-${fallbackVersion}-multi.zip`
+      const fallbackName = (() => {
+        if (outputName) {
+          if (!isMultiRuntimeBuild && launcherBuildSingleFile && primaryRuntimeIdentifier.startsWith('win-')) {
+            return `${outputName}.exe`
+          }
+
+          return `${outputName}.zip`
+        }
+
+        if (selectedRuntimeIdentifiers.length === 1 && launcherBuildSingleFile && primaryRuntimeIdentifier.startsWith('win-')) {
+          return `launcher-${primaryRuntimeIdentifier}.exe`
+        }
+
+        return selectedRuntimeIdentifiers.length === 1
+          ? `launcher-${fallbackVersion}-${primaryRuntimeIdentifier}.zip`
+          : `launcher-${fallbackVersion}-multi.zip`
+      })()
       const fileName = extractDownloadFileName(response.headers.get('content-disposition')) || fallbackName
       const url = URL.createObjectURL(blob)
       const anchor = document.createElement('a')
@@ -5516,7 +5534,7 @@ function App() {
                 {activePage === 'build' && (
                 <div className="action-block">
                   <h4>Сборка лаунчера</h4>
-                  <small>Собирает `launcher/BivLauncher.Client` и сразу скачивает ZIP-артефакт.</small>
+                  <small>Single Windows + single-file builds are downloaded as `.exe`. Other build combinations are downloaded as `.zip`.</small>
                   <small>Project folder on player PC: {brandingSettings.launcherDirectoryName || 'BivLauncher'} (change in Settings -&gt; Branding).</small>
                   <div className="grid-inline">
                     <div>
@@ -5560,6 +5578,11 @@ function App() {
                     value={launcherBuildVersion}
                     onChange={(event) => setLauncherBuildVersion(event.target.value)}
                   />
+                  <input
+                    placeholder={`Launcher file name (optional, e.g. ${brandingSettings.productName || 'BivLauncher'})`}
+                    value={launcherBuildOutputName}
+                    onChange={(event) => setLauncherBuildOutputName(event.target.value)}
+                  />
                   <label className="checkbox">
                     <input
                       type="checkbox"
@@ -5576,6 +5599,10 @@ function App() {
                     />
                     Single-file publish
                   </label>
+                  <small>
+                    If you enter a file name, that same name is used for the downloaded launcher file.
+                  </small>
+                  <small>Use one stable launcher file name between releases if you want future auto-updates to replace the same `.exe` cleanly.</small>
                   <div className="button-row">
                     <button type="button" onClick={onBuildLauncherAndDownload} disabled={busy || !token}>
                       Собрать и скачать лаунчер
