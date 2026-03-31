@@ -24,6 +24,7 @@ public sealed class PublicAuthController(
     IHardwareFingerprintService hardwareFingerprintService,
     IJwtTokenService jwtTokenService,
     ITwoFactorService twoFactorService,
+    ISecuritySettingsProvider securitySettingsProvider,
     ILogger<PublicAuthController> logger) : ControllerBase
 {
     private const string LauncherVerifiedClaimType = "launcher_verified";
@@ -190,6 +191,166 @@ public sealed class PublicAuthController(
 
         account.SessionVersion++;
         account.UpdatedAtUtc = DateTime.UtcNow;
+        var activeGameSessions = await dbContext.ActiveGameSessions
+            .Where(x => x.AccountId == account.Id)
+            .ToListAsync(cancellationToken);
+        if (activeGameSessions.Count > 0)
+        {
+            dbContext.ActiveGameSessions.RemoveRange(activeGameSessions);
+        }
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return NoContent();
+    }
+
+    [Authorize]
+    [HttpPost("game-session/start")]
+    public async Task<ActionResult<PublicGameSessionStartResponse>> StartGameSession(
+        [FromBody] PublicGameSessionStartRequest request,
+        CancellationToken cancellationToken)
+    {
+        var (account, errorResult) = await ResolveAuthorizedAccountForCurrentRequestAsync(cancellationToken);
+        if (errorResult is not null)
+        {
+            return errorResult;
+        }
+
+        var securitySettings = securitySettingsProvider.GetCachedSettings();
+        var now = DateTime.UtcNow;
+        await PruneExpiredGameSessionsAsync(now, cancellationToken);
+
+        var normalizedHwidHash = NormalizeHwidHash(account!.HwidHash);
+        var normalizedDeviceUserName = NormalizeDeviceUserName(account.DeviceUserName);
+        var hasDeviceIdentity = !string.IsNullOrWhiteSpace(normalizedHwidHash) || !string.IsNullOrWhiteSpace(normalizedDeviceUserName);
+
+        var activeAccountsOnDevice = 1;
+        if (hasDeviceIdentity)
+        {
+            var deviceSessionsQuery = BuildDeviceSessionsQuery(normalizedHwidHash, normalizedDeviceUserName, now);
+            var otherActiveAccountsOnDevice = await deviceSessionsQuery
+                .Where(x => x.AccountId != account.Id)
+                .Select(x => x.AccountId)
+                .Distinct()
+                .CountAsync(cancellationToken);
+            activeAccountsOnDevice += otherActiveAccountsOnDevice;
+
+            if (securitySettings.MaxConcurrentGameAccountsPerDevice > 0 &&
+                activeAccountsOnDevice > securitySettings.MaxConcurrentGameAccountsPerDevice)
+            {
+                return Conflict(new
+                {
+                    error = $"Device account limit reached. Active accounts on this computer: {activeAccountsOnDevice - 1}. Allowed: {securitySettings.MaxConcurrentGameAccountsPerDevice}.",
+                    code = "device_account_limit"
+                });
+            }
+        }
+
+        var expiresAtUtc = now.AddSeconds(securitySettings.GameSessionExpirationSeconds);
+        var normalizedServerName = string.IsNullOrWhiteSpace(request.ServerName)
+            ? string.Empty
+            : request.ServerName.Trim();
+        var session = await dbContext.ActiveGameSessions.FirstOrDefaultAsync(
+            x => x.AccountId == account.Id,
+            cancellationToken);
+        if (session is null)
+        {
+            session = new ActiveGameSession
+            {
+                AccountId = account.Id,
+                Username = account.Username,
+                HwidHash = normalizedHwidHash,
+                DeviceUserName = normalizedDeviceUserName,
+                ServerId = request.ServerId,
+                ServerName = normalizedServerName,
+                StartedAtUtc = now,
+                LastHeartbeatAtUtc = now,
+                ExpiresAtUtc = expiresAtUtc
+            };
+            dbContext.ActiveGameSessions.Add(session);
+        }
+        else
+        {
+            session.Username = account.Username;
+            session.HwidHash = normalizedHwidHash;
+            session.DeviceUserName = normalizedDeviceUserName;
+            session.ServerId = request.ServerId;
+            session.ServerName = normalizedServerName;
+            session.LastHeartbeatAtUtc = now;
+            session.ExpiresAtUtc = expiresAtUtc;
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return Ok(new PublicGameSessionStartResponse(
+            SessionId: session.Id,
+            HeartbeatIntervalSeconds: securitySettings.GameSessionHeartbeatIntervalSeconds,
+            ExpiresAfterSeconds: securitySettings.GameSessionExpirationSeconds,
+            ActiveAccountsOnDevice: activeAccountsOnDevice,
+            Limit: securitySettings.MaxConcurrentGameAccountsPerDevice));
+    }
+
+    [Authorize]
+    [HttpPost("game-session/heartbeat")]
+    public async Task<IActionResult> HeartbeatGameSession(
+        [FromBody] PublicGameSessionHeartbeatRequest request,
+        CancellationToken cancellationToken)
+    {
+        var (account, errorResult) = await ResolveAuthorizedAccountForCurrentRequestAsync(cancellationToken);
+        if (errorResult is not null)
+        {
+            return errorResult;
+        }
+
+        if (request.SessionId == Guid.Empty)
+        {
+            return BadRequest(new { error = "SessionId is required." });
+        }
+
+        var now = DateTime.UtcNow;
+        await PruneExpiredGameSessionsAsync(now, cancellationToken);
+
+        var session = await dbContext.ActiveGameSessions.FirstOrDefaultAsync(
+            x => x.Id == request.SessionId && x.AccountId == account!.Id,
+            cancellationToken);
+        if (session is null)
+        {
+            return NotFound(new { error = "Game session not found." });
+        }
+
+        var securitySettings = securitySettingsProvider.GetCachedSettings();
+        session.LastHeartbeatAtUtc = now;
+        session.ExpiresAtUtc = now.AddSeconds(securitySettings.GameSessionExpirationSeconds);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return NoContent();
+    }
+
+    [Authorize]
+    [HttpPost("game-session/stop")]
+    public async Task<IActionResult> StopGameSession(
+        [FromBody] PublicGameSessionStopRequest request,
+        CancellationToken cancellationToken)
+    {
+        var (account, errorResult) = await ResolveAuthorizedAccountForCurrentRequestAsync(cancellationToken);
+        if (errorResult is not null)
+        {
+            return errorResult;
+        }
+
+        if (request.SessionId == Guid.Empty)
+        {
+            return BadRequest(new { error = "SessionId is required." });
+        }
+
+        var session = await dbContext.ActiveGameSessions.FirstOrDefaultAsync(
+            x => x.Id == request.SessionId && x.AccountId == account!.Id,
+            cancellationToken);
+        if (session is null)
+        {
+            return NoContent();
+        }
+
+        dbContext.ActiveGameSessions.Remove(session);
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return NoContent();
@@ -685,6 +846,124 @@ public sealed class PublicAuthController(
         return account;
     }
 
+    private async Task<(AuthAccount? Account, ActionResult? ErrorResult)> ResolveAuthorizedAccountForCurrentRequestAsync(
+        CancellationToken cancellationToken)
+    {
+        if (!IsLauncherClientAllowed(out var launcherError))
+        {
+            return (null, StatusCode(StatusCodes.Status403Forbidden, new { error = launcherError }));
+        }
+
+        var externalId = User.FindFirstValue("external_id")?.Trim() ?? string.Empty;
+        var username = User.Identity?.Name?.Trim() ?? string.Empty;
+        var tokenSessionVersionRaw = User.FindFirstValue("session_version");
+        if (string.IsNullOrWhiteSpace(externalId) && string.IsNullOrWhiteSpace(username))
+        {
+            return (null, Unauthorized(new { error = "Invalid player session token." }));
+        }
+
+        var account = await ResolveAccountForSessionMutationAsync(externalId, username, cancellationToken);
+        if (account is null)
+        {
+            return (null, Unauthorized(new { error = "Player session is not recognized." }));
+        }
+
+        if (!TryParseSessionVersion(tokenSessionVersionRaw, out var tokenSessionVersion))
+        {
+            return (null, Unauthorized(new { error = "Invalid player session token version." }));
+        }
+
+        if (tokenSessionVersion != account.SessionVersion)
+        {
+            return (null, Unauthorized(new { error = "Player session expired. Login is required." }));
+        }
+
+        if (IsLauncherProofEnforced() &&
+            (!HasLauncherVerifiedClaim(User) || !IsTokenLauncherProofAllowed(User)))
+        {
+            return (null, Unauthorized(new { error = "Player session expired. Login is required." }));
+        }
+
+        if (IsLauncherMinVersionEnforced() && !IsTokenLauncherVersionAllowed(User))
+        {
+            return (null, Unauthorized(new { error = "Player session expired. Login is required." }));
+        }
+
+        if (account.Banned)
+        {
+            return (null, BanResponse("account_ban", "Account is banned."));
+        }
+
+        var now = DateTime.UtcNow;
+        var activeAccountBan = await dbContext.HardwareBans
+            .AsNoTracking()
+            .Where(x =>
+                x.AccountId == account.Id &&
+                (x.ExpiresAtUtc == null || x.ExpiresAtUtc > now))
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .Select(x => x.Reason)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (activeAccountBan is not null)
+        {
+            return (null, BanResponse("account_ban", $"Account is banned: {activeAccountBan}"));
+        }
+
+        var normalizedDeviceUserName = NormalizeDeviceUserName(account.DeviceUserName);
+        if (!string.IsNullOrWhiteSpace(normalizedDeviceUserName))
+        {
+            var activeDeviceUserBan = await dbContext.HardwareBans
+                .AsNoTracking()
+                .Where(x =>
+                    x.DeviceUserName == normalizedDeviceUserName &&
+                    (x.ExpiresAtUtc == null || x.ExpiresAtUtc > now))
+                .OrderByDescending(x => x.CreatedAtUtc)
+                .Select(x => x.Reason)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (activeDeviceUserBan is not null)
+            {
+                return (null, BanResponse("device_user_ban", $"Device user banned: {activeDeviceUserBan}"));
+            }
+        }
+
+        return (account, null);
+    }
+
+    private IQueryable<ActiveGameSession> BuildDeviceSessionsQuery(
+        string normalizedHwidHash,
+        string normalizedDeviceUserName,
+        DateTime nowUtc)
+    {
+        var query = dbContext.ActiveGameSessions
+            .Where(x => x.ExpiresAtUtc > nowUtc)
+            .AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(normalizedHwidHash))
+        {
+            return query.Where(x => x.HwidHash == normalizedHwidHash);
+        }
+
+        if (!string.IsNullOrWhiteSpace(normalizedDeviceUserName))
+        {
+            return query.Where(x => x.DeviceUserName == normalizedDeviceUserName);
+        }
+
+        return query.Where(_ => false);
+    }
+
+    private async Task PruneExpiredGameSessionsAsync(DateTime nowUtc, CancellationToken cancellationToken)
+    {
+        var expiredSessions = await dbContext.ActiveGameSessions
+            .Where(x => x.ExpiresAtUtc <= nowUtc)
+            .ToListAsync(cancellationToken);
+        if (expiredSessions.Count == 0)
+        {
+            return;
+        }
+
+        dbContext.ActiveGameSessions.RemoveRange(expiredSessions);
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
     private static bool TryGetPendingTwoFactorChallenge(string key, out PendingTwoFactorChallenge challenge)
     {
         challenge = default!;
@@ -750,6 +1029,17 @@ public sealed class PublicAuthController(
         }
 
         var normalized = rawDeviceUserName.Trim().ToLowerInvariant();
+        return normalized.Length > 128 ? normalized[..128] : normalized;
+    }
+
+    private static string NormalizeHwidHash(string? rawHwidHash)
+    {
+        if (string.IsNullOrWhiteSpace(rawHwidHash))
+        {
+            return string.Empty;
+        }
+
+        var normalized = rawHwidHash.Trim().ToLowerInvariant();
         return normalized.Length > 128 ? normalized[..128] : normalized;
     }
 

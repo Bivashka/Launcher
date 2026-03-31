@@ -5,6 +5,9 @@ public sealed record NewsItemDto(
     string Title,
     string Body,
     string Source,
+    string ScopeType,
+    string ScopeId,
+    string ScopeName,
     bool Pinned,
     bool Enabled,
     DateTime CreatedAtUtc);

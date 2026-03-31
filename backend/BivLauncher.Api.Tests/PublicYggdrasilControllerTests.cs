@@ -39,6 +39,11 @@ public sealed class PublicYggdrasilControllerTests
         var controller = new PublicYggdrasilController(
             fixture.DbContext,
             BuildConfiguration(),
+            new StubDeliverySettingsProvider(new DeliverySettingsConfig(
+                PublicBaseUrl: "http://95.217.99.17:8080",
+                AssetBaseUrl: "http://95.217.99.17:8080",
+                FallbackApiBaseUrls: [],
+                UpdatedAtUtc: null)),
             Microsoft.Extensions.Options.Options.Create(options),
             NullLogger<PublicYggdrasilController>.Instance);
 
@@ -85,6 +90,11 @@ public sealed class PublicYggdrasilControllerTests
         var controller = new PublicYggdrasilController(
             fixture.DbContext,
             BuildConfiguration(),
+            new StubDeliverySettingsProvider(new DeliverySettingsConfig(
+                PublicBaseUrl: "http://95.217.99.17:8080",
+                AssetBaseUrl: "http://95.217.99.17:8080",
+                FallbackApiBaseUrls: [],
+                UpdatedAtUtc: null)),
             Microsoft.Extensions.Options.Options.Create(options),
             NullLogger<PublicYggdrasilController>.Instance);
 
@@ -124,6 +134,11 @@ public sealed class PublicYggdrasilControllerTests
         var controller = new PublicYggdrasilController(
             fixture.DbContext,
             BuildConfiguration(),
+            new StubDeliverySettingsProvider(new DeliverySettingsConfig(
+                PublicBaseUrl: "http://95.217.99.17:8080",
+                AssetBaseUrl: "http://95.217.99.17:8080",
+                FallbackApiBaseUrls: [],
+                UpdatedAtUtc: null)),
             Microsoft.Extensions.Options.Options.Create(options),
             NullLogger<PublicYggdrasilController>.Instance);
 
@@ -170,6 +185,11 @@ public sealed class PublicYggdrasilControllerTests
         var controller = new PublicYggdrasilController(
             fixture.DbContext,
             BuildConfiguration(),
+            new StubDeliverySettingsProvider(new DeliverySettingsConfig(
+                PublicBaseUrl: "http://95.217.99.17:8080",
+                AssetBaseUrl: "http://95.217.99.17:8080",
+                FallbackApiBaseUrls: [],
+                UpdatedAtUtc: null)),
             Microsoft.Extensions.Options.Options.Create(options),
             NullLogger<PublicYggdrasilController>.Instance);
 
@@ -209,6 +229,11 @@ public sealed class PublicYggdrasilControllerTests
         var controller = new PublicYggdrasilController(
             fixture.DbContext,
             BuildConfiguration(launcherProof: "proof-secret"),
+            new StubDeliverySettingsProvider(new DeliverySettingsConfig(
+                PublicBaseUrl: "http://95.217.99.17:8080",
+                AssetBaseUrl: "http://95.217.99.17:8080",
+                FallbackApiBaseUrls: [],
+                UpdatedAtUtc: null)),
             Microsoft.Extensions.Options.Options.Create(options),
             NullLogger<PublicYggdrasilController>.Instance);
 
@@ -248,6 +273,11 @@ public sealed class PublicYggdrasilControllerTests
         var controller = new PublicYggdrasilController(
             fixture.DbContext,
             BuildConfiguration(),
+            new StubDeliverySettingsProvider(new DeliverySettingsConfig(
+                PublicBaseUrl: "http://95.217.99.17:8080",
+                AssetBaseUrl: "http://95.217.99.17:8080",
+                FallbackApiBaseUrls: [],
+                UpdatedAtUtc: null)),
             Microsoft.Extensions.Options.Options.Create(options),
             NullLogger<PublicYggdrasilController>.Instance);
 
@@ -284,6 +314,11 @@ public sealed class PublicYggdrasilControllerTests
         var controller = new PublicYggdrasilController(
             fixture.DbContext,
             BuildConfiguration(),
+            new StubDeliverySettingsProvider(new DeliverySettingsConfig(
+                PublicBaseUrl: "http://95.217.99.17:8080",
+                AssetBaseUrl: "http://95.217.99.17:8080",
+                FallbackApiBaseUrls: [],
+                UpdatedAtUtc: null)),
             Microsoft.Extensions.Options.Options.Create(options),
             NullLogger<PublicYggdrasilController>.Instance);
 
@@ -313,6 +348,11 @@ public sealed class PublicYggdrasilControllerTests
         var controller = new PublicYggdrasilController(
             fixture.DbContext,
             BuildConfiguration(),
+            new StubDeliverySettingsProvider(new DeliverySettingsConfig(
+                PublicBaseUrl: "http://95.217.99.17:8080",
+                AssetBaseUrl: "http://95.217.99.17:8080",
+                FallbackApiBaseUrls: [],
+                UpdatedAtUtc: null)),
             Microsoft.Extensions.Options.Options.Create(options),
             NullLogger<PublicYggdrasilController>.Instance)
         {
@@ -341,6 +381,11 @@ public sealed class PublicYggdrasilControllerTests
         var controller = new PublicYggdrasilController(
             fixture.DbContext,
             BuildConfiguration(),
+            new StubDeliverySettingsProvider(new DeliverySettingsConfig(
+                PublicBaseUrl: "http://95.217.99.17:8080",
+                AssetBaseUrl: "http://95.217.99.17:8080",
+                FallbackApiBaseUrls: [],
+                UpdatedAtUtc: null)),
             Microsoft.Extensions.Options.Options.Create(BuildJwtOptions()),
             NullLogger<PublicYggdrasilController>.Instance)
         {

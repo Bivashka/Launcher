@@ -30,3 +30,28 @@ public sealed class PublicAuthSessionResponse
     public string ExternalId { get; set; } = string.Empty;
     public List<string> Roles { get; set; } = [];
 }
+
+public sealed class PublicGameSessionStartRequest
+{
+    public Guid? ServerId { get; set; }
+    public string ServerName { get; set; } = string.Empty;
+}
+
+public sealed class PublicGameSessionStartResponse
+{
+    public Guid SessionId { get; set; }
+    public int HeartbeatIntervalSeconds { get; set; } = 45;
+    public int ExpiresAfterSeconds { get; set; } = 150;
+    public int ActiveAccountsOnDevice { get; set; }
+    public int Limit { get; set; }
+}
+
+public sealed class PublicGameSessionHeartbeatRequest
+{
+    public Guid SessionId { get; set; }
+}
+
+public sealed class PublicGameSessionStopRequest
+{
+    public Guid SessionId { get; set; }
+}

@@ -229,6 +229,11 @@ public sealed class PublicControllerTests
                 new StubBuildPipelineService(),
                 new StubLauncherUpdateConfigProvider(),
                 new ConfigurationBuilder().AddInMemoryCollection().Build(),
+                new StubDeliverySettingsProvider(new DeliverySettingsConfig(
+                    PublicBaseUrl: "https://cdn.local",
+                    AssetBaseUrl: "https://cdn.local",
+                    FallbackApiBaseUrls: [],
+                    UpdatedAtUtc: null)),
                 new StubAssetUrlService(),
                 _objectStorage,
                 Microsoft.Extensions.Options.Options.Create(new InstallTelemetryOptions { Enabled = true }),

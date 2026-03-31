@@ -113,7 +113,8 @@ public sealed class SettingsService : ISettingsService
             InstallDirectory = GetDefaultInstallDirectory(),
             RamMb = 2048,
             JavaMode = "Auto",
-            Language = "ru"
+            Language = "ru",
+            KnownApiBaseUrls = []
         };
     }
 
@@ -285,6 +286,10 @@ public sealed class SettingsService : ISettingsService
             RamMb = source.RamMb,
             JavaMode = source.JavaMode,
             Language = source.Language,
+            KnownApiBaseUrls = [.. (source.KnownApiBaseUrls ?? [])
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Select(x => x.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)],
             ProfileRouteSelections = (source.ProfileRouteSelections ?? [])
                 .Select(selection => new ProfileRouteSelection
                 {

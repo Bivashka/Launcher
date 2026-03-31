@@ -1,6 +1,8 @@
 namespace BivLauncher.Api.Services;
 
-public sealed class AssetUrlService(IConfiguration configuration) : IAssetUrlService
+public sealed class AssetUrlService(
+    IConfiguration configuration,
+    IDeliverySettingsProvider deliverySettingsProvider) : IAssetUrlService
 {
     public string BuildPublicUrl(string key)
     {
@@ -9,9 +11,14 @@ public sealed class AssetUrlService(IConfiguration configuration) : IAssetUrlSer
             return string.Empty;
         }
 
-        var baseUrl = configuration["PUBLIC_BASE_URL"]
-            ?? configuration["PublicBaseUrl"]
-            ?? "http://localhost:8080";
+        var deliverySettings = deliverySettingsProvider.GetCachedSettings();
+        var baseUrl = !string.IsNullOrWhiteSpace(deliverySettings.AssetBaseUrl)
+            ? deliverySettings.AssetBaseUrl
+            : !string.IsNullOrWhiteSpace(deliverySettings.PublicBaseUrl)
+                ? deliverySettings.PublicBaseUrl
+                : configuration["PUBLIC_BASE_URL"]
+                    ?? configuration["PublicBaseUrl"]
+                    ?? "http://localhost:8080";
 
         var normalizedBaseUrl = baseUrl.TrimEnd('/');
         var escapedKey = string.Join('/',

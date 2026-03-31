@@ -23,6 +23,24 @@ public interface ILauncherApiService
         string accessToken,
         string tokenType = "Bearer",
         CancellationToken cancellationToken = default);
+    Task<PublicGameSessionStartResponse> StartGameSessionAsync(
+        string apiBaseUrl,
+        string accessToken,
+        string tokenType,
+        PublicGameSessionStartRequest request,
+        CancellationToken cancellationToken = default);
+    Task HeartbeatGameSessionAsync(
+        string apiBaseUrl,
+        string accessToken,
+        string tokenType,
+        Guid sessionId,
+        CancellationToken cancellationToken = default);
+    Task StopGameSessionAsync(
+        string apiBaseUrl,
+        string accessToken,
+        string tokenType,
+        Guid sessionId,
+        CancellationToken cancellationToken = default);
     Task<bool> HasSkinAsync(string apiBaseUrl, string username, CancellationToken cancellationToken = default);
     Task<bool> HasCapeAsync(string apiBaseUrl, string username, CancellationToken cancellationToken = default);
     Task<LauncherManifest> GetManifestAsync(

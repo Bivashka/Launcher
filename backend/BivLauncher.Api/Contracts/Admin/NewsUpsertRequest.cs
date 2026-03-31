@@ -17,6 +17,12 @@ public sealed class NewsUpsertRequest
     [MaxLength(256)]
     public string Source { get; set; } = "manual";
 
+    [MaxLength(16)]
+    public string ScopeType { get; set; } = "global";
+
+    [MaxLength(64)]
+    public string ScopeId { get; set; } = string.Empty;
+
     public bool Pinned { get; set; }
 
     public bool Enabled { get; set; } = true;

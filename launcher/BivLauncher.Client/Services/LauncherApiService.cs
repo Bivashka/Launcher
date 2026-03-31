@@ -130,6 +130,103 @@ public sealed class LauncherApiService : ILauncherApiService
         throw CreateApiException("Logout", response, body);
     }
 
+    public async Task<PublicGameSessionStartResponse> StartGameSessionAsync(
+        string apiBaseUrl,
+        string accessToken,
+        string tokenType,
+        PublicGameSessionStartRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var token = accessToken.Trim();
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            throw new InvalidOperationException("Session token is required.");
+        }
+
+        var uri = BuildUri(apiBaseUrl, "/api/public/auth/game-session/start");
+        using var response = await SendWithRetryAsync(
+            () => BuildAuthorizedJsonPostRequest(uri, token, tokenType, request),
+            cancellationToken);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw CreateApiException("Game session start", response, body);
+        }
+
+        var payload = JsonSerializer.Deserialize<PublicGameSessionStartResponse>(body, JsonOptions);
+        return payload ?? throw new InvalidOperationException("Game session start response is empty.");
+    }
+
+    public async Task HeartbeatGameSessionAsync(
+        string apiBaseUrl,
+        string accessToken,
+        string tokenType,
+        Guid sessionId,
+        CancellationToken cancellationToken = default)
+    {
+        if (sessionId == Guid.Empty)
+        {
+            return;
+        }
+
+        var token = accessToken.Trim();
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            throw new InvalidOperationException("Session token is required.");
+        }
+
+        var uri = BuildUri(apiBaseUrl, "/api/public/auth/game-session/heartbeat");
+        using var response = await SendWithRetryAsync(
+            () => BuildAuthorizedJsonPostRequest(
+                uri,
+                token,
+                tokenType,
+                new PublicGameSessionHeartbeatRequest { SessionId = sessionId }),
+            cancellationToken);
+        if (response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.NotFound)
+        {
+            return;
+        }
+
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        throw CreateApiException("Game session heartbeat", response, body);
+    }
+
+    public async Task StopGameSessionAsync(
+        string apiBaseUrl,
+        string accessToken,
+        string tokenType,
+        Guid sessionId,
+        CancellationToken cancellationToken = default)
+    {
+        if (sessionId == Guid.Empty)
+        {
+            return;
+        }
+
+        var token = accessToken.Trim();
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return;
+        }
+
+        var uri = BuildUri(apiBaseUrl, "/api/public/auth/game-session/stop");
+        using var response = await SendWithRetryAsync(
+            () => BuildAuthorizedJsonPostRequest(
+                uri,
+                token,
+                tokenType,
+                new PublicGameSessionStopRequest { SessionId = sessionId }),
+            cancellationToken);
+        if (response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.NotFound)
+        {
+            return;
+        }
+
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        throw CreateApiException("Game session stop", response, body);
+    }
+
     public Task<bool> HasSkinAsync(string apiBaseUrl, string username, CancellationToken cancellationToken = default)
     {
         return CheckResourceExistsAsync(apiBaseUrl, $"/api/public/skins/{Uri.EscapeDataString(username)}", cancellationToken);
@@ -275,6 +372,18 @@ public sealed class LauncherApiService : ILauncherApiService
         {
             Content = new StringContent(json, Encoding.UTF8, "application/json")
         };
+    }
+
+    private static HttpRequestMessage BuildAuthorizedJsonPostRequest<T>(
+        Uri uri,
+        string accessToken,
+        string tokenType,
+        T payload)
+    {
+        var request = BuildJsonPostRequest(uri, payload);
+        var normalizedType = string.IsNullOrWhiteSpace(tokenType) ? "Bearer" : tokenType.Trim();
+        request.Headers.Authorization = new AuthenticationHeaderValue(normalizedType, accessToken.Trim());
+        return request;
     }
 
     private static HttpRequestMessage BuildAuthorizedRequest(HttpMethod method, Uri uri, string accessToken, string tokenType)

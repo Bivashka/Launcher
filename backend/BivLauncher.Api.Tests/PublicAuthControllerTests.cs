@@ -245,6 +245,7 @@ public sealed class PublicAuthControllerTests
             new StubHardwareFingerprintService(),
             new JwtTokenService(Microsoft.Extensions.Options.Options.Create(BuildJwtOptions())),
             new StubTwoFactorService(),
+            new StubSecuritySettingsProvider(),
             NullLogger<PublicAuthController>.Instance)
         {
             ControllerContext = new ControllerContext

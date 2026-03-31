@@ -29,17 +29,10 @@ public sealed class AdminNewsController(
         var items = await query
             .OrderByDescending(x => x.Pinned)
             .ThenByDescending(x => x.CreatedAtUtc)
-            .Select(x => new NewsItemDto(
-                x.Id,
-                x.Title,
-                x.Body,
-                x.Source,
-                x.Pinned,
-                x.Enabled,
-                x.CreatedAtUtc))
             .ToListAsync(cancellationToken);
 
-        return Ok(items);
+        var scopeNames = await ResolveScopeNamesAsync(cancellationToken);
+        return Ok(items.Select(item => Map(item, scopeNames)).ToList());
     }
 
     [HttpGet("{id:guid}")]
@@ -48,17 +41,15 @@ public sealed class AdminNewsController(
         var item = await dbContext.NewsItems
             .AsNoTracking()
             .Where(x => x.Id == id)
-            .Select(x => new NewsItemDto(
-                x.Id,
-                x.Title,
-                x.Body,
-                x.Source,
-                x.Pinned,
-                x.Enabled,
-                x.CreatedAtUtc))
             .FirstOrDefaultAsync(cancellationToken);
 
-        return item is null ? NotFound() : Ok(item);
+        if (item is null)
+        {
+            return NotFound();
+        }
+
+        var scopeNames = await ResolveScopeNamesAsync(cancellationToken);
+        return Ok(Map(item, scopeNames));
     }
 
     [HttpPost]
@@ -71,11 +62,19 @@ public sealed class AdminNewsController(
             return BadRequest(new { error = "Title and body are required." });
         }
 
+        var normalizedScope = await NormalizeScopeAsync(request.ScopeType, request.ScopeId, cancellationToken);
+        if (normalizedScope is null)
+        {
+            return BadRequest(new { error = "Invalid news scope." });
+        }
+
         var item = new NewsItem
         {
             Title = title,
             Body = body,
             Source = NormalizeSource(request.Source),
+            ScopeType = normalizedScope.Value.ScopeType,
+            ScopeId = normalizedScope.Value.ScopeId,
             Pinned = request.Pinned,
             Enabled = request.Enabled,
             CreatedAtUtc = DateTime.UtcNow
@@ -93,12 +92,15 @@ public sealed class AdminNewsController(
             details: new
             {
                 item.Source,
+                item.ScopeType,
+                item.ScopeId,
                 item.Pinned,
                 item.Enabled
             },
             cancellationToken: cancellationToken);
 
-        return CreatedAtAction(nameof(GetById), new { id = item.Id }, Map(item));
+        var scopeNames = await ResolveScopeNamesAsync(cancellationToken);
+        return CreatedAtAction(nameof(GetById), new { id = item.Id }, Map(item, scopeNames));
     }
 
     [HttpPut("{id:guid}")]
@@ -117,9 +119,17 @@ public sealed class AdminNewsController(
             return BadRequest(new { error = "Title and body are required." });
         }
 
+        var normalizedScope = await NormalizeScopeAsync(request.ScopeType, request.ScopeId, cancellationToken);
+        if (normalizedScope is null)
+        {
+            return BadRequest(new { error = "Invalid news scope." });
+        }
+
         item.Title = title;
         item.Body = body;
         item.Source = NormalizeSource(request.Source);
+        item.ScopeType = normalizedScope.Value.ScopeType;
+        item.ScopeId = normalizedScope.Value.ScopeId;
         item.Pinned = request.Pinned;
         item.Enabled = request.Enabled;
 
@@ -134,12 +144,15 @@ public sealed class AdminNewsController(
             details: new
             {
                 item.Source,
+                item.ScopeType,
+                item.ScopeId,
                 item.Pinned,
                 item.Enabled
             },
             cancellationToken: cancellationToken);
 
-        return Ok(Map(item));
+        var scopeNames = await ResolveScopeNamesAsync(cancellationToken);
+        return Ok(Map(item, scopeNames));
     }
 
     [HttpDelete("{id:guid}")]
@@ -175,13 +188,95 @@ public sealed class AdminNewsController(
         return string.IsNullOrWhiteSpace(source) ? "manual" : source.Trim();
     }
 
-    private static NewsItemDto Map(NewsItem item)
+    private async Task<Dictionary<string, string>> ResolveScopeNamesAsync(CancellationToken cancellationToken)
     {
+        var profiles = await dbContext.Profiles
+            .AsNoTracking()
+            .Select(x => new { x.Id, x.Name })
+            .ToListAsync(cancellationToken);
+        var servers = await dbContext.Servers
+            .AsNoTracking()
+            .Select(x => new { x.Id, x.Name })
+            .ToListAsync(cancellationToken);
+
+        var scopeNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var profile in profiles)
+        {
+            scopeNames[$"profile:{profile.Id}"] = profile.Name;
+        }
+
+        foreach (var server in servers)
+        {
+            scopeNames[$"server:{server.Id}"] = server.Name;
+        }
+
+        return scopeNames;
+    }
+
+    private async Task<(string ScopeType, string ScopeId)?> NormalizeScopeAsync(
+        string? rawScopeType,
+        string? rawScopeId,
+        CancellationToken cancellationToken)
+    {
+        var scopeType = NormalizeScopeType(rawScopeType);
+        var scopeId = (rawScopeId ?? string.Empty).Trim();
+
+        if (scopeType == "global")
+        {
+            return (scopeType, string.Empty);
+        }
+
+        if (!Guid.TryParse(scopeId, out var parsedScopeId))
+        {
+            return null;
+        }
+
+        var exists = scopeType == "profile"
+            ? await dbContext.Profiles.AnyAsync(x => x.Id == parsedScopeId, cancellationToken)
+            : await dbContext.Servers.AnyAsync(x => x.Id == parsedScopeId, cancellationToken);
+        if (!exists)
+        {
+            return null;
+        }
+
+        return (scopeType, parsedScopeId.ToString());
+    }
+
+    private static string NormalizeScopeType(string? rawScopeType)
+    {
+        var normalized = (rawScopeType ?? string.Empty).Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "profile" => "profile",
+            "server" => "server",
+            _ => "global"
+        };
+    }
+
+    private static NewsItemDto Map(NewsItem item, IReadOnlyDictionary<string, string> scopeNames)
+    {
+        var scopeType = NormalizeScopeType(item.ScopeType);
+        var scopeId = (item.ScopeId ?? string.Empty).Trim();
+        var scopeKey = string.IsNullOrWhiteSpace(scopeId)
+            ? scopeType
+            : $"{scopeType}:{scopeId}";
+        var scopeName = scopeType switch
+        {
+            "profile" when scopeNames.TryGetValue(scopeKey, out var profileName) => profileName,
+            "server" when scopeNames.TryGetValue(scopeKey, out var serverName) => serverName,
+            "profile" => "Profile",
+            "server" => "Server",
+            _ => "Global"
+        };
+
         return new NewsItemDto(
             item.Id,
             item.Title,
             item.Body,
             item.Source,
+            scopeType,
+            scopeId,
+            scopeName,
             item.Pinned,
             item.Enabled,
             item.CreatedAtUtc);

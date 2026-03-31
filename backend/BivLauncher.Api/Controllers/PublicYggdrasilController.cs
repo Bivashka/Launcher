@@ -2,6 +2,7 @@ using BivLauncher.Api.Data;
 using BivLauncher.Api.Data.Entities;
 using BivLauncher.Api.Infrastructure;
 using BivLauncher.Api.Options;
+using BivLauncher.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
@@ -21,6 +22,7 @@ namespace BivLauncher.Api.Controllers;
 public sealed class PublicYggdrasilController(
     AppDbContext dbContext,
     IConfiguration configuration,
+    IDeliverySettingsProvider deliverySettingsProvider,
     IOptions<JwtOptions> jwtOptionsAccessor,
     ILogger<PublicYggdrasilController> logger) : ControllerBase
 {
@@ -48,7 +50,7 @@ public sealed class PublicYggdrasilController(
     {
         try
         {
-            var publicBaseUrl = ResolvePublicBaseUrl(configuration, Request);
+            var publicBaseUrl = ResolvePublicBaseUrl(Request);
             var hostName = ResolveHostName(publicBaseUrl, Request.Host.Host);
             var signaturePublicKey = (configuration["YGGDRASIL_SIGNATURE_PUBLIC_KEY"] ?? string.Empty).Trim();
             var apiLocation = BuildApiLocation(publicBaseUrl);
@@ -781,9 +783,12 @@ public sealed class PublicYggdrasilController(
         };
     }
 
-    private static string ResolvePublicBaseUrl(IConfiguration configuration, HttpRequest request)
+    private string ResolvePublicBaseUrl(HttpRequest request)
     {
-        var configuredUrl = (configuration["PUBLIC_BASE_URL"] ?? configuration["PublicBaseUrl"] ?? string.Empty).Trim();
+        var deliverySettings = deliverySettingsProvider.GetCachedSettings();
+        var configuredUrl = !string.IsNullOrWhiteSpace(deliverySettings.PublicBaseUrl)
+            ? deliverySettings.PublicBaseUrl
+            : (configuration["PUBLIC_BASE_URL"] ?? configuration["PublicBaseUrl"] ?? string.Empty).Trim();
         if (!string.IsNullOrWhiteSpace(configuredUrl))
         {
             return configuredUrl.TrimEnd('/');

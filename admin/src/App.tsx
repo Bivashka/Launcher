@@ -133,6 +133,40 @@ type TwoFactorSettings = {
   updatedAtUtc?: string | null
 }
 
+type SecuritySettings = {
+  maxConcurrentGameAccountsPerDevice: number
+  gameSessionHeartbeatIntervalSeconds: number
+  gameSessionExpirationSeconds: number
+  updatedAtUtc?: string | null
+}
+
+type ActiveGameSession = {
+  id: string
+  accountId: string
+  username: string
+  hwidHash: string
+  deviceUserName: string
+  serverId?: string | null
+  serverName: string
+  startedAtUtc: string
+  lastHeartbeatAtUtc: string
+  expiresAtUtc: string
+  active: boolean
+}
+
+type DeliverySettings = {
+  publicBaseUrl: string
+  assetBaseUrl: string
+  fallbackApiBaseUrls: string[]
+  updatedAtUtc?: string | null
+}
+
+type AdminPasswordForm = {
+  currentPassword: string
+  newPassword: string
+  confirmPassword: string
+}
+
 type TwoFactorAccount = {
   id: string
   username: string
@@ -256,6 +290,9 @@ type NewsItem = {
   title: string
   body: string
   source: string
+  scopeType: 'global' | 'profile' | 'server'
+  scopeId: string
+  scopeName: string
   pinned: boolean
   enabled: boolean
   createdAtUtc: string
@@ -572,7 +609,7 @@ function loadWizardPreflightHistory(): WizardPreflightRun[] {
     return []
   }
 }
-type NewsForm = Omit<NewsItem, 'id' | 'createdAtUtc'>
+type NewsForm = Omit<NewsItem, 'id' | 'createdAtUtc' | 'scopeName'>
 type HwidBanForm = {
   hwidHash: string
   reason: string
@@ -664,6 +701,8 @@ const defaultNewsForm: NewsForm = {
   title: '',
   body: '',
   source: 'manual',
+  scopeType: 'global',
+  scopeId: '',
   pinned: false,
   enabled: true,
 }
@@ -732,6 +771,26 @@ const defaultAuthProviderSettings: AuthProviderSettings = {
 const defaultTwoFactorSettings: TwoFactorSettings = {
   enabled: false,
   updatedAtUtc: null,
+}
+
+const defaultSecuritySettings: SecuritySettings = {
+  maxConcurrentGameAccountsPerDevice: 1,
+  gameSessionHeartbeatIntervalSeconds: 45,
+  gameSessionExpirationSeconds: 150,
+  updatedAtUtc: null,
+}
+
+const defaultDeliverySettings: DeliverySettings = {
+  publicBaseUrl: '',
+  assetBaseUrl: '',
+  fallbackApiBaseUrls: [],
+  updatedAtUtc: null,
+}
+
+const defaultAdminPasswordForm: AdminPasswordForm = {
+  currentPassword: '',
+  newPassword: '',
+  confirmPassword: '',
 }
 
 const defaultBrandingSettings: BrandingSettings = {
@@ -1224,6 +1283,17 @@ function toLocalDateTimeInputValue(value: Date): string {
   return `${year}-${month}-${day}T${hours}:${minutes}`
 }
 
+function normalizeMultilineList(value: string): string[] {
+  return value
+    .split(/\r?\n|;|,/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function toMultilineList(value: string[] | null | undefined): string {
+  return (value ?? []).map((item) => item.trim()).filter(Boolean).join('\n')
+}
+
 function extractDownloadFileName(contentDisposition: string | null): string | null {
   if (!contentDisposition) {
     return null
@@ -1448,6 +1518,11 @@ function App() {
   const [twoFactorSearch, setTwoFactorSearch] = useState('')
   const [twoFactorRequiredOnly, setTwoFactorRequiredOnly] = useState(false)
   const [twoFactorLimit, setTwoFactorLimit] = useState(100)
+  const [securitySettings, setSecuritySettings] = useState<SecuritySettings>(defaultSecuritySettings)
+  const [activeGameSessions, setActiveGameSessions] = useState<ActiveGameSession[]>([])
+  const [adminPasswordForm, setAdminPasswordForm] = useState<AdminPasswordForm>(defaultAdminPasswordForm)
+  const [deliverySettings, setDeliverySettings] = useState<DeliverySettings>(defaultDeliverySettings)
+  const [deliveryFallbackApiBaseUrlsText, setDeliveryFallbackApiBaseUrlsText] = useState('')
   const [brandingSettings, setBrandingSettings] = useState<BrandingSettings>(defaultBrandingSettings)
   const [developerSupportInfo, setDeveloperSupportInfo] = useState<DeveloperSupportInfo>(defaultDeveloperSupportInfo)
   const [installTelemetrySettings, setInstallTelemetrySettings] = useState<InstallTelemetrySettings>(defaultInstallTelemetrySettings)
@@ -1659,6 +1734,10 @@ function App() {
   const wizardHasSlugConflict = useMemo(
     () => profiles.some((profile) => profile.slug.toLowerCase() === wizardNormalizedSlug),
     [profiles, wizardNormalizedSlug],
+  )
+  const profileNameById = useMemo<Record<string, string>>(
+    () => Object.fromEntries(profiles.map((profile) => [profile.id, profile.name])),
+    [profiles],
   )
 
   useEffect(() => {
@@ -2056,7 +2135,7 @@ function App() {
         }
       }
 
-      const [profileData, serverData, newsData, newsSourcesData, newsSyncData, newsRetentionData, runtimeRetentionData, bansData, crashData, docsData, authProviderData, discordRpcSettingsData, twoFactorData, twoFactorAccountsData, brandingData, developerSupportData, installTelemetrySettingsData, projectInstallStatsData, s3Data, serverLauncherJarData] = await Promise.all([
+      const [profileData, serverData, newsData, newsSourcesData, newsSyncData, newsRetentionData, runtimeRetentionData, bansData, crashData, docsData, authProviderData, discordRpcSettingsData, twoFactorData, twoFactorAccountsData, securitySettingsData, activeGameSessionsData, deliverySettingsData, brandingData, developerSupportData, installTelemetrySettingsData, projectInstallStatsData, s3Data, serverLauncherJarData] = await Promise.all([
         fetch(`${apiBaseUrl}/api/admin/profiles`, {
           headers: { Authorization: `Bearer ${activeToken}` },
         }),
@@ -2097,6 +2176,15 @@ function App() {
           headers: { Authorization: `Bearer ${activeToken}` },
         }),
         fetch(`${apiBaseUrl}/api/admin/settings/two-factor/accounts?limit=100`, {
+          headers: { Authorization: `Bearer ${activeToken}` },
+        }),
+        fetch(`${apiBaseUrl}/api/admin/settings/security`, {
+          headers: { Authorization: `Bearer ${activeToken}` },
+        }),
+        fetch(`${apiBaseUrl}/api/admin/settings/security/sessions`, {
+          headers: { Authorization: `Bearer ${activeToken}` },
+        }),
+        fetch(`${apiBaseUrl}/api/admin/settings/delivery`, {
           headers: { Authorization: `Bearer ${activeToken}` },
         }),
         fetch(`${apiBaseUrl}/api/admin/settings/branding`, {
@@ -2141,6 +2229,9 @@ function App() {
         { name: 'discord-rpc', response: discordRpcSettingsData },
         { name: 'two-factor', response: twoFactorData },
         { name: 'two-factor/accounts', response: twoFactorAccountsData },
+        { name: 'settings/security', response: securitySettingsData },
+        { name: 'settings/security/sessions', response: activeGameSessionsData },
+        { name: 'settings/delivery', response: deliverySettingsData },
         { name: 'branding', response: brandingData },
         { name: 'support/developer', response: developerSupportData },
         { name: 'install-telemetry/settings', response: installTelemetrySettingsData },
@@ -2173,6 +2264,9 @@ function App() {
       const loadedDiscordRpcSettings = await readJsonOrDefault<DiscordRpcSettings>(discordRpcSettingsData, defaultDiscordRpcSettings)
       const loadedTwoFactorSettings = await readJsonOrDefault<TwoFactorSettings>(twoFactorData, defaultTwoFactorSettings)
       const loadedTwoFactorAccounts = await readJsonOrDefault<TwoFactorAccount[]>(twoFactorAccountsData, [])
+      const loadedSecuritySettings = await readJsonOrDefault<SecuritySettings>(securitySettingsData, defaultSecuritySettings)
+      const loadedActiveGameSessions = await readJsonOrDefault<ActiveGameSession[]>(activeGameSessionsData, [])
+      const loadedDeliverySettings = await readJsonOrDefault<DeliverySettings>(deliverySettingsData, defaultDeliverySettings)
       const loadedBranding = await readJsonOrDefault<BrandingSettings>(brandingData, defaultBrandingSettings)
       const loadedDeveloperSupport = await readJsonOrDefault<DeveloperSupportInfo>(developerSupportData, defaultDeveloperSupportInfo)
       const loadedInstallTelemetrySettings = await readJsonOrDefault<InstallTelemetrySettings>(installTelemetrySettingsData, defaultInstallTelemetrySettings)
@@ -2206,6 +2300,17 @@ function App() {
       setDiscordRpcSettings(loadedDiscordRpcSettings)
       setTwoFactorSettings(loadedTwoFactorSettings)
       setTwoFactorAccounts(loadedTwoFactorAccounts)
+      setSecuritySettings({
+        ...defaultSecuritySettings,
+        ...loadedSecuritySettings,
+      })
+      setActiveGameSessions(loadedActiveGameSessions)
+      setDeliverySettings({
+        ...defaultDeliverySettings,
+        ...loadedDeliverySettings,
+        fallbackApiBaseUrls: loadedDeliverySettings.fallbackApiBaseUrls ?? [],
+      })
+      setDeliveryFallbackApiBaseUrlsText(toMultilineList(loadedDeliverySettings.fallbackApiBaseUrls))
       setBrandingSettings({
         ...defaultBrandingSettings,
         ...loadedBranding,
@@ -2460,6 +2565,11 @@ function App() {
 
   async function onNewsSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (newsForm.scopeType !== 'global' && !newsForm.scopeId.trim()) {
+      setError('Select a profile or server scope for this news item.')
+      return
+    }
+
     setBusy(true)
     setError('')
     setNotice('')
@@ -2468,7 +2578,11 @@ function App() {
       const path = editingNewsId ? `/api/admin/news/${editingNewsId}` : '/api/admin/news'
       await requestWithAuth<NewsItem>(path, {
         method,
-        body: JSON.stringify(newsForm),
+        body: JSON.stringify({
+          ...newsForm,
+          source: newsForm.source.trim() || 'manual',
+          scopeId: newsForm.scopeType === 'global' ? '' : newsForm.scopeId.trim(),
+        }),
       })
 
       setEditingNewsId(null)
@@ -2488,6 +2602,8 @@ function App() {
       title: item.title,
       body: item.body,
       source: item.source,
+      scopeType: item.scopeType,
+      scopeId: item.scopeId,
       pinned: item.pinned,
       enabled: item.enabled,
     })
@@ -3666,6 +3782,109 @@ function App() {
       setNotice(`2FA enrollment key generated for ${result.account.username}. Secret: ${result.secret}`)
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : '2FA enroll failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function onSaveSecuritySettings() {
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      const saved = await requestWithAuth<SecuritySettings>('/api/admin/settings/security', {
+        method: 'PUT',
+        body: JSON.stringify({
+          maxConcurrentGameAccountsPerDevice: Math.max(1, Math.min(10, Number(securitySettings.maxConcurrentGameAccountsPerDevice) || 1)),
+        }),
+      })
+      setSecuritySettings(saved)
+      setNotice('Security settings saved.')
+      if (token) {
+        await loadAdminData(token)
+      }
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : 'Security settings save failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function onTerminateGameSession(sessionId: string) {
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      await requestWithAuth<void>(`/api/admin/settings/security/sessions/${sessionId}`, {
+        method: 'DELETE',
+      })
+      setActiveGameSessions((prev) => prev.filter((item) => item.id !== sessionId))
+      setNotice('Game session terminated.')
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : 'Unable to terminate game session')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function onChangeAdminPassword() {
+    const currentPassword = adminPasswordForm.currentPassword.trim()
+    const newPassword = adminPasswordForm.newPassword.trim()
+    const confirmPassword = adminPasswordForm.confirmPassword.trim()
+
+    if (!currentPassword || !newPassword) {
+      setError('Current and new password are required.')
+      return
+    }
+
+    if (newPassword.length < 6) {
+      setError('New password must be at least 6 characters.')
+      return
+    }
+
+    if (newPassword !== confirmPassword) {
+      setError('New password confirmation does not match.')
+      return
+    }
+
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      await requestWithAuth<{ success: boolean }>('/api/admin/change-password', {
+        method: 'POST',
+        body: JSON.stringify({
+          currentPassword,
+          newPassword,
+        }),
+      })
+      setAdminPasswordForm(defaultAdminPasswordForm)
+      setNotice('Admin password changed.')
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : 'Admin password change failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function onSaveDeliverySettings() {
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      const saved = await requestWithAuth<DeliverySettings>('/api/admin/settings/delivery', {
+        method: 'PUT',
+        body: JSON.stringify({
+          publicBaseUrl: deliverySettings.publicBaseUrl.trim(),
+          assetBaseUrl: deliverySettings.assetBaseUrl.trim(),
+          fallbackApiBaseUrls: normalizeMultilineList(deliveryFallbackApiBaseUrlsText),
+        }),
+      })
+      setDeliverySettings(saved)
+      setDeliveryFallbackApiBaseUrlsText(toMultilineList(saved.fallbackApiBaseUrls))
+      setNotice('Delivery settings saved.')
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : 'Delivery settings save failed')
     } finally {
       setBusy(false)
     }
@@ -4923,6 +5142,11 @@ function App() {
     setTwoFactorSearch('')
     setTwoFactorRequiredOnly(false)
     setTwoFactorLimit(100)
+    setSecuritySettings(defaultSecuritySettings)
+    setActiveGameSessions([])
+    setAdminPasswordForm(defaultAdminPasswordForm)
+    setDeliverySettings(defaultDeliverySettings)
+    setDeliveryFallbackApiBaseUrlsText('')
     setBrandingSettings(defaultBrandingSettings)
     setS3Settings(defaultS3Settings)
     setStorageTestResult(null)
@@ -6194,6 +6418,53 @@ function App() {
                   value={newsForm.source}
                   onChange={(event) => setNewsForm((prev) => ({ ...prev, source: event.target.value }))}
                 />
+                <div className="grid-inline">
+                  <select
+                    value={newsForm.scopeType}
+                    onChange={(event) =>
+                      setNewsForm((prev) => ({
+                        ...prev,
+                        scopeType:
+                          event.target.value === 'profile'
+                            ? 'profile'
+                            : event.target.value === 'server'
+                              ? 'server'
+                              : 'global',
+                        scopeId: '',
+                      }))
+                    }
+                  >
+                    <option value="global">Scope: all branches</option>
+                    <option value="profile">Scope: profile</option>
+                    <option value="server">Scope: server</option>
+                  </select>
+                  {newsForm.scopeType === 'profile' && (
+                    <select
+                      value={newsForm.scopeId}
+                      onChange={(event) => setNewsForm((prev) => ({ ...prev, scopeId: event.target.value }))}
+                    >
+                      <option value="">Select profile</option>
+                      {profiles.map((profile) => (
+                        <option key={profile.id} value={profile.id}>
+                          {profile.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  {newsForm.scopeType === 'server' && (
+                    <select
+                      value={newsForm.scopeId}
+                      onChange={(event) => setNewsForm((prev) => ({ ...prev, scopeId: event.target.value }))}
+                    >
+                      <option value="">Select server</option>
+                      {servers.map((server) => (
+                        <option key={server.id} value={server.id}>
+                          {(profileNameById[server.profileId] || 'Profile')} / {server.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
                 <label className="checkbox">
                   <input
                     type="checkbox"
@@ -6227,7 +6498,7 @@ function App() {
                         {item.title}
                         <small>{new Date(item.createdAtUtc).toLocaleString()}</small>
                         <small>
-                          {item.source} | pinned: {String(item.pinned)} | enabled: {String(item.enabled)}
+                          {item.source} | {item.scopeType}{item.scopeName ? `: ${item.scopeName}` : ''} | pinned: {String(item.pinned)} | enabled: {String(item.enabled)}
                         </small>
                         <small>{item.body.slice(0, 120)}{item.body.length > 120 ? '...' : ''}</small>
                       </span>
@@ -6725,6 +6996,126 @@ function App() {
                       <span className="list-text">
                         No accounts
                         <small>Accounts appear after player login.</small>
+                      </span>
+                    </li>
+                  )}
+                </ul>
+              </section>
+            </div>
+            )}
+
+            {activePage === 'security' && (
+            <div className="grid-2">
+              <section className="form form-small form-actions">
+                <h3>Launcher access policy</h3>
+                <div className="action-block">
+                  <h4>Accounts per computer</h4>
+                  <small className="muted">
+                    Limits simultaneous game sessions from one device. Enforcement happens on launch/session start, not by counting open launcher windows.
+                  </small>
+                  <input
+                    type="number"
+                    min={1}
+                    max={10}
+                    placeholder="Max accounts per device"
+                    value={securitySettings.maxConcurrentGameAccountsPerDevice}
+                    onChange={(event) =>
+                      setSecuritySettings((prev) => ({
+                        ...prev,
+                        maxConcurrentGameAccountsPerDevice: Math.min(10, Math.max(1, Number(event.target.value) || 1)),
+                      }))
+                    }
+                  />
+                  <button type="button" onClick={onSaveSecuritySettings} disabled={busy || !token}>
+                    Save device limit
+                  </button>
+                  <small className="muted">
+                    Heartbeat: {securitySettings.gameSessionHeartbeatIntervalSeconds}s | expiry: {securitySettings.gameSessionExpirationSeconds}s
+                  </small>
+                </div>
+
+                <div className="action-block">
+                  <h4>Admin password</h4>
+                  <input
+                    type="password"
+                    placeholder="Current password"
+                    value={adminPasswordForm.currentPassword}
+                    onChange={(event) =>
+                      setAdminPasswordForm((prev) => ({
+                        ...prev,
+                        currentPassword: event.target.value,
+                      }))
+                    }
+                  />
+                  <input
+                    type="password"
+                    placeholder="New password"
+                    value={adminPasswordForm.newPassword}
+                    onChange={(event) =>
+                      setAdminPasswordForm((prev) => ({
+                        ...prev,
+                        newPassword: event.target.value,
+                      }))
+                    }
+                  />
+                  <input
+                    type="password"
+                    placeholder="Confirm new password"
+                    value={adminPasswordForm.confirmPassword}
+                    onChange={(event) =>
+                      setAdminPasswordForm((prev) => ({
+                        ...prev,
+                        confirmPassword: event.target.value,
+                      }))
+                    }
+                  />
+                  <button type="button" onClick={onChangeAdminPassword} disabled={busy || !token}>
+                    Change admin password
+                  </button>
+                </div>
+              </section>
+
+              <section>
+                <h3>Active game sessions</h3>
+                <ul className="list">
+                  <li>
+                    <span className="list-text">
+                      Device limit
+                      <small>{securitySettings.maxConcurrentGameAccountsPerDevice} account(s) per computer</small>
+                      <small>
+                        updated: {securitySettings.updatedAtUtc ? new Date(securitySettings.updatedAtUtc).toLocaleString() : 'not persisted yet'}
+                      </small>
+                    </span>
+                    <button type="button" onClick={() => token && loadAdminData(token)} disabled={busy || !token}>
+                      Refresh
+                    </button>
+                  </li>
+                  {activeGameSessions.map((session) => (
+                    <li key={session.id}>
+                      <span className="list-text">
+                        {session.username}
+                        <small>server: {session.serverName || 'not specified'}</small>
+                        <small>device user: {session.deviceUserName || 'n/a'}</small>
+                        <small>hwid: {session.hwidHash || 'n/a'}</small>
+                        <small>
+                          started: {new Date(session.startedAtUtc).toLocaleString()} | heartbeat: {new Date(session.lastHeartbeatAtUtc).toLocaleString()}
+                        </small>
+                        <small>
+                          expires: {new Date(session.expiresAtUtc).toLocaleString()} | active: {String(session.active)}
+                        </small>
+                      </span>
+                      <div>
+                        <button onClick={() => onTerminateGameSession(session.id)} disabled={busy || !token}>
+                          Terminate
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                  {activeGameSessions.length === 0 && (
+                    <li>
+                      <span className="list-text">
+                        No active sessions
+                        <small>They appear after players launch the game through the updated launcher.</small>
                       </span>
                     </li>
                   )}
@@ -7348,6 +7739,77 @@ function App() {
                       </span>
                     </li>
                   )}
+                </ul>
+              </section>
+            </div>
+            )}
+
+            {activePage === 'settings' && (
+            <div className="grid-2">
+              <section className="form form-small form-actions">
+                <h3>Delivery / availability</h3>
+                <div className="action-block">
+                  <small className="muted">
+                    Use an accessible public URL for the panel/bootstrap, a separate asset/update mirror if needed, and fallback API URLs for launcher failover.
+                  </small>
+                  <input
+                    placeholder="Public base URL (for launcher/bootstrap)"
+                    value={deliverySettings.publicBaseUrl}
+                    onChange={(event) => setDeliverySettings((prev) => ({ ...prev, publicBaseUrl: event.target.value }))}
+                  />
+                  <input
+                    placeholder="Asset/update base URL (optional mirror/CDN)"
+                    value={deliverySettings.assetBaseUrl}
+                    onChange={(event) => setDeliverySettings((prev) => ({ ...prev, assetBaseUrl: event.target.value }))}
+                  />
+                  <label>
+                    Fallback API URLs
+                    <textarea
+                      rows={5}
+                      placeholder={'One URL per line\nhttps://api-ru.example.com\nhttps://api-eu.example.com'}
+                      value={deliveryFallbackApiBaseUrlsText}
+                      onChange={(event) => setDeliveryFallbackApiBaseUrlsText(event.target.value)}
+                    />
+                  </label>
+                  <button type="button" onClick={onSaveDeliverySettings} disabled={busy || !token}>
+                    Save delivery settings
+                  </button>
+                </div>
+              </section>
+
+              <section>
+                <h3>Delivery status</h3>
+                <ul className="list">
+                  <li>
+                    <span className="list-text">
+                      Public base URL
+                      <small>{deliverySettings.publicBaseUrl || '(not set)'}</small>
+                    </span>
+                  </li>
+                  <li>
+                    <span className="list-text">
+                      Asset/update base URL
+                      <small>{deliverySettings.assetBaseUrl || '(falls back to public base URL)'}</small>
+                    </span>
+                  </li>
+                  <li>
+                    <span className="list-text">
+                      Fallback API URLs
+                      <small>{deliverySettings.fallbackApiBaseUrls.length > 0 ? deliverySettings.fallbackApiBaseUrls.join(' | ') : 'none'}</small>
+                    </span>
+                  </li>
+                  <li>
+                    <span className="list-text">
+                      Updated
+                      <small>{deliverySettings.updatedAtUtc ? new Date(deliverySettings.updatedAtUtc).toLocaleString() : 'not persisted yet'}</small>
+                    </span>
+                  </li>
+                  <li>
+                    <span className="list-text">
+                      Recommendation
+                      <small>Point players to a domain reachable from RU and publish at least one fallback API host before building the next launcher release.</small>
+                    </span>
+                  </li>
                 </ul>
               </section>
             </div>

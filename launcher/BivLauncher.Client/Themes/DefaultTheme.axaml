@@ -50,14 +50,14 @@
   </Style>
 
   <Style Selector="Border.accountCornerPanel">
-    <Setter Property="Padding" Value="14" />
-    <Setter Property="CornerRadius" Value="14" />
+    <Setter Property="Padding" Value="18" />
+    <Setter Property="CornerRadius" Value="18" />
     <Setter Property="BoxShadow" Value="0 14 28 0 #030C1B8A" />
   </Style>
 
   <Style Selector="Border.heroPanel">
-    <Setter Property="Padding" Value="18" />
-    <Setter Property="CornerRadius" Value="18" />
+    <Setter Property="Padding" Value="20" />
+    <Setter Property="CornerRadius" Value="20" />
     <Setter Property="BorderBrush" Value="#4E81C7" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="Background">
@@ -82,16 +82,16 @@
   </Style>
 
   <Style Selector="Border.featurePanel">
-    <Setter Property="Padding" Value="22" />
-    <Setter Property="CornerRadius" Value="18" />
+    <Setter Property="Padding" Value="24" />
+    <Setter Property="CornerRadius" Value="22" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="BorderBrush" Value="#4B79B3" />
     <Setter Property="Background">
       <Setter.Value>
         <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-          <GradientStop Offset="0" Color="#17345CCC" />
-          <GradientStop Offset="0.52" Color="#102845CC" />
-          <GradientStop Offset="1" Color="#0D2139CC" />
+          <GradientStop Offset="0" Color="#183A61D9" />
+          <GradientStop Offset="0.48" Color="#112C48D9" />
+          <GradientStop Offset="1" Color="#0C2237D9" />
         </LinearGradientBrush>
       </Setter.Value>
     </Setter>
@@ -197,7 +197,7 @@
   <Style Selector="Button.compactAccountButton">
     <Setter Property="HorizontalAlignment" Value="Stretch" />
     <Setter Property="HorizontalContentAlignment" Value="Center" />
-    <Setter Property="Padding" Value="10,7" />
+    <Setter Property="Padding" Value="12,9" />
   </Style>
 
   <Style Selector="Button.iconButton">
@@ -253,23 +253,23 @@
     <Setter Property="Background" Value="#0D1B2FD9" />
     <Setter Property="BorderBrush" Value="#3E669A" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="12" />
-    <Setter Property="Padding" Value="8" />
+    <Setter Property="CornerRadius" Value="14" />
+    <Setter Property="Padding" Value="10" />
   </Style>
 
   <Style Selector="ListBoxItem">
-    <Setter Property="Padding" Value="8" />
-    <Setter Property="Margin" Value="0,2,0,2" />
-    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="Padding" Value="10" />
+    <Setter Property="Margin" Value="0,4,0,4" />
+    <Setter Property="CornerRadius" Value="14" />
   </Style>
 
   <Style Selector="ListBoxItem:pointerover /template/ ContentPresenter">
-    <Setter Property="Background" Value="#1A3154" />
+    <Setter Property="Background" Value="#1C365C" />
   </Style>
 
   <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
-    <Setter Property="Background" Value="#23456F" />
-    <Setter Property="BorderBrush" Value="#6EA2E6" />
+    <Setter Property="Background" Value="#244C79" />
+    <Setter Property="BorderBrush" Value="#79B0F2" />
     <Setter Property="BorderThickness" Value="1" />
   </Style>
 </Styles>

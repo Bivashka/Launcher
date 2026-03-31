@@ -22,6 +22,7 @@ public sealed class PublicController(
     IBuildPipelineService buildPipelineService,
     ILauncherUpdateConfigProvider launcherUpdateConfigProvider,
     IConfiguration configuration,
+    IDeliverySettingsProvider deliverySettingsProvider,
     IAssetUrlService assetUrlService,
     IObjectStorageService objectStorageService,
     IOptions<InstallTelemetryOptions> installTelemetryOptions,
@@ -59,19 +60,21 @@ public sealed class PublicController(
                 (x.ScopeType == "server" && serverIds.Contains(x.ScopeId)))
             .ToListAsync(cancellationToken);
 
-        var news = await dbContext.NewsItems
+        var allNews = await dbContext.NewsItems
             .AsNoTracking()
             .Where(x => x.Enabled)
             .OrderByDescending(x => x.Pinned)
             .ThenByDescending(x => x.CreatedAtUtc)
-            .Take(20)
+            .Take(60)
             .ToListAsync(cancellationToken);
+        var news = FilterRelevantNews(allNews, profileIds, serverIds)
+            .Take(20)
+            .ToList();
 
         var branding = await brandingProvider.GetBrandingAsync(cancellationToken);
         branding = MapBranding(branding);
-        var publicBaseUrl = configuration["PUBLIC_BASE_URL"]
-            ?? configuration["PublicBaseUrl"]
-            ?? "http://localhost:8080";
+        var deliverySettings = deliverySettingsProvider.GetCachedSettings();
+        var publicBaseUrl = ResolvePublicBaseUrl(deliverySettings);
         var installTelemetryEnabled = await ResolveInstallTelemetryEnabledAsync(cancellationToken);
         var discordRpcSettings = await ResolveDiscordRpcSettingsAsync(cancellationToken);
         var profileDiscord = discordConfigs
@@ -87,6 +90,7 @@ public sealed class PublicController(
 
         var response = new BootstrapResponse(
             PublicBaseUrl: publicBaseUrl,
+            FallbackApiBaseUrls: deliverySettings.FallbackApiBaseUrls,
             Branding: branding,
             Constraints: new LauncherConstraints(
                 ManagedLauncher: true,
@@ -133,6 +137,9 @@ public sealed class PublicController(
                     Title: item.Title,
                     Body: item.Body,
                     Source: item.Source,
+                    ScopeType: NormalizeNewsScopeType(item.ScopeType),
+                    ScopeId: NormalizeNewsScopeId(item.ScopeId),
+                    ScopeName: ResolveNewsScopeName(item.ScopeType, item.ScopeId, profiles),
                     Pinned: item.Pinned,
                     CreatedAtUtc: item.CreatedAtUtc))
                 .ToList(),
@@ -144,20 +151,40 @@ public sealed class PublicController(
     [HttpGet("news")]
     public async Task<ActionResult<IReadOnlyList<BootstrapNewsItemDto>>> News(CancellationToken cancellationToken)
     {
-        var news = await dbContext.NewsItems
+        var currentUsername = ResolveCurrentPlayerUsername();
+        var profiles = await dbContext.Profiles
+            .AsNoTracking()
+            .Include(x => x.Servers.Where(server => server.Enabled))
+            .Where(x => x.Enabled)
+            .OrderBy(x => x.Priority)
+            .ToListAsync(cancellationToken);
+        profiles = profiles
+            .Where(profile => ProfileAccessRules.CanAccess(profile, currentUsername))
+            .ToList();
+
+        var profileIds = profiles.Select(x => x.Id).ToHashSet();
+        var serverIds = profiles.SelectMany(x => x.Servers).Select(x => x.Id).ToHashSet();
+
+        var allNews = await dbContext.NewsItems
             .AsNoTracking()
             .Where(x => x.Enabled)
             .OrderByDescending(x => x.Pinned)
             .ThenByDescending(x => x.CreatedAtUtc)
+            .Take(60)
+            .ToListAsync(cancellationToken);
+        var news = FilterRelevantNews(allNews, profileIds, serverIds)
             .Take(20)
             .Select(item => new BootstrapNewsItemDto(
                 item.Id,
                 item.Title,
                 item.Body,
                 item.Source,
+                NormalizeNewsScopeType(item.ScopeType),
+                NormalizeNewsScopeId(item.ScopeId),
+                ResolveNewsScopeName(item.ScopeType, item.ScopeId, profiles),
                 item.Pinned,
                 item.CreatedAtUtc))
-            .ToListAsync(cancellationToken);
+            .ToList();
 
         return Ok(news);
     }
@@ -333,6 +360,80 @@ public sealed class PublicController(
     private static int ResolvePositiveInt(string? rawValue, int fallback)
     {
         return int.TryParse(rawValue, out var parsed) && parsed > 0 ? parsed : fallback;
+    }
+
+    private string ResolvePublicBaseUrl(DeliverySettingsConfig settings)
+    {
+        if (!string.IsNullOrWhiteSpace(settings.PublicBaseUrl))
+        {
+            return settings.PublicBaseUrl;
+        }
+
+        var configured = (configuration["PUBLIC_BASE_URL"] ?? configuration["PublicBaseUrl"] ?? string.Empty).Trim();
+        return string.IsNullOrWhiteSpace(configured)
+            ? "http://localhost:8080"
+            : configured.TrimEnd('/');
+    }
+
+    private static IEnumerable<NewsItem> FilterRelevantNews(
+        IEnumerable<NewsItem> allNews,
+        IReadOnlySet<Guid> profileIds,
+        IReadOnlySet<Guid> serverIds)
+    {
+        return allNews.Where(item =>
+        {
+            var scopeType = NormalizeNewsScopeType(item.ScopeType);
+            var scopeId = NormalizeNewsScopeId(item.ScopeId);
+            if (scopeType == "global")
+            {
+                return true;
+            }
+
+            if (!Guid.TryParse(scopeId, out var parsedScopeId))
+            {
+                return false;
+            }
+
+            return scopeType == "profile"
+                ? profileIds.Contains(parsedScopeId)
+                : scopeType == "server" && serverIds.Contains(parsedScopeId);
+        });
+    }
+
+    private static string NormalizeNewsScopeType(string? rawScopeType)
+    {
+        var normalized = (rawScopeType ?? string.Empty).Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "profile" => "profile",
+            "server" => "server",
+            _ => "global"
+        };
+    }
+
+    private static string NormalizeNewsScopeId(string? rawScopeId)
+    {
+        return string.IsNullOrWhiteSpace(rawScopeId) ? string.Empty : rawScopeId.Trim();
+    }
+
+    private static string ResolveNewsScopeName(string? rawScopeType, string? rawScopeId, IReadOnlyList<Profile> profiles)
+    {
+        var scopeType = NormalizeNewsScopeType(rawScopeType);
+        var scopeId = NormalizeNewsScopeId(rawScopeId);
+        if (scopeType == "profile" && Guid.TryParse(scopeId, out var profileId))
+        {
+            return profiles.FirstOrDefault(x => x.Id == profileId)?.Name ?? "Profile";
+        }
+
+        if (scopeType == "server" && Guid.TryParse(scopeId, out var serverId))
+        {
+            return profiles
+                .SelectMany(x => x.Servers)
+                .FirstOrDefault(x => x.Id == serverId)
+                ?.Name ?? "Server";
+        }
+
+        return "Global";
     }
 
     private string ResolveCurrentPlayerUsername()

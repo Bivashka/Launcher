@@ -17,6 +17,7 @@ public sealed class AdminLauncherController(
     IConfiguration configuration,
     IHttpClientFactory httpClientFactory,
     IBrandingProvider brandingProvider,
+    IDeliverySettingsProvider deliverySettingsProvider,
     IObjectStorageService objectStorageService,
     IAssetUrlService assetUrlService,
     ILauncherUpdateConfigProvider launcherUpdateConfigProvider,
@@ -759,6 +760,12 @@ public sealed class AdminLauncherController(
             startInfo.ArgumentList.Add($"/p:BivLauncherApiBaseUrl={launcherApiBaseUrl}");
         }
 
+        var launcherFallbackApiBaseUrls = ResolveLauncherFallbackApiBaseUrls();
+        if (!string.IsNullOrWhiteSpace(launcherFallbackApiBaseUrls))
+        {
+            startInfo.ArgumentList.Add($"/p:BivLauncherFallbackApiBaseUrls={launcherFallbackApiBaseUrls}");
+        }
+
         var launcherClientProof = ResolveLauncherClientProof();
         if (!string.IsNullOrWhiteSpace(launcherClientProof))
         {
@@ -967,10 +974,26 @@ public sealed class AdminLauncherController(
 
     private string ResolveLauncherDefaultApiBaseUrl()
     {
-        var configuredUrl = configuration["PUBLIC_BASE_URL"] ?? configuration["PublicBaseUrl"];
+        var deliverySettings = deliverySettingsProvider.GetCachedSettings();
+        var configuredUrl = !string.IsNullOrWhiteSpace(deliverySettings.PublicBaseUrl)
+            ? deliverySettings.PublicBaseUrl
+            : configuration["PUBLIC_BASE_URL"] ?? configuration["PublicBaseUrl"];
         return string.IsNullOrWhiteSpace(configuredUrl)
             ? string.Empty
             : configuredUrl.Trim().TrimEnd('/');
+    }
+
+    private string ResolveLauncherFallbackApiBaseUrls()
+    {
+        var deliverySettings = deliverySettingsProvider.GetCachedSettings();
+        var normalizedValues = deliverySettings.FallbackApiBaseUrls
+            .Select(x => (x ?? string.Empty).Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return normalizedValues.Count == 0
+            ? string.Empty
+            : string.Join(";", normalizedValues);
     }
 
     private string ResolveLauncherClientProof()

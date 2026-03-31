@@ -115,16 +115,36 @@
         </Border>
 
         <Grid IsVisible="{Binding IsLauncherReady}"
-              ColumnDefinitions="*,380"
-              ColumnSpacing="14">
+              ColumnDefinitions="*,420"
+              ColumnSpacing="16">
           <Border Classes="featurePanel"
                   Background="{Binding PanelBackgroundBrush}"
                   BorderBrush="{Binding PanelBorderBrush}">
-            <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,*" RowSpacing="12">
-              <TextBlock Classes="sectionTitle"
-                         Foreground="{Binding PrimaryTextBrush}"
-                         Text="{Binding PlayButtonText}" />
+            <Grid RowDefinitions="Auto,Auto,Auto,Auto,*,Auto" RowSpacing="14">
+              <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
+                <TextBlock Classes="subtle"
+                           Foreground="{Binding SecondaryTextBrush}"
+                           VerticalAlignment="Center"
+                           Text="{Binding StatusText}"
+                           TextWrapping="Wrap" />
+                <Button Grid.Column="1"
+                        Classes="ghostButton compactAccountButton"
+                        Content="{Binding RefreshButtonText}"
+                        Background="{Binding PrimaryButtonBackgroundBrush}"
+                        BorderBrush="{Binding PrimaryButtonBorderBrush}"
+                        Foreground="{Binding PrimaryButtonForegroundBrush}"
+                        Command="{Binding RefreshCommand}" />
+                <Button Grid.Column="2"
+                        Classes="iconButton"
+                        Background="{Binding PrimaryButtonBackgroundBrush}"
+                        BorderBrush="{Binding PrimaryButtonBorderBrush}"
+                        Foreground="{Binding PrimaryButtonForegroundBrush}"
+                        Command="{Binding ToggleSettingsCommand}">
+                  <TextBlock Text="&#xE713;" FontFamily="Segoe MDL2 Assets" />
+                </Button>
+              </Grid>
               <TextBlock Grid.Row="1"
+                         Classes="heroTitle"
                          FontSize="24"
                          FontWeight="SemiBold"
                          Foreground="{Binding PrimaryTextBrush}"
@@ -139,21 +159,7 @@
                            Foreground="{Binding SecondaryTextBrush}"
                            Text="{Binding SelectedServer.OnlineStatusText, TargetNullValue='Проверка...'}" />
               </StackPanel>
-              <Grid Grid.Row="3"
-                    ColumnDefinitions="Auto,*"
-                    ColumnSpacing="10">
-                <TextBlock VerticalAlignment="Center"
-                           Foreground="{Binding PrimaryTextBrush}"
-                           Text="{Binding RouteLabelText}" />
-                <ComboBox Grid.Column="1"
-                          Width="180"
-                          Background="{Binding InputBackgroundBrush}"
-                          BorderBrush="{Binding InputBorderBrush}"
-                          Foreground="{Binding InputForegroundBrush}"
-                          ItemsSource="{Binding RouteOptions}"
-                          SelectedItem="{Binding SelectedRouteOption}" />
-              </Grid>
-              <Border Grid.Row="4"
+              <Border Grid.Row="3"
                       IsVisible="{Binding IsFileSyncInProgress}"
                       CornerRadius="12"
                       BorderThickness="1"
@@ -184,6 +190,65 @@
                 </StackPanel>
               </Border>
 
+              <Grid Grid.Row="4"
+                    ColumnDefinitions="1.18*,0.82*"
+                    ColumnSpacing="14">
+                <Border Classes="panel heroPanel"
+                        Background="{Binding PanelBackgroundBrush}"
+                        BorderBrush="{Binding PanelBorderBrush}">
+                  <Grid RowDefinitions="Auto,Auto,*" RowSpacing="10">
+                    <TextBlock Classes="heroMeta"
+                               Foreground="{Binding SecondaryTextBrush}"
+                               Text="{Binding SelectedNewsMetaText}" />
+                    <TextBlock Grid.Row="1"
+                               FontSize="24"
+                               FontWeight="SemiBold"
+                               Foreground="{Binding PrimaryTextBrush}"
+                               Text="{Binding SelectedNewsHeadlineText}"
+                               TextWrapping="Wrap" />
+                    <ScrollViewer Grid.Row="2"
+                                  VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled">
+                      <TextBlock Foreground="{Binding PrimaryTextBrush}"
+                                 Text="{Binding SelectedNewsBodyText}"
+                                 TextWrapping="Wrap"
+                                 LineHeight="22" />
+                    </ScrollViewer>
+                  </Grid>
+                </Border>
+
+                <Border Grid.Column="1"
+                        Classes="panel"
+                        Background="{Binding PanelBackgroundBrush}"
+                        BorderBrush="{Binding PanelBorderBrush}">
+                  <ListBox Background="{Binding ListBackgroundBrush}"
+                           BorderBrush="{Binding ListBorderBrush}"
+                           Foreground="{Binding InputForegroundBrush}"
+                           ItemsSource="{Binding NewsItems}"
+                           SelectedItem="{Binding SelectedNewsItem}">
+                    <ListBox.ItemTemplate>
+                      <DataTemplate>
+                        <Grid Margin="2,4" RowDefinitions="Auto,Auto,Auto" RowSpacing="4">
+                          <TextBlock Text="{Binding Title}"
+                                     FontWeight="SemiBold"
+                                     TextWrapping="Wrap" />
+                          <TextBlock Grid.Row="1"
+                                     Classes="subtle"
+                                     Opacity="0.84"
+                                     Text="{Binding Meta}"
+                                     TextWrapping="Wrap" />
+                          <TextBlock Grid.Row="2"
+                                     Opacity="0.84"
+                                     Text="{Binding Preview}"
+                                     TextWrapping="Wrap"
+                                     MaxHeight="54" />
+                        </Grid>
+                      </DataTemplate>
+                    </ListBox.ItemTemplate>
+                  </ListBox>
+                </Border>
+              </Grid>
+
               <StackPanel Grid.Row="5"
                           Orientation="Horizontal"
                           Spacing="10"
@@ -194,6 +259,11 @@
                         BorderBrush="{Binding PlayButtonBorderBrush}"
                         Foreground="{Binding PlayButtonForegroundBrush}"
                         Command="{Binding LaunchCommand}" />
+                <Button Content="{Binding VerifyFilesButtonText}"
+                        Background="{Binding PrimaryButtonBackgroundBrush}"
+                        BorderBrush="{Binding PrimaryButtonBorderBrush}"
+                        Foreground="{Binding PrimaryButtonForegroundBrush}"
+                        Command="{Binding VerifyFilesCommand}" />
                 <Button Content="{Binding OpenLogsFolderButtonText}"
                         Background="{Binding PrimaryButtonBackgroundBrush}"
                         BorderBrush="{Binding PrimaryButtonBorderBrush}"
@@ -203,8 +273,67 @@
             </Grid>
           </Border>
 
-          <Grid Grid.Column="1" RowDefinitions="Auto,*,Auto" RowSpacing="12">
-            <Border Classes="panel"
+          <Grid Grid.Column="1" RowDefinitions="Auto,*" RowSpacing="14">
+            <Border Classes="panel accountCornerPanel"
+                    Background="{Binding PanelBackgroundBrush}"
+                    BorderBrush="{Binding PanelBorderBrush}">
+              <Grid RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="10">
+                <StackPanel>
+                  <TextBlock FontSize="22"
+                             FontWeight="SemiBold"
+                             Foreground="{Binding PrimaryTextBrush}"
+                             Text="{Binding PlayerLoggedInAs}" />
+                  <TextBlock Classes="subtle"
+                             Foreground="{Binding SecondaryTextBrush}"
+                             Text="{Binding AuthStatusText}"
+                             TextWrapping="Wrap" />
+                </StackPanel>
+
+                <ComboBox Grid.Row="1"
+                          Background="{Binding InputBackgroundBrush}"
+                          BorderBrush="{Binding InputBorderBrush}"
+                          Foreground="{Binding InputForegroundBrush}"
+                          ItemsSource="{Binding StoredPlayerAccounts}"
+                          SelectedItem="{Binding SelectedStoredAccount}"
+                          IsVisible="{Binding HasStoredAccounts}">
+                  <ComboBox.ItemTemplate>
+                    <DataTemplate>
+                      <TextBlock Text="{Binding Username}" />
+                    </DataTemplate>
+                  </ComboBox.ItemTemplate>
+                </ComboBox>
+
+                <Grid Grid.Row="2"
+                      ColumnDefinitions="*,*"
+                      ColumnSpacing="8">
+                  <Button Classes="ghostButton compactAccountButton"
+                          Content="{Binding AddAccountButtonText}"
+                          Background="{Binding PrimaryButtonBackgroundBrush}"
+                          BorderBrush="{Binding PrimaryButtonBorderBrush}"
+                          Foreground="{Binding PrimaryButtonForegroundBrush}"
+                          Command="{Binding AddAccountCommand}" />
+                  <Button Grid.Column="1"
+                          Classes="ghostButton compactAccountButton"
+                          Content="{Binding DeleteAccountButtonText}"
+                          Background="{Binding PrimaryButtonBackgroundBrush}"
+                          BorderBrush="{Binding PrimaryButtonBorderBrush}"
+                          Foreground="{Binding PrimaryButtonForegroundBrush}"
+                          Command="{Binding DeleteAccountCommand}"
+                          IsVisible="{Binding HasStoredAccounts}" />
+                </Grid>
+
+                <Button Grid.Row="3"
+                        Classes="ghostButton compactAccountButton"
+                        Content="{Binding LogoutButtonText}"
+                        Background="{Binding PrimaryButtonBackgroundBrush}"
+                        BorderBrush="{Binding PrimaryButtonBorderBrush}"
+                        Foreground="{Binding PrimaryButtonForegroundBrush}"
+                        Command="{Binding LogoutCommand}" />
+              </Grid>
+            </Border>
+
+            <Border Grid.Row="1"
+                    Classes="panel"
                     Background="{Binding PanelBackgroundBrush}"
                     BorderBrush="{Binding PanelBorderBrush}">
               <Grid RowDefinitions="Auto,*" RowSpacing="10">
@@ -219,7 +348,6 @@
                              Text="{Binding ServerMonitoringText}" />
                 </Grid>
                 <ListBox Grid.Row="1"
-                         MaxHeight="290"
                          Background="{Binding ListBackgroundBrush}"
                          BorderBrush="{Binding ListBorderBrush}"
                          Foreground="{Binding InputForegroundBrush}"
@@ -227,26 +355,35 @@
                          SelectedItem="{Binding SelectedServer}">
                   <ListBox.ItemTemplate>
                     <DataTemplate>
-                      <Grid Margin="0,2" ColumnDefinitions="40,*" ColumnSpacing="8">
-                        <Border Width="34"
-                                Height="34"
-                                CornerRadius="8"
-                                BorderBrush="#3A4F70"
+                      <Grid Margin="2,4"
+                            ColumnDefinitions="64,*"
+                            ColumnSpacing="12">
+                        <Border Width="56"
+                                Height="56"
+                                CornerRadius="16"
+                                BorderBrush="#496A97"
                                 BorderThickness="1"
-                                VerticalAlignment="Top">
+                                VerticalAlignment="Top"
+                                Background="#143152">
                           <Image Source="{Binding Icon}" Stretch="UniformToFill" />
                         </Border>
-                        <Grid Grid.Column="1" RowDefinitions="Auto,Auto" RowSpacing="2">
+                        <Grid Grid.Column="1" RowDefinitions="Auto,Auto,Auto" RowSpacing="4">
                           <TextBlock Text="{Binding DisplayName}"
+                                     FontSize="16"
                                      FontWeight="SemiBold"
                                      TextWrapping="Wrap" />
-                          <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="6">
+                          <TextBlock Grid.Row="1"
+                                     Classes="subtle"
+                                     Opacity="0.86"
+                                     Text="{Binding RuntimeDisplay}" />
+                          <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="6">
                             <Ellipse Width="8"
                                      Height="8"
                                      VerticalAlignment="Center"
                                      Fill="{Binding OnlineStatusBrush}" />
                             <TextBlock Opacity="0.88"
-                                       Text="{Binding OnlineStatusText}" />
+                                       Text="{Binding OnlineStatusText}"
+                                       TextWrapping="Wrap" />
                           </StackPanel>
                         </Grid>
                       </Grid>
@@ -256,101 +393,6 @@
               </Grid>
             </Border>
 
-            <Border Grid.Row="1"
-                    Classes="panel"
-                    Background="{Binding PanelBackgroundBrush}"
-                    BorderBrush="{Binding PanelBorderBrush}">
-              <Grid RowDefinitions="Auto,*" RowSpacing="10">
-                <TextBlock Classes="sectionTitle"
-                           Foreground="{Binding PrimaryTextBrush}"
-                           Text="{Binding NewsHeaderText}" />
-                <ListBox Grid.Row="1"
-                         Background="{Binding ListBackgroundBrush}"
-                         BorderBrush="{Binding ListBorderBrush}"
-                         Foreground="{Binding InputForegroundBrush}"
-                         ItemsSource="{Binding NewsItems}"
-                         SelectedItem="{Binding SelectedNewsItem}">
-                  <ListBox.ItemTemplate>
-                  <DataTemplate>
-                    <Grid Margin="0,2" RowDefinitions="Auto,Auto,Auto">
-                        <TextBlock Text="{Binding Title}"
-                                   FontWeight="SemiBold"
-                                   TextWrapping="Wrap" />
-                        <TextBlock Grid.Row="1"
-                                   Opacity="0.82"
-                                   Text="{Binding Meta}" />
-                        <TextBlock Grid.Row="2"
-                                   Opacity="0.82"
-                                   Text="{Binding Preview}"
-                                   TextWrapping="Wrap"
-                                   MaxHeight="44" />
-                    </Grid>
-                  </DataTemplate>
-                  </ListBox.ItemTemplate>
-                </ListBox>
-              </Grid>
-            </Border>
-
-            <Border Grid.Row="2"
-                    Classes="panel accountCornerPanel"
-                    Background="{Binding PanelBackgroundBrush}"
-                    BorderBrush="{Binding PanelBorderBrush}">
-              <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto" RowSpacing="8">
-                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                  <Button Classes="ghostButton compactAccountButton"
-                          Content="{Binding RefreshButtonText}"
-                          Background="{Binding PrimaryButtonBackgroundBrush}"
-                          BorderBrush="{Binding PrimaryButtonBorderBrush}"
-                          Foreground="{Binding PrimaryButtonForegroundBrush}"
-                          Command="{Binding RefreshCommand}" />
-                  <Button Grid.Column="1"
-                          Classes="iconButton"
-                          Background="{Binding PrimaryButtonBackgroundBrush}"
-                          BorderBrush="{Binding PrimaryButtonBorderBrush}"
-                          Foreground="{Binding PrimaryButtonForegroundBrush}"
-                          Command="{Binding ToggleSettingsCommand}">
-                    <TextBlock Text="&#xE713;" FontFamily="Segoe MDL2 Assets" />
-                  </Button>
-                </Grid>
-
-                <ComboBox Grid.Row="1"
-                          Width="220"
-                          Background="{Binding InputBackgroundBrush}"
-                          BorderBrush="{Binding InputBorderBrush}"
-                          Foreground="{Binding InputForegroundBrush}"
-                          ItemsSource="{Binding StoredPlayerAccounts}"
-                          SelectedItem="{Binding SelectedStoredAccount}">
-                  <ComboBox.ItemTemplate>
-                    <DataTemplate>
-                      <TextBlock Text="{Binding Username}" />
-                    </DataTemplate>
-                  </ComboBox.ItemTemplate>
-                </ComboBox>
-
-                <Button Grid.Row="2"
-                        Classes="ghostButton compactAccountButton"
-                        Content="{Binding AddAccountButtonText}"
-                        Background="{Binding PrimaryButtonBackgroundBrush}"
-                        BorderBrush="{Binding PrimaryButtonBorderBrush}"
-                        Foreground="{Binding PrimaryButtonForegroundBrush}"
-                        Command="{Binding AddAccountCommand}" />
-                <Button Grid.Row="3"
-                        Classes="ghostButton compactAccountButton"
-                        Content="{Binding DeleteAccountButtonText}"
-                        Background="{Binding PrimaryButtonBackgroundBrush}"
-                        BorderBrush="{Binding PrimaryButtonBorderBrush}"
-                        Foreground="{Binding PrimaryButtonForegroundBrush}"
-                        Command="{Binding DeleteAccountCommand}"
-                        IsVisible="{Binding HasStoredAccounts}" />
-                <Button Grid.Row="4"
-                        Classes="ghostButton compactAccountButton"
-                        Content="{Binding LogoutButtonText}"
-                        Background="{Binding PrimaryButtonBackgroundBrush}"
-                        BorderBrush="{Binding PrimaryButtonBorderBrush}"
-                        Foreground="{Binding PrimaryButtonForegroundBrush}"
-                        Command="{Binding LogoutCommand}" />
-              </Grid>
-            </Border>
           </Grid>
         </Grid>
 

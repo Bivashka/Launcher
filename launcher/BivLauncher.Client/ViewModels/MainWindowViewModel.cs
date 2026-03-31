@@ -13,6 +13,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.Net;
+using System.Net.Http;
 using System.Net.Sockets;
 using System.Reflection;
 using System.Security.Cryptography;
@@ -47,9 +48,12 @@ public partial class MainWindowViewModel : ViewModelBase
     private const string LocalFallbackApiBaseUrl = "http://localhost:8080";
     private const string LauncherApiBaseUrlEnvVar = "BIVLAUNCHER_API_BASE_URL";
     private const string LauncherApiBaseUrlAssemblyMetadataKey = "BivLauncher.ApiBaseUrl";
+    private const string LauncherFallbackApiBaseUrlsAssemblyMetadataKey = "BivLauncher.FallbackApiBaseUrls";
     private readonly string _currentLauncherVersion = GetCurrentLauncherVersion();
     private string _languageCode = "ru";
     private readonly Dictionary<string, string> _profileRouteSelections = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<string> _knownApiBaseUrls = [];
+    private readonly List<LauncherNewsItem> _allNewsItems = [];
     private bool _isSyncingLanguageOption;
     private bool _isSyncingJavaModeOption;
     private bool _isSyncingRouteOption;
@@ -443,7 +447,17 @@ public partial class MainWindowViewModel : ViewModelBase
     public string CrashFlagText => F("status.hasCrash", BoolWord(HasCrash));
     public string DebugLogHeaderText => T("header.debugLog");
     public string SelectedNewsTitle => SelectedNewsItem?.Title ?? string.Empty;
+    public string SelectedNewsMeta => SelectedNewsItem?.Meta ?? string.Empty;
     public string SelectedNewsBody => SelectedNewsItem?.Body ?? string.Empty;
+    public string SelectedNewsHeadlineText => SelectedNewsItem?.Title ?? EmptyNewsText;
+    public string SelectedNewsBodyText => SelectedNewsItem?.Body ?? (_languageCode == "en"
+        ? "Create a global, profile, or server news item in the admin panel and it will appear here."
+        : "Создайте глобальную, профильную или серверную новость в админке, и она появится здесь.");
+    public string SelectedNewsMetaText => SelectedNewsItem?.Meta ?? (_languageCode == "en" ? "Branch feed" : "Лента ветки");
+    public bool HasSelectedNews => SelectedNewsItem is not null;
+    public string EmptyNewsText => _languageCode == "en"
+        ? "News for this branch will appear here."
+        : "Новости для этой ветки появятся здесь.";
     public string UpdateHeaderText => "Launcher update";
     public string CurrentVersionText => $"Current version: {_currentLauncherVersion}";
     public string LatestVersionText => string.IsNullOrWhiteSpace(LatestLauncherVersion)
@@ -479,6 +493,8 @@ public partial class MainWindowViewModel : ViewModelBase
         RebuildRouteOptions();
         RefreshLocalizedBindings();
         LoadRouteSelections(_settings.ProfileRouteSelections ?? []);
+        MergeKnownApiBaseUrls(_settings.KnownApiBaseUrls);
+        MergeKnownApiBaseUrls(ResolveBundledFallbackApiBaseUrls());
 
         var configuredApiBaseUrl = TryResolveConfiguredApiBaseUrl();
         if (!string.IsNullOrWhiteSpace(configuredApiBaseUrl))
@@ -493,6 +509,7 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             ApiBaseUrl = NormalizeBaseUrl(_settings.ApiBaseUrl);
         }
+        MergeKnownApiBaseUrls([ApiBaseUrl]);
         InstallDirectory = string.IsNullOrWhiteSpace(_settings.InstallDirectory)
             ? _settingsService.GetDefaultInstallDirectory()
             : _settings.InstallDirectory;
@@ -532,6 +549,7 @@ public partial class MainWindowViewModel : ViewModelBase
         VerifyFilesCommand.NotifyCanExecuteChanged();
         LaunchCommand.NotifyCanExecuteChanged();
         RebuildRouteOptions();
+        RefreshVisibleNewsItems();
 
         if (value is null)
         {
@@ -599,7 +617,12 @@ public partial class MainWindowViewModel : ViewModelBase
     partial void OnSelectedNewsItemChanged(LauncherNewsItem? value)
     {
         OnPropertyChanged(nameof(SelectedNewsTitle));
+        OnPropertyChanged(nameof(SelectedNewsMeta));
         OnPropertyChanged(nameof(SelectedNewsBody));
+        OnPropertyChanged(nameof(SelectedNewsHeadlineText));
+        OnPropertyChanged(nameof(SelectedNewsBodyText));
+        OnPropertyChanged(nameof(SelectedNewsMetaText));
+        OnPropertyChanged(nameof(HasSelectedNews));
     }
 
     partial void OnIsTwoFactorStepActiveChanged(bool value)
@@ -1357,10 +1380,18 @@ public partial class MainWindowViewModel : ViewModelBase
     private async Task RefreshCoreAsync()
     {
         StatusText = T("status.fetchingBootstrap");
-        var bootstrap = await _launcherApiService.GetBootstrapAsync(
-            ApiBaseUrl,
-            _playerAuthToken,
-            _playerAuthTokenType);
+        var bootstrap = await ExecuteAgainstApiFailoverAsync(
+            candidate => _launcherApiService.GetBootstrapAsync(
+                candidate,
+                _playerAuthToken,
+                _playerAuthTokenType));
+        var bootstrapApiBaseUrl = NormalizeBaseUrlOrEmpty(bootstrap.PublicBaseUrl);
+        if (!string.IsNullOrWhiteSpace(bootstrapApiBaseUrl))
+        {
+            ApiBaseUrl = bootstrapApiBaseUrl;
+            MergeKnownApiBaseUrls([bootstrapApiBaseUrl]);
+        }
+        MergeKnownApiBaseUrls(bootstrap.FallbackApiBaseUrls);
         _ = FlushPendingSubmissionsAsync();
         await TrySubmitInstallTelemetryAsync(bootstrap);
 
@@ -1400,6 +1431,7 @@ public partial class MainWindowViewModel : ViewModelBase
                 allServers.Add(new ManagedServerItem
                 {
                     ServerId = server.Id,
+                    ProfileId = profile.Id,
                     ProfileSlug = profile.Slug,
                     ProfileName = profile.Name,
                     ServerName = server.Name,
@@ -1438,7 +1470,8 @@ public partial class MainWindowViewModel : ViewModelBase
             }
         }
 
-        var allNews = bootstrap.News
+        _allNewsItems.Clear();
+        _allNewsItems.AddRange(bootstrap.News
             .OrderByDescending(item => item.Pinned)
             .ThenByDescending(item => item.CreatedAtUtc)
             .Select(item => new LauncherNewsItem
@@ -1448,11 +1481,14 @@ public partial class MainWindowViewModel : ViewModelBase
                 Body = item.Body,
                 Preview = BuildNewsPreview(item.Body),
                 Source = item.Source,
+                ScopeType = NormalizeNewsScopeType(item.ScopeType),
+                ScopeId = NormalizeNewsScopeId(item.ScopeId),
+                ScopeName = (item.ScopeName ?? string.Empty).Trim(),
                 Pinned = item.Pinned,
                 CreatedAtUtc = item.CreatedAtUtc,
-                Meta = BuildNewsMeta(item.Source, item.Pinned, item.CreatedAtUtc)
+                Meta = BuildNewsMeta(item.Source, item.Pinned, item.CreatedAtUtc, item.ScopeType, item.ScopeName)
             })
-            .ToList();
+            .ToList());
 
         ManagedServers.Clear();
         foreach (var server in allServers)
@@ -1460,13 +1496,7 @@ public partial class MainWindowViewModel : ViewModelBase
             ManagedServers.Add(server);
         }
 
-        NewsItems.Clear();
-        foreach (var item in allNews)
-        {
-            NewsItems.Add(item);
-        }
-
-        SelectedNewsItem = NewsItems.FirstOrDefault();
+        RefreshVisibleNewsItems();
 
         if (ManagedServers.Count == 0)
         {
@@ -1570,11 +1600,12 @@ public partial class MainWindowViewModel : ViewModelBase
                 await SaveSettingsAsync();
 
                 StatusText = T("status.fetchingManifest");
-                manifest = await _launcherApiService.GetManifestAsync(
-                    ApiBaseUrl,
-                    selectedServer.ProfileSlug,
-                    _playerAuthToken,
-                    _playerAuthTokenType);
+                manifest = await ExecuteAgainstApiFailoverAsync(
+                    candidate => _launcherApiService.GetManifestAsync(
+                        candidate,
+                        selectedServer.ProfileSlug,
+                        _playerAuthToken,
+                        _playerAuthTokenType));
                 ApplyProfileRuntimeFallback(manifest, selectedServer.ProfileSlug);
 
                 StartFileSyncProgress();
@@ -1601,6 +1632,14 @@ public partial class MainWindowViewModel : ViewModelBase
 
                 StatusText = T("status.launchingJava");
                 launchRoute = ResolveLaunchRoute(selectedServer);
+                var gameSession = await TryStartGameSessionAsync(selectedServer);
+                if (gameSession is null)
+                {
+                    return;
+                }
+
+                using var gameSessionHeartbeatCts = new CancellationTokenSource();
+                var heartbeatTask = RunGameSessionHeartbeatLoopAsync(gameSession, gameSessionHeartbeatCts.Token);
                 _discordRpcService.SetLaunchingPresence(selectedServer);
 
                 try
@@ -1617,6 +1656,20 @@ public partial class MainWindowViewModel : ViewModelBase
                 }
                 finally
                 {
+                    gameSessionHeartbeatCts.Cancel();
+                    try
+                    {
+                        await heartbeatTask;
+                    }
+                    catch (OperationCanceledException)
+                    {
+                    }
+                    catch (Exception ex)
+                    {
+                        _logService.LogInfo($"Game session heartbeat stopped with warning: {ex.Message}");
+                    }
+
+                    await TryStopGameSessionAsync(gameSession.SessionId);
                     _discordRpcService.UpdateIdlePresence(selectedServer);
                 }
 
@@ -2024,6 +2077,9 @@ public partial class MainWindowViewModel : ViewModelBase
             RamMb = RamMb,
             JavaMode = JavaMode,
             Language = _languageCode,
+            KnownApiBaseUrls = [.. _knownApiBaseUrls
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Distinct(StringComparer.OrdinalIgnoreCase)],
             ProfileRouteSelections = _profileRouteSelections
                 .Select(x => new ProfileRouteSelection
                 {
@@ -2086,14 +2142,15 @@ public partial class MainWindowViewModel : ViewModelBase
             AuthStatusText = T("status.authorizing");
             StatusText = AuthStatusText;
 
-            var response = await _launcherApiService.LoginAsync(ApiBaseUrl, new PublicAuthLoginRequest
-            {
-                Username = username,
-                Password = password,
-                HwidFingerprint = ComputeHwidFingerprint(),
-                DeviceUserName = ComputeDeviceUserName(),
-                TwoFactorCode = IsTwoFactorStepActive ? normalizedTwoFactorCode : string.Empty
-            });
+            var response = await ExecuteAgainstApiFailoverAsync(
+                candidate => _launcherApiService.LoginAsync(candidate, new PublicAuthLoginRequest
+                {
+                    Username = username,
+                    Password = password,
+                    HwidFingerprint = ComputeHwidFingerprint(),
+                    DeviceUserName = ComputeDeviceUserName(),
+                    TwoFactorCode = IsTwoFactorStepActive ? normalizedTwoFactorCode : string.Empty
+                }));
 
             if (response.RequiresTwoFactor)
             {
@@ -2141,20 +2198,16 @@ public partial class MainWindowViewModel : ViewModelBase
                 throw new InvalidOperationException("No saved session token for this account.");
             }
 
-            var currentApiBaseUrl = NormalizeBaseUrl(ApiBaseUrl);
             var accountApiBaseUrl = NormalizeBaseUrlOrEmpty(account.ApiBaseUrl);
-            if (!string.IsNullOrWhiteSpace(accountApiBaseUrl) &&
-                !string.Equals(accountApiBaseUrl, currentApiBaseUrl, StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidOperationException("Saved account belongs to another API endpoint.");
-            }
 
             try
             {
-                var session = await _launcherApiService.GetSessionAsync(
-                    ApiBaseUrl,
-                    token,
-                    string.IsNullOrWhiteSpace(account.AuthTokenType) ? "Bearer" : account.AuthTokenType);
+                var session = await ExecuteAgainstApiFailoverAsync(
+                    candidate => _launcherApiService.GetSessionAsync(
+                        candidate,
+                        token,
+                        string.IsNullOrWhiteSpace(account.AuthTokenType) ? "Bearer" : account.AuthTokenType),
+                    preferredApiBaseUrl: accountApiBaseUrl);
                 var selectedUsername = (account.Username ?? string.Empty).Trim();
                 var sessionUsername = (session.Username ?? string.Empty).Trim();
                 var selectedExternalId = (account.ExternalId ?? string.Empty).Trim();
@@ -2194,7 +2247,7 @@ public partial class MainWindowViewModel : ViewModelBase
                     sessionUsername,
                     sessionExternalId,
                     session.Roles,
-                    currentApiBaseUrl);
+                    ApiBaseUrl);
                 await RefreshPlayerCosmeticsAsync(sessionUsername);
                 await PersistSettingsSnapshotAsync();
                 await RefreshCoreAsync();
@@ -2356,26 +2409,21 @@ public partial class MainWindowViewModel : ViewModelBase
         }
 
         var currentApiBaseUrl = NormalizeBaseUrl(ApiBaseUrl);
-        if (!string.IsNullOrWhiteSpace(_playerAuthApiBaseUrl) &&
-            !string.Equals(_playerAuthApiBaseUrl, currentApiBaseUrl, StringComparison.OrdinalIgnoreCase))
-        {
-            ClearAuthenticatedPlayerSession();
-            await PersistSettingsSnapshotAsync();
-            return;
-        }
 
         var fallbackStoredUsername = SelectedStoredAccount?.Username?.Trim() ?? string.Empty;
 
         try
         {
-            var session = await _launcherApiService.GetSessionAsync(ApiBaseUrl, _playerAuthToken, _playerAuthTokenType);
+            var session = await ExecuteAgainstApiFailoverAsync(
+                candidate => _launcherApiService.GetSessionAsync(candidate, _playerAuthToken, _playerAuthTokenType),
+                preferredApiBaseUrl: _playerAuthApiBaseUrl);
             SetAuthenticatedPlayerSession(
                 _playerAuthToken,
                 _playerAuthTokenType,
                 session.Username,
                 session.ExternalId,
                 session.Roles,
-                currentApiBaseUrl);
+                ApiBaseUrl);
 
             await RefreshPlayerCosmeticsAsync(session.Username);
             await PersistSettingsSnapshotAsync();
@@ -2420,18 +2468,18 @@ public partial class MainWindowViewModel : ViewModelBase
                 : "Токен игрока отсутствует. Требуется повторный вход.";
         }
 
-        var currentApiBaseUrl = NormalizeBaseUrl(ApiBaseUrl);
-
         try
         {
-            var session = await _launcherApiService.GetSessionAsync(ApiBaseUrl, _playerAuthToken, _playerAuthTokenType);
+            var session = await ExecuteAgainstApiFailoverAsync(
+                candidate => _launcherApiService.GetSessionAsync(candidate, _playerAuthToken, _playerAuthTokenType),
+                preferredApiBaseUrl: _playerAuthApiBaseUrl);
             SetAuthenticatedPlayerSession(
                 _playerAuthToken,
                 _playerAuthTokenType,
                 session.Username,
                 session.ExternalId,
                 session.Roles,
-                currentApiBaseUrl);
+                ApiBaseUrl);
             await PersistSettingsSnapshotAsync();
             return string.Empty;
         }
@@ -2453,6 +2501,123 @@ public partial class MainWindowViewModel : ViewModelBase
         catch (Exception ex)
         {
             return $"Failed to validate player session before launch: {ex.Message}";
+        }
+    }
+
+    private async Task<PublicGameSessionStartResponse?> TryStartGameSessionAsync(ManagedServerItem server)
+    {
+        if (string.IsNullOrWhiteSpace(_playerAuthToken))
+        {
+            throw new InvalidOperationException("Player auth token is missing.");
+        }
+
+        try
+        {
+            var session = await ExecuteAgainstApiFailoverAsync(
+                candidate => _launcherApiService.StartGameSessionAsync(
+                    candidate,
+                    _playerAuthToken,
+                    _playerAuthTokenType,
+                    new PublicGameSessionStartRequest
+                    {
+                        ServerId = server.ServerId,
+                        ServerName = server.DisplayName
+                    }),
+                preferredApiBaseUrl: _playerAuthApiBaseUrl);
+
+            if (session.Limit > 0)
+            {
+                _logService.LogInfo(
+                    $"Game session started: {session.SessionId} for {server.DisplayName}. " +
+                    $"Active accounts on device: {session.ActiveAccountsOnDevice}/{session.Limit}.");
+            }
+
+            return session;
+        }
+        catch (LauncherApiException apiException) when (
+            apiException.StatusCode is HttpStatusCode.Conflict or HttpStatusCode.Forbidden)
+        {
+            if (TryShowBanNotice(apiException))
+            {
+                StatusText = BanNoticeMessage;
+                return null;
+            }
+
+            throw;
+        }
+    }
+
+    private async Task RunGameSessionHeartbeatLoopAsync(
+        PublicGameSessionStartResponse gameSession,
+        CancellationToken cancellationToken)
+    {
+        var heartbeatIntervalSeconds = Math.Clamp(gameSession.HeartbeatIntervalSeconds, 10, 120);
+        var delay = TimeSpan.FromSeconds(heartbeatIntervalSeconds);
+
+        while (true)
+        {
+            await Task.Delay(delay, cancellationToken);
+
+            try
+            {
+                await ExecuteAgainstApiFailoverAsync(
+                    async candidate =>
+                    {
+                        await _launcherApiService.HeartbeatGameSessionAsync(
+                            candidate,
+                            _playerAuthToken,
+                            _playerAuthTokenType,
+                            gameSession.SessionId,
+                            cancellationToken);
+                        return true;
+                    },
+                    preferredApiBaseUrl: _playerAuthApiBaseUrl,
+                    persistSuccess: false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (LauncherApiException apiException) when (
+                apiException.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+            {
+                _logService.LogInfo(
+                    $"Game session heartbeat stopped permanently for {gameSession.SessionId}: " +
+                    $"{(int)apiException.StatusCode} {apiException.Message}");
+                return;
+            }
+            catch (Exception ex)
+            {
+                _logService.LogInfo($"Game session heartbeat warning for {gameSession.SessionId}: {ex.Message}");
+            }
+        }
+    }
+
+    private async Task TryStopGameSessionAsync(Guid sessionId)
+    {
+        if (sessionId == Guid.Empty || string.IsNullOrWhiteSpace(_playerAuthToken))
+        {
+            return;
+        }
+
+        try
+        {
+            await ExecuteAgainstApiFailoverAsync(
+                async candidate =>
+                {
+                    await _launcherApiService.StopGameSessionAsync(
+                        candidate,
+                        _playerAuthToken,
+                        _playerAuthTokenType,
+                        sessionId);
+                    return true;
+                },
+                preferredApiBaseUrl: _playerAuthApiBaseUrl,
+                persistSuccess: false);
+        }
+        catch (Exception ex)
+        {
+            _logService.LogInfo($"Game session stop warning for {sessionId}: {ex.Message}");
         }
     }
 
@@ -2512,8 +2677,12 @@ public partial class MainWindowViewModel : ViewModelBase
 
         try
         {
-            HasSkin = await _launcherApiService.HasSkinAsync(ApiBaseUrl, normalized);
-            HasCape = await _launcherApiService.HasCapeAsync(ApiBaseUrl, normalized);
+            HasSkin = await ExecuteAgainstApiFailoverAsync(
+                candidate => _launcherApiService.HasSkinAsync(candidate, normalized),
+                persistSuccess: false);
+            HasCape = await ExecuteAgainstApiFailoverAsync(
+                candidate => _launcherApiService.HasCapeAsync(candidate, normalized),
+                persistSuccess: false);
         }
         catch (Exception ex)
         {
@@ -3366,6 +3535,130 @@ public partial class MainWindowViewModel : ViewModelBase
         return changed;
     }
 
+    private void MergeKnownApiBaseUrls(IEnumerable<string>? candidates)
+    {
+        foreach (var candidate in candidates ?? [])
+        {
+            var normalized = NormalizeBaseUrlOrEmpty(candidate);
+            if (string.IsNullOrWhiteSpace(normalized) ||
+                _knownApiBaseUrls.Contains(normalized, StringComparer.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            _knownApiBaseUrls.Add(normalized);
+        }
+    }
+
+    private IEnumerable<string> GetApiBaseUrlCandidates(string? preferredApiBaseUrl = null)
+    {
+        var candidates = new List<string>();
+
+        void Add(string? value)
+        {
+            var normalized = NormalizeBaseUrlOrEmpty(value);
+            if (string.IsNullOrWhiteSpace(normalized) ||
+                candidates.Contains(normalized, StringComparer.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            candidates.Add(normalized);
+        }
+
+        Add(preferredApiBaseUrl);
+        Add(ApiBaseUrl);
+        Add(_playerAuthApiBaseUrl);
+        Add(TryResolveConfiguredApiBaseUrl());
+
+        foreach (var knownApiBaseUrl in _knownApiBaseUrls)
+        {
+            Add(knownApiBaseUrl);
+        }
+
+        foreach (var bundledFallback in ResolveBundledFallbackApiBaseUrls())
+        {
+            Add(bundledFallback);
+        }
+
+        Add(LocalFallbackApiBaseUrl);
+        return candidates;
+    }
+
+    private async Task<T> ExecuteAgainstApiFailoverAsync<T>(
+        Func<string, Task<T>> operation,
+        string? preferredApiBaseUrl = null,
+        bool persistSuccess = true)
+    {
+        Exception? lastError = null;
+        foreach (var candidate in GetApiBaseUrlCandidates(preferredApiBaseUrl))
+        {
+            try
+            {
+                var result = await operation(candidate);
+                MergeKnownApiBaseUrls([candidate]);
+                if (persistSuccess)
+                {
+                    ApiBaseUrl = candidate;
+                }
+
+                return result;
+            }
+            catch (LauncherApiException apiException) when (ShouldTryNextApiBaseUrl(apiException))
+            {
+                lastError = apiException;
+                _logService.LogInfo($"API candidate failed and will be skipped: {candidate} ({(int)apiException.StatusCode}) {apiException.Message}");
+            }
+            catch (HttpRequestException httpException)
+            {
+                lastError = httpException;
+                _logService.LogInfo($"API candidate failed and will be skipped: {candidate} ({httpException.Message})");
+            }
+            catch (TaskCanceledException canceledException)
+            {
+                lastError = canceledException;
+                _logService.LogInfo($"API candidate timed out and will be skipped: {candidate} ({canceledException.Message})");
+            }
+        }
+
+        throw lastError ?? new InvalidOperationException("No reachable API endpoints are configured.");
+    }
+
+    private static bool ShouldTryNextApiBaseUrl(LauncherApiException apiException)
+    {
+        return apiException.StatusCode is
+            HttpStatusCode.NotFound or
+            HttpStatusCode.RequestTimeout or
+            HttpStatusCode.TooManyRequests or
+            HttpStatusCode.InternalServerError or
+            HttpStatusCode.BadGateway or
+            HttpStatusCode.ServiceUnavailable or
+            HttpStatusCode.GatewayTimeout;
+    }
+
+    private static IReadOnlyList<string> ResolveBundledFallbackApiBaseUrls()
+    {
+        var assembly = Assembly.GetEntryAssembly() ?? typeof(MainWindowViewModel).Assembly;
+        var rawValue = assembly
+            .GetCustomAttributes<AssemblyMetadataAttribute>()
+            .FirstOrDefault(attribute => string.Equals(
+                attribute.Key,
+                LauncherFallbackApiBaseUrlsAssemblyMetadataKey,
+                StringComparison.OrdinalIgnoreCase))?
+            .Value;
+        if (string.IsNullOrWhiteSpace(rawValue))
+        {
+            return [];
+        }
+
+        return rawValue
+            .Split(new[] { '\r', '\n', ';', ',' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(NormalizeBaseUrlOrEmpty)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
     private void ApplyProfileRuntimeFallback(LauncherManifest manifest, string profileSlug)
     {
         if (manifest is null || string.IsNullOrWhiteSpace(profileSlug))
@@ -3552,6 +3845,19 @@ public partial class MainWindowViewModel : ViewModelBase
             return true;
         }
 
+        if (errorCode == "device_account_limit")
+        {
+            title = _languageCode == "en"
+                ? "Device limit reached"
+                : "Лимит аккаунтов на устройстве";
+            message = !string.IsNullOrWhiteSpace(rawMessage)
+                ? rawMessage
+                : _languageCode == "en"
+                    ? "Too many active game accounts are already running from this computer."
+                    : "С этого компьютера уже запущено максимально допустимое число игровых аккаунтов.";
+            return true;
+        }
+
         return false;
     }
 
@@ -3607,7 +3913,35 @@ public partial class MainWindowViewModel : ViewModelBase
         return normalized.Length > 180 ? $"{normalized[..180]}..." : normalized;
     }
 
-    private string BuildNewsMeta(string sourceRaw, bool pinned, DateTime createdAtUtc)
+    private static string NormalizeNewsScopeType(string? rawScopeType)
+    {
+        var normalized = (rawScopeType ?? string.Empty).Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "profile" => "profile",
+            "server" => "server",
+            _ => "global"
+        };
+    }
+
+    private static string NormalizeNewsScopeId(string? rawScopeId)
+    {
+        return string.IsNullOrWhiteSpace(rawScopeId) ? string.Empty : rawScopeId.Trim();
+    }
+
+    private string BuildNewsScopeLabel(string? rawScopeType, string? rawScopeName)
+    {
+        var scopeType = NormalizeNewsScopeType(rawScopeType);
+        var scopeName = (rawScopeName ?? string.Empty).Trim();
+        return scopeType switch
+        {
+            "profile" when !string.IsNullOrWhiteSpace(scopeName) => _languageCode == "en" ? $"Profile: {scopeName}" : $"Профиль: {scopeName}",
+            "server" when !string.IsNullOrWhiteSpace(scopeName) => _languageCode == "en" ? $"Server: {scopeName}" : $"Сервер: {scopeName}",
+            _ => _languageCode == "en" ? "All branches" : "Все ветки"
+        };
+    }
+
+    private string BuildNewsMeta(string sourceRaw, bool pinned, DateTime createdAtUtc, string? scopeTypeRaw, string? scopeNameRaw)
     {
         var source = string.IsNullOrWhiteSpace(sourceRaw) ? "manual" : sourceRaw.Trim();
         if (source.Equals("manual", StringComparison.OrdinalIgnoreCase))
@@ -3616,9 +3950,41 @@ public partial class MainWindowViewModel : ViewModelBase
         }
 
         var localTime = createdAtUtc.ToLocalTime().ToString("g");
-        return pinned
+        var scopeLabel = BuildNewsScopeLabel(scopeTypeRaw, scopeNameRaw);
+        var baseMeta = pinned
             ? F("news.meta.pinned", source, localTime)
             : F("news.meta.regular", source, localTime);
+        return $"{scopeLabel} | {baseMeta}";
+    }
+
+    private void RefreshVisibleNewsItems()
+    {
+        var selectedServerId = SelectedServer?.ServerId.ToString();
+        var selectedProfileId = SelectedServer?.ProfileId.ToString();
+        var filteredNews = _allNewsItems
+            .Where(item =>
+            {
+                var scopeType = NormalizeNewsScopeType(item.ScopeType);
+                var scopeId = NormalizeNewsScopeId(item.ScopeId);
+                return scopeType == "global" ||
+                       (scopeType == "profile" &&
+                        !string.IsNullOrWhiteSpace(selectedProfileId) &&
+                        string.Equals(scopeId, selectedProfileId, StringComparison.OrdinalIgnoreCase)) ||
+                       (scopeType == "server" &&
+                        !string.IsNullOrWhiteSpace(selectedServerId) &&
+                        string.Equals(scopeId, selectedServerId, StringComparison.OrdinalIgnoreCase));
+            })
+            .OrderByDescending(item => item.Pinned)
+            .ThenByDescending(item => item.CreatedAtUtc)
+            .ToList();
+
+        NewsItems.Clear();
+        foreach (var item in filteredNews)
+        {
+            NewsItems.Add(item);
+        }
+
+        SelectedNewsItem = NewsItems.FirstOrDefault();
     }
 
     private string BuildDiscordPreview(bool enabled, string appId, string details, string state)
@@ -3789,7 +4155,7 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private string GetSelectedRouteCode(string profileSlug)
     {
-        return _profileRouteSelections.TryGetValue(profileSlug, out var route) ? NormalizeRouteCode(route) : "main";
+        return "main";
     }
 
     private void SyncSelectedRouteOption()
@@ -3809,22 +4175,10 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private void RebuildRouteOptions()
     {
-        var selectedRoute = SelectedServer is null ? "main" : GetSelectedRouteCode(SelectedServer.ProfileSlug);
         _isSyncingRouteOption = true;
         RouteOptions.Clear();
         RouteOptions.Add(new LocalizedOption { Value = "main", Label = T("route.main") });
-
-        if (SelectedServer is not null && SupportsRuRoute(SelectedServer))
-        {
-            RouteOptions.Add(new LocalizedOption { Value = "ru", Label = T("route.ru") });
-        }
-
-        if (!RouteOptions.Any(x => x.Value == selectedRoute))
-        {
-            selectedRoute = "main";
-        }
-
-        SelectedRouteOption = RouteOptions.FirstOrDefault(x => x.Value == selectedRoute) ?? RouteOptions[0];
+        SelectedRouteOption = RouteOptions[0];
         _isSyncingRouteOption = false;
     }
 
@@ -3835,25 +4189,6 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private GameLaunchRoute ResolveLaunchRoute(ManagedServerItem server)
     {
-        var routeCode = GetSelectedRouteCode(server.ProfileSlug);
-
-        if (routeCode == "ru")
-        {
-            if (string.IsNullOrWhiteSpace(server.RuProxyAddress))
-            {
-                throw new InvalidOperationException(T("validation.ruProxyAddressRequired"));
-            }
-
-            return new GameLaunchRoute
-            {
-                RouteCode = "ru",
-                Address = server.RuProxyAddress.Trim(),
-                Port = server.RuProxyPort,
-                PreferredJarPath = server.RuJarPath.Trim(),
-                McVersion = server.McVersion
-            };
-        }
-
         return new GameLaunchRoute
         {
             RouteCode = "main",
@@ -3902,6 +4237,7 @@ public partial class MainWindowViewModel : ViewModelBase
         var localizedServers = ManagedServers.Select(server => new ManagedServerItem
         {
             ServerId = server.ServerId,
+            ProfileId = server.ProfileId,
             ProfileSlug = server.ProfileSlug,
             ProfileName = server.ProfileName,
             ServerName = server.ServerName,
@@ -3949,31 +4285,28 @@ public partial class MainWindowViewModel : ViewModelBase
             SelectedServer = ManagedServers.FirstOrDefault(x => x.ServerId == selectedServerId.Value);
         }
 
-        var localizedNews = NewsItems.Select(item => new LauncherNewsItem
+        var localizedNewsItems = _allNewsItems.Select(item => new LauncherNewsItem
         {
             Id = item.Id,
             Title = item.Title,
             Body = item.Body,
             Preview = item.Preview,
             Source = item.Source,
+            ScopeType = item.ScopeType,
+            ScopeId = item.ScopeId,
+            ScopeName = item.ScopeName,
             Pinned = item.Pinned,
             CreatedAtUtc = item.CreatedAtUtc,
-            Meta = BuildNewsMeta(item.Source, item.Pinned, item.CreatedAtUtc)
+            Meta = BuildNewsMeta(item.Source, item.Pinned, item.CreatedAtUtc, item.ScopeType, item.ScopeName)
         }).ToList();
 
-        NewsItems.Clear();
-        foreach (var item in localizedNews)
-        {
-            NewsItems.Add(item);
-        }
+        _allNewsItems.Clear();
+        _allNewsItems.AddRange(localizedNewsItems);
 
+        RefreshVisibleNewsItems();
         if (selectedNewsId.HasValue)
         {
-            SelectedNewsItem = NewsItems.FirstOrDefault(x => x.Id == selectedNewsId.Value);
-        }
-        else
-        {
-            SelectedNewsItem = NewsItems.FirstOrDefault();
+            SelectedNewsItem = NewsItems.FirstOrDefault(x => x.Id == selectedNewsId.Value) ?? SelectedNewsItem;
         }
     }
 
@@ -4016,6 +4349,14 @@ public partial class MainWindowViewModel : ViewModelBase
         OnPropertyChanged(nameof(CopyCrashButtonText));
         OnPropertyChanged(nameof(CrashFlagText));
         OnPropertyChanged(nameof(DebugLogHeaderText));
+        OnPropertyChanged(nameof(SelectedNewsTitle));
+        OnPropertyChanged(nameof(SelectedNewsMeta));
+        OnPropertyChanged(nameof(SelectedNewsBody));
+        OnPropertyChanged(nameof(SelectedNewsHeadlineText));
+        OnPropertyChanged(nameof(SelectedNewsBodyText));
+        OnPropertyChanged(nameof(SelectedNewsMetaText));
+        OnPropertyChanged(nameof(HasSelectedNews));
+        OnPropertyChanged(nameof(EmptyNewsText));
         OnPropertyChanged(nameof(ServerMonitoringText));
     }
 

@@ -2,6 +2,7 @@ namespace BivLauncher.Api.Contracts.Public;
 
 public sealed record BootstrapResponse(
     string PublicBaseUrl,
+    IReadOnlyList<string> FallbackApiBaseUrls,
     BrandingConfig Branding,
     LauncherConstraints Constraints,
     IReadOnlyList<BootstrapProfileDto> Profiles,
@@ -82,6 +83,9 @@ public sealed record BootstrapNewsItemDto(
     string Title,
     string Body,
     string Source,
+    string ScopeType,
+    string ScopeId,
+    string ScopeName,
     bool Pinned,
     DateTime CreatedAtUtc);
 

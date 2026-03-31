@@ -117,4 +117,51 @@ public sealed class AdminAuthController(
             username = User.Identity?.Name
         });
     }
+
+    [Authorize(Roles = "admin")]
+    [HttpPost("change-password")]
+    public async Task<IActionResult> ChangePassword(
+        [FromBody] AdminChangePasswordRequest request,
+        CancellationToken cancellationToken)
+    {
+        var currentAdminUsername = (User.Identity?.Name ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(currentAdminUsername))
+        {
+            return Unauthorized(new { error = "Admin session is invalid." });
+        }
+
+        var admin = await dbContext.AdminUsers.FirstOrDefaultAsync(
+            x => x.Username == currentAdminUsername,
+            cancellationToken);
+        if (admin is null)
+        {
+            return Unauthorized(new { error = "Admin account not found." });
+        }
+
+        var verification = passwordHasher.VerifyHashedPassword(admin, admin.PasswordHash, request.CurrentPassword);
+        if (verification == PasswordVerificationResult.Failed)
+        {
+            await auditService.WriteAsync(
+                action: "admin.password.failed",
+                actor: currentAdminUsername,
+                entityType: "admin",
+                entityId: admin.Id.ToString(),
+                details: new { error = "Current password mismatch." },
+                cancellationToken: cancellationToken);
+            return Unauthorized(new { error = "Current password is invalid." });
+        }
+
+        admin.PasswordHash = passwordHasher.HashPassword(admin, request.NewPassword);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        await auditService.WriteAsync(
+            action: "admin.password.change",
+            actor: currentAdminUsername,
+            entityType: "admin",
+            entityId: admin.Id.ToString(),
+            details: new { success = true },
+            cancellationToken: cancellationToken);
+
+        return Ok(new { success = true });
+    }
 }

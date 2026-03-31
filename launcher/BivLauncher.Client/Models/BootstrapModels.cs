@@ -6,6 +6,7 @@ namespace BivLauncher.Client.Models;
 public sealed class BootstrapResponse
 {
     public string PublicBaseUrl { get; set; } = string.Empty;
+    public List<string> FallbackApiBaseUrls { get; set; } = [];
     public BrandingConfig Branding { get; set; } = new();
     public LauncherConstraints Constraints { get; set; } = new();
     public List<BootstrapProfile> Profiles { get; set; } = [];
@@ -115,6 +116,9 @@ public sealed class BootstrapNewsItem
     public string Title { get; set; } = string.Empty;
     public string Body { get; set; } = string.Empty;
     public string Source { get; set; } = string.Empty;
+    public string ScopeType { get; set; } = "global";
+    public string ScopeId { get; set; } = string.Empty;
+    public string ScopeName { get; set; } = string.Empty;
     public bool Pinned { get; set; }
     public DateTime CreatedAtUtc { get; set; }
 }
@@ -127,6 +131,9 @@ public sealed class LauncherNewsItem
     public required string Preview { get; init; }
     public required string Meta { get; init; }
     public required string Source { get; init; }
+    public required string ScopeType { get; init; }
+    public required string ScopeId { get; init; }
+    public required string ScopeName { get; init; }
     public required bool Pinned { get; init; }
     public required DateTime CreatedAtUtc { get; init; }
 }
@@ -134,6 +141,7 @@ public sealed class LauncherNewsItem
 public sealed partial class ManagedServerItem : ObservableObject
 {
     public required Guid ServerId { get; init; }
+    public required Guid ProfileId { get; init; }
     public required string ProfileSlug { get; init; }
     public required string ProfileName { get; init; }
     public required string ServerName { get; init; }

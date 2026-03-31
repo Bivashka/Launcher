@@ -8,6 +8,7 @@ public sealed class LauncherSettings
     public int RamMb { get; set; } = 2048;
     public string JavaMode { get; set; } = "Auto";
     public string Language { get; set; } = "ru";
+    public List<string> KnownApiBaseUrls { get; set; } = [];
     public List<ProfileRouteSelection> ProfileRouteSelections { get; set; } = [];
     public string SelectedServerId { get; set; } = string.Empty;
     public string LastPlayerUsername { get; set; } = string.Empty;

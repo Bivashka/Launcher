@@ -18,6 +18,8 @@ builder.Services.AddSwaggerGen();
 
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection(JwtOptions.SectionName));
 builder.Services.Configure<BrandingOptions>(builder.Configuration.GetSection(BrandingOptions.SectionName));
+builder.Services.Configure<DeliverySettingsOptions>(builder.Configuration.GetSection(DeliverySettingsOptions.SectionName));
+builder.Services.Configure<SecuritySettingsOptions>(builder.Configuration.GetSection(SecuritySettingsOptions.SectionName));
 builder.Services.Configure<S3Options>(builder.Configuration.GetSection(S3Options.SectionName));
 builder.Services.Configure<NewsSyncOptions>(builder.Configuration.GetSection(NewsSyncOptions.SectionName));
 builder.Services.Configure<NewsRetentionOptions>(builder.Configuration.GetSection(NewsRetentionOptions.SectionName));
@@ -50,8 +52,10 @@ builder.Services.AddScoped<IRuntimeRetentionService, RuntimeRetentionService>();
 builder.Services.AddScoped<INewsImportService, NewsImportService>();
 builder.Services.AddSingleton<IHardwareFingerprintService, HardwareFingerprintService>();
 builder.Services.AddSingleton<IBrandingProvider, BrandingProvider>();
+builder.Services.AddSingleton<IDeliverySettingsProvider, DeliverySettingsProvider>();
+builder.Services.AddSingleton<ISecuritySettingsProvider, SecuritySettingsProvider>();
 builder.Services.AddSingleton<IObjectStorageService, S3ObjectStorageService>();
-builder.Services.AddSingleton<IAssetUrlService, AssetUrlService>();
+builder.Services.AddScoped<IAssetUrlService, AssetUrlService>();
 builder.Services.AddHostedService<NewsSyncHostedService>();
 builder.Services.AddHostedService<RuntimeRetentionHostedService>();
 
@@ -164,6 +168,18 @@ builder.Services.PostConfigure<BrandingOptions>(options =>
 {
     options.FilePath = (builder.Configuration["BRANDING_FILE_PATH"] ?? options.FilePath ?? string.Empty).Trim();
     options.FilePath = string.IsNullOrWhiteSpace(options.FilePath) ? "branding.json" : options.FilePath;
+});
+
+builder.Services.PostConfigure<DeliverySettingsOptions>(options =>
+{
+    options.FilePath = (builder.Configuration["DELIVERY_FILE_PATH"] ?? options.FilePath ?? string.Empty).Trim();
+    options.FilePath = string.IsNullOrWhiteSpace(options.FilePath) ? "delivery.json" : options.FilePath;
+});
+
+builder.Services.PostConfigure<SecuritySettingsOptions>(options =>
+{
+    options.FilePath = (builder.Configuration["SECURITY_SETTINGS_FILE_PATH"] ?? options.FilePath ?? string.Empty).Trim();
+    options.FilePath = string.IsNullOrWhiteSpace(options.FilePath) ? "security-settings.json" : options.FilePath;
 });
 
 builder.Services.PostConfigure<LauncherUpdateOptions>(options =>

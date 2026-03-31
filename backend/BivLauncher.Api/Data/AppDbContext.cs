@@ -8,6 +8,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<AdminUser> AdminUsers => Set<AdminUser>();
     public DbSet<AdminAuditLog> AdminAuditLogs => Set<AdminAuditLog>();
     public DbSet<AuthAccount> AuthAccounts => Set<AuthAccount>();
+    public DbSet<ActiveGameSession> ActiveGameSessions => Set<ActiveGameSession>();
     public DbSet<TwoFactorConfig> TwoFactorConfigs => Set<TwoFactorConfig>();
     public DbSet<AuthProviderConfig> AuthProviderConfigs => Set<AuthProviderConfig>();
     public DbSet<NewsSourceConfig> NewsSourceConfigs => Set<NewsSourceConfig>();
@@ -67,6 +68,23 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.Property(x => x.HwidHash).HasMaxLength(128);
             entity.Property(x => x.DeviceUserName).HasMaxLength(128);
             entity.Property(x => x.TwoFactorSecret).HasMaxLength(128);
+        });
+
+        modelBuilder.Entity<ActiveGameSession>(entity =>
+        {
+            entity.HasIndex(x => x.AccountId);
+            entity.HasIndex(x => x.HwidHash);
+            entity.HasIndex(x => x.DeviceUserName);
+            entity.HasIndex(x => x.ExpiresAtUtc);
+            entity.Property(x => x.Username).HasMaxLength(64);
+            entity.Property(x => x.HwidHash).HasMaxLength(128);
+            entity.Property(x => x.DeviceUserName).HasMaxLength(128);
+            entity.Property(x => x.ServerName).HasMaxLength(128);
+
+            entity.HasOne(x => x.Account)
+                .WithMany()
+                .HasForeignKey(x => x.AccountId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<TwoFactorConfig>(entity =>
@@ -267,9 +285,12 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
 
         modelBuilder.Entity<NewsItem>(entity =>
         {
+            entity.HasIndex(x => new { x.ScopeType, x.ScopeId, x.CreatedAtUtc });
             entity.Property(x => x.Title).HasMaxLength(256);
             entity.Property(x => x.Body).HasMaxLength(8192);
             entity.Property(x => x.Source).HasMaxLength(256);
+            entity.Property(x => x.ScopeType).HasMaxLength(16);
+            entity.Property(x => x.ScopeId).HasMaxLength(64);
         });
 
         modelBuilder.Entity<DocumentationArticle>(entity =>
