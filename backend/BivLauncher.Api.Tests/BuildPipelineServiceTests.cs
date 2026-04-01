@@ -159,6 +159,20 @@ public sealed class BuildPipelineServiceTests
             return Task.FromResult(value);
         }
 
+        public Task<StoredObjectStream?> OpenReadAsync(string key, CancellationToken cancellationToken = default)
+        {
+            if (!_objects.TryGetValue(key, out var value))
+            {
+                return Task.FromResult<StoredObjectStream?>(null);
+            }
+
+            return Task.FromResult<StoredObjectStream?>(
+                new StoredObjectStream(
+                    new MemoryStream(value.Data, writable: false),
+                    value.ContentType,
+                    value.Data.LongLength));
+        }
+
         public Task<StoredObjectMetadata?> GetMetadataAsync(string key, CancellationToken cancellationToken = default)
         {
             _objects.TryGetValue(key, out var value);

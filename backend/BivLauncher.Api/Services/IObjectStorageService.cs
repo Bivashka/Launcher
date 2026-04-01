@@ -9,11 +9,13 @@ public interface IObjectStorageService
         IReadOnlyDictionary<string, string>? metadata = null,
         CancellationToken cancellationToken = default);
     Task<StoredObject?> GetAsync(string key, CancellationToken cancellationToken = default);
+    Task<StoredObjectStream?> OpenReadAsync(string key, CancellationToken cancellationToken = default);
     Task<StoredObjectMetadata?> GetMetadataAsync(string key, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<StoredObjectListItem>> ListByPrefixAsync(string prefix, CancellationToken cancellationToken = default);
     Task DeleteAsync(string key, CancellationToken cancellationToken = default);
 }
 
 public sealed record StoredObject(byte[] Data, string ContentType);
+public sealed record StoredObjectStream(Stream Stream, string ContentType, long? SizeBytes);
 public sealed record StoredObjectMetadata(long SizeBytes, string ContentType, string Sha256);
 public sealed record StoredObjectListItem(string Key, long SizeBytes, DateTime LastModifiedUtc);

@@ -386,13 +386,20 @@ public sealed class PublicController(
         }
 
         var normalizedKey = key.TrimStart('/');
-        var storedObject = await objectStorageService.GetAsync(normalizedKey, cancellationToken);
+        var storedObject = await objectStorageService.OpenReadAsync(normalizedKey, cancellationToken);
         if (storedObject is null)
         {
             return NotFound();
         }
 
-        return File(storedObject.Data, storedObject.ContentType);
+        if (storedObject.SizeBytes is long sizeBytes)
+        {
+            Response.ContentLength = sizeBytes;
+        }
+
+        var result = File(storedObject.Stream, storedObject.ContentType);
+        result.EnableRangeProcessing = true;
+        return result;
     }
 
     private static int ResolvePositiveInt(string? rawValue, int fallback)

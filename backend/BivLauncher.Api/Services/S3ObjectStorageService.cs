@@ -64,6 +64,14 @@ public sealed class S3ObjectStorageService(
             : await GetLocalAsync(settings, key, cancellationToken);
     }
 
+    public async Task<StoredObjectStream?> OpenReadAsync(string key, CancellationToken cancellationToken = default)
+    {
+        var settings = await ResolveSettingsAsync(cancellationToken);
+        return settings.UseS3
+            ? await OpenS3ReadAsync(settings, key, cancellationToken)
+            : await OpenLocalReadAsync(settings, key, cancellationToken);
+    }
+
     public async Task<StoredObjectMetadata?> GetMetadataAsync(string key, CancellationToken cancellationToken = default)
     {
         var settings = await ResolveSettingsAsync(cancellationToken);
@@ -323,6 +331,32 @@ public sealed class S3ObjectStorageService(
         }
     }
 
+    private async Task<StoredObjectStream?> OpenS3ReadAsync(
+        ResolvedStorageSettings settings,
+        string key,
+        CancellationToken cancellationToken)
+    {
+        var client = await GetClientAsync(settings, cancellationToken);
+        await EnsureBucketExistsAsync(client, settings, cancellationToken);
+
+        try
+        {
+            var response = await client.GetObjectAsync(settings.Bucket, NormalizeStorageKey(key), cancellationToken);
+            var contentType = string.IsNullOrWhiteSpace(response.Headers.ContentType)
+                ? "application/octet-stream"
+                : response.Headers.ContentType;
+            var sizeBytes = response.Headers.ContentLength >= 0
+                ? (long?)response.Headers.ContentLength
+                : null;
+            var ownedStream = new OwnedStream(response.ResponseStream, response);
+            return new StoredObjectStream(ownedStream, contentType, sizeBytes);
+        }
+        catch (AmazonS3Exception ex) when (ex.StatusCode == HttpStatusCode.NotFound || ex.ErrorCode == "NoSuchKey")
+        {
+            return null;
+        }
+    }
+
     private async Task<IReadOnlyList<StoredObjectListItem>> ListS3ByPrefixAsync(
         ResolvedStorageSettings settings,
         string prefix,
@@ -448,6 +482,33 @@ public sealed class S3ObjectStorageService(
         }
 
         return new StoredObjectMetadata(fileInfo.Length, contentType, sha256);
+    }
+
+    private async Task<StoredObjectStream?> OpenLocalReadAsync(
+        ResolvedStorageSettings settings,
+        string key,
+        CancellationToken cancellationToken)
+    {
+        var objectPath = ResolveLocalObjectPath(settings, key, createParentDirectory: false);
+        if (!File.Exists(objectPath))
+        {
+            return null;
+        }
+
+        var metadata = await TryReadLocalMetadataAsync(objectPath, cancellationToken);
+        var contentType = string.IsNullOrWhiteSpace(metadata?.ContentType)
+            ? InferContentTypeFromKey(key)
+            : metadata.ContentType!.Trim();
+        var fileInfo = new FileInfo(objectPath);
+        var stream = new FileStream(
+            objectPath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            bufferSize: 131072,
+            options: FileOptions.Asynchronous | FileOptions.SequentialScan);
+
+        return new StoredObjectStream(stream, contentType, fileInfo.Length);
     }
 
     private IReadOnlyList<StoredObjectListItem> ListLocalByPrefix(ResolvedStorageSettings settings, string prefix)
@@ -769,5 +830,109 @@ public sealed class S3ObjectStorageService(
     {
         public string ContentType { get; set; } = "application/octet-stream";
         public Dictionary<string, string> Metadata { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private sealed class OwnedStream(Stream inner, IDisposable owner) : Stream
+    {
+        private readonly Stream _inner = inner;
+        private readonly IDisposable _owner = owner;
+
+        public override bool CanRead => _inner.CanRead;
+        public override bool CanSeek => _inner.CanSeek;
+        public override bool CanWrite => _inner.CanWrite;
+        public override long Length => _inner.Length;
+
+        public override long Position
+        {
+            get => _inner.Position;
+            set => _inner.Position = value;
+        }
+
+        public override void Flush()
+        {
+            _inner.Flush();
+        }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            return _inner.Read(buffer, offset, count);
+        }
+
+        public override int Read(Span<byte> buffer)
+        {
+            return _inner.Read(buffer);
+        }
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            return _inner.ReadAsync(buffer, cancellationToken);
+        }
+
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            return _inner.ReadAsync(buffer, offset, count, cancellationToken);
+        }
+
+        public override long Seek(long offset, SeekOrigin origin)
+        {
+            return _inner.Seek(offset, origin);
+        }
+
+        public override void SetLength(long value)
+        {
+            _inner.SetLength(value);
+        }
+
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            _inner.Write(buffer, offset, count);
+        }
+
+        public override void Write(ReadOnlySpan<byte> buffer)
+        {
+            _inner.Write(buffer);
+        }
+
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            return _inner.WriteAsync(buffer, cancellationToken);
+        }
+
+        public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            return _inner.WriteAsync(buffer, offset, count, cancellationToken);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (!disposing)
+            {
+                base.Dispose(disposing);
+                return;
+            }
+
+            try
+            {
+                _inner.Dispose();
+            }
+            finally
+            {
+                _owner.Dispose();
+                base.Dispose(disposing);
+            }
+        }
+
+        public override async ValueTask DisposeAsync()
+        {
+            try
+            {
+                await _inner.DisposeAsync();
+            }
+            finally
+            {
+                _owner.Dispose();
+                await base.DisposeAsync();
+            }
+        }
     }
 }

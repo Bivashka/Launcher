@@ -44,13 +44,20 @@ public sealed class PublicCosmeticsController(
             return NotFound();
         }
 
-        var storedObject = await objectStorageService.GetAsync(key, cancellationToken);
+        var storedObject = await objectStorageService.OpenReadAsync(key, cancellationToken);
         if (storedObject is null)
         {
             return NotFound();
         }
 
-        return File(storedObject.Data, storedObject.ContentType);
+        if (storedObject.SizeBytes is long sizeBytes)
+        {
+            Response.ContentLength = sizeBytes;
+        }
+
+        var result = File(storedObject.Stream, storedObject.ContentType);
+        result.EnableRangeProcessing = true;
+        return result;
     }
 
     private async Task<IActionResult> GetCosmeticMeta(string user, string type, CancellationToken cancellationToken)

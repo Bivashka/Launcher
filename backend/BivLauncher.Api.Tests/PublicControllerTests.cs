@@ -158,6 +158,27 @@ public sealed class PublicControllerTests
         Assert.Equal("https://cdn.local/clients/public/build-public/mods/example.jar", file.DownloadUrl);
     }
 
+    [Fact]
+    public async Task GetAsset_ReturnsStreamedFileResult()
+    {
+        await using var fixture = await TestFixture.CreateAsync();
+        await fixture.ObjectStorage.UploadAsync(
+            "branding/background/example.png",
+            new MemoryStream([1, 2, 3, 4]),
+            "image/png");
+
+        var controller = fixture.CreateController();
+        var response = await controller.GetAsset("branding/background/example.png", CancellationToken.None);
+
+        var file = Assert.IsType<FileStreamResult>(response);
+        Assert.Equal("image/png", file.ContentType);
+        Assert.True(file.EnableRangeProcessing);
+
+        using var buffer = new MemoryStream();
+        await file.FileStream.CopyToAsync(buffer);
+        Assert.Equal([1, 2, 3, 4], buffer.ToArray());
+    }
+
     private sealed class TestFixture : IAsyncDisposable
     {
         private readonly InMemoryObjectStorageService _objectStorage = new();
@@ -392,6 +413,20 @@ public sealed class PublicControllerTests
         {
             _objects.TryGetValue(key, out var storedObject);
             return Task.FromResult(storedObject);
+        }
+
+        public Task<StoredObjectStream?> OpenReadAsync(string key, CancellationToken cancellationToken = default)
+        {
+            if (!_objects.TryGetValue(key, out var storedObject))
+            {
+                return Task.FromResult<StoredObjectStream?>(null);
+            }
+
+            return Task.FromResult<StoredObjectStream?>(
+                new StoredObjectStream(
+                    new MemoryStream(storedObject.Data, writable: false),
+                    storedObject.ContentType,
+                    storedObject.Data.LongLength));
         }
 
         public Task<StoredObjectMetadata?> GetMetadataAsync(string key, CancellationToken cancellationToken = default)
