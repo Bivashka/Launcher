@@ -1431,15 +1431,28 @@ function sanitizeApiErrorMessage(raw: string, status: number): string {
   return collapsed
 }
 
+function normalizeBaseUrl(value: string): string {
+  return value.trim().replace(/\/+$/, '')
+}
+
+function isLocalAdminHost(hostname: string): boolean {
+  const normalized = hostname.trim().toLowerCase()
+  return normalized === 'localhost' || normalized === '127.0.0.1' || normalized === '::1' || normalized === '[::1]'
+}
+
 function App() {
   const apiBaseUrl = useMemo(() => {
     const configured = import.meta.env.VITE_API_BASE_URL
     if (configured && configured.trim()) {
-      return configured.trim()
+      return normalizeBaseUrl(configured)
     }
 
-    const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:'
-    return `${protocol}//${window.location.hostname}:8080`
+    if (isLocalAdminHost(window.location.hostname)) {
+      const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:'
+      return `${protocol}//${window.location.hostname}:8080`
+    }
+
+    return normalizeBaseUrl(window.location.origin)
   }, [])
   const yggdrasilBaseUrl = useMemo(() => `${apiBaseUrl.replace(/\/+$/, '')}/api/public/yggdrasil`, [apiBaseUrl])
   const currentOrigin = useMemo(() => window.location.origin, [])
@@ -1816,7 +1829,7 @@ function App() {
     } catch (error) {
       setPhase('login')
       if (error instanceof TypeError) {
-        setError(`Нет доступа к API (${apiBaseUrl}) из ${window.location.origin}. Проверь CORS (ADMIN_ALLOWED_ORIGINS), порт API 8080 и reverse-proxy/firewall.`)
+        setError(`Нет доступа к API (${apiBaseUrl}) из ${window.location.origin}. Проверь reverse-proxy до /api, доступность backend и firewall. VITE_API_BASE_URL нужен только для локальной разработки.`)
         return
       }
 
@@ -1825,7 +1838,7 @@ function App() {
         return
       }
 
-      setError('Нет доступа к API. Проверь backend и VITE_API_BASE_URL.')
+      setError('Нет доступа к API. Проверь backend или same-origin reverse-proxy. VITE_API_BASE_URL нужен только локально.')
     }
   }
 
@@ -7774,6 +7787,9 @@ function App() {
                 <div className="action-block">
                   <small className="muted">
                     Use an accessible public URL for the panel/bootstrap, a separate asset/update mirror if needed, and fallback API URLs for launcher failover.
+                  </small>
+                  <small className="muted">
+                    If the admin panel is opened behind the same reverse proxy as the API, no VITE_API_BASE_URL or CORS override is required.
                   </small>
                   <input
                     placeholder="Public base URL (for launcher/bootstrap)"
