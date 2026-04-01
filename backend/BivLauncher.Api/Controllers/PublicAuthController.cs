@@ -136,7 +136,10 @@ public sealed class PublicAuthController(
             }
         }
 
-        var roles = NormalizeRoles(account.Roles.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        var roles = await ApplyConfiguredSecurityRolesAsync(
+            account.Username,
+            account.Roles.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+            cancellationToken);
 
         return Ok(new PublicAuthSessionResponse(
             Username: account.Username,
@@ -466,7 +469,11 @@ public sealed class PublicAuthController(
                 return Unauthorized(new { error = "Auth provider returned invalid identity payload." });
             }
 
-            roles = NormalizeRoles(authResult.Roles);
+            var providerRoles = NormalizeRoles(authResult.Roles);
+            roles = await ApplyConfiguredSecurityRolesAsync(
+                normalizedUsername,
+                providerRoles,
+                cancellationToken);
 
             var accountByExternalId = await dbContext.AuthAccounts.FirstOrDefaultAsync(
                 x => x.ExternalId == normalizedExternalId,
@@ -522,7 +529,7 @@ public sealed class PublicAuthController(
                 {
                     ExternalId = normalizedExternalId,
                     Username = normalizedUsername,
-                    Roles = string.Join(',', roles),
+                    Roles = string.Join(',', providerRoles),
                     Banned = false,
                     HwidHash = hwidHash,
                     DeviceUserName = deviceUserName
@@ -542,7 +549,7 @@ public sealed class PublicAuthController(
 
                 account.Username = normalizedUsername;
                 account.ExternalId = normalizedExternalId;
-                account.Roles = string.Join(',', roles);
+                account.Roles = string.Join(',', providerRoles);
                 account.HwidHash = hwidHash;
                 account.DeviceUserName = deviceUserName;
                 account.UpdatedAtUtc = now;
@@ -1074,6 +1081,31 @@ public sealed class PublicAuthController(
         }
 
         return normalized;
+    }
+
+    private async Task<List<string>> ApplyConfiguredSecurityRolesAsync(
+        string username,
+        IEnumerable<string> roles,
+        CancellationToken cancellationToken)
+    {
+        var normalizedRoles = NormalizeRoles(roles);
+        if (string.IsNullOrWhiteSpace(username))
+        {
+            return normalizedRoles;
+        }
+
+        var securitySettings = await securitySettingsProvider.GetSettingsAsync(cancellationToken);
+        if (securitySettings.LauncherAdminUsernames.Any(
+                configuredUsername => string.Equals(
+                    configuredUsername,
+                    username,
+                    StringComparison.OrdinalIgnoreCase)) &&
+            !normalizedRoles.Contains("admin", StringComparer.OrdinalIgnoreCase))
+        {
+            normalizedRoles.Add("admin");
+        }
+
+        return normalizedRoles;
     }
 
     private sealed record PendingTwoFactorChallenge(

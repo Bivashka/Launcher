@@ -32,6 +32,7 @@ public sealed class AdminSecuritySettingsController(
             current with
             {
                 MaxConcurrentGameAccountsPerDevice = request.MaxConcurrentGameAccountsPerDevice,
+                LauncherAdminUsernames = [.. request.LauncherAdminUsernames],
                 UpdatedAtUtc = DateTime.UtcNow
             },
             cancellationToken);
@@ -45,6 +46,7 @@ public sealed class AdminSecuritySettingsController(
             details: new
             {
                 saved.MaxConcurrentGameAccountsPerDevice,
+                saved.LauncherAdminUsernames,
                 saved.GameSessionHeartbeatIntervalSeconds,
                 saved.GameSessionExpirationSeconds
             },
@@ -129,6 +131,7 @@ public sealed class AdminSecuritySettingsController(
     {
         return new SecuritySettingsDto(
             config.MaxConcurrentGameAccountsPerDevice,
+            config.LauncherAdminUsernames,
             config.GameSessionHeartbeatIntervalSeconds,
             config.GameSessionExpirationSeconds,
             config.UpdatedAtUtc);

@@ -138,6 +138,7 @@ public sealed class SecuritySettingsProvider(
     {
         return new SecuritySettingsConfig(
             MaxConcurrentGameAccountsPerDevice: 0,
+            LauncherAdminUsernames: [],
             GameSessionHeartbeatIntervalSeconds: DefaultHeartbeatIntervalSeconds,
             GameSessionExpirationSeconds: DefaultExpirationSeconds,
             UpdatedAtUtc: null);
@@ -147,9 +148,16 @@ public sealed class SecuritySettingsProvider(
     {
         var heartbeatSeconds = Math.Clamp(settings.GameSessionHeartbeatIntervalSeconds, 15, 300);
         var expirationSeconds = Math.Clamp(settings.GameSessionExpirationSeconds, heartbeatSeconds + 30, 900);
+        var launcherAdminUsernames = (settings.LauncherAdminUsernames ?? [])
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => x.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(256)
+            .ToArray();
 
         return new SecuritySettingsConfig(
             MaxConcurrentGameAccountsPerDevice: Math.Clamp(settings.MaxConcurrentGameAccountsPerDevice, 0, 16),
+            LauncherAdminUsernames: launcherAdminUsernames,
             GameSessionHeartbeatIntervalSeconds: heartbeatSeconds,
             GameSessionExpirationSeconds: expirationSeconds,
             UpdatedAtUtc: DateTime.UtcNow);

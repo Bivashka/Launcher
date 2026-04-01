@@ -149,6 +149,34 @@ public sealed class PublicAuthControllerTests
     }
 
     [Fact]
+    public async Task Login_WhenUsernameIsConfiguredAsLauncherAdmin_ReturnsAdminRole()
+    {
+        await using var fixture = await TestFixture.CreateAsync();
+        var controller = CreateController(
+            fixture.DbContext,
+            minClientVersion: "1.0.0",
+            securitySettingsProvider: new StubSecuritySettingsProvider(new SecuritySettingsConfig(
+                MaxConcurrentGameAccountsPerDevice: 1,
+                LauncherAdminUsernames: ["player"],
+                GameSessionHeartbeatIntervalSeconds: 45,
+                GameSessionExpirationSeconds: 150,
+                UpdatedAtUtc: null)));
+        controller.ControllerContext.HttpContext.Request.Headers["X-BivLauncher-Client"] = "BivLauncher.Client/1.0.3";
+
+        var response = await controller.Login(
+            new PublicAuthLoginRequest
+            {
+                Username = "player",
+                Password = "secret"
+            },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(response.Result);
+        var payload = Assert.IsType<PublicAuthLoginResponse>(ok.Value);
+        Assert.Contains("admin", payload.Roles, StringComparer.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Logout_WhenTokenIsValid_RevokesSessionVersion()
     {
         await using var fixture = await TestFixture.CreateAsync();
@@ -221,7 +249,8 @@ public sealed class PublicAuthControllerTests
     private static PublicAuthController CreateController(
         AppDbContext dbContext,
         string minClientVersion,
-        string launcherProof = "")
+        string launcherProof = "",
+        ISecuritySettingsProvider? securitySettingsProvider = null)
     {
         var values = new Dictionary<string, string?>();
         if (!string.IsNullOrWhiteSpace(minClientVersion))
@@ -245,7 +274,7 @@ public sealed class PublicAuthControllerTests
             new StubHardwareFingerprintService(),
             new JwtTokenService(Microsoft.Extensions.Options.Options.Create(BuildJwtOptions())),
             new StubTwoFactorService(),
-            new StubSecuritySettingsProvider(),
+            securitySettingsProvider ?? new StubSecuritySettingsProvider(),
             NullLogger<PublicAuthController>.Instance)
         {
             ControllerContext = new ControllerContext

@@ -33,6 +33,7 @@ internal sealed class StubSecuritySettingsProvider(SecuritySettingsConfig? initi
 {
     private SecuritySettingsConfig _settings = initial ?? new SecuritySettingsConfig(
         MaxConcurrentGameAccountsPerDevice: 1,
+        LauncherAdminUsernames: [],
         GameSessionHeartbeatIntervalSeconds: 45,
         GameSessionExpirationSeconds: 150,
         UpdatedAtUtc: null);

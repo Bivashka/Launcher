@@ -188,18 +188,7 @@
                       </ScrollViewer>
                     </Grid>
 
-                    <Grid IsVisible="{Binding HasSelectedNewsPlaceholder}">
-                      <StackPanel HorizontalAlignment="Center"
-                                  VerticalAlignment="Center"
-                                  Spacing="14">
-                        <Border Classes="newsPlaceholderArt">
-                          <Image Source="{Binding SelectedServer.Icon}"
-                                 Width="96"
-                                 Height="96"
-                                 Stretch="UniformToFill" />
-                        </Border>
-                      </StackPanel>
-                    </Grid>
+                    <Grid IsVisible="{Binding HasSelectedNewsPlaceholder}" />
                   </Grid>
                 </Border>
 

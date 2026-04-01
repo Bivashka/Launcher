@@ -135,6 +135,7 @@ type TwoFactorSettings = {
 
 type SecuritySettings = {
   maxConcurrentGameAccountsPerDevice: number
+  launcherAdminUsernames: string[]
   gameSessionHeartbeatIntervalSeconds: number
   gameSessionExpirationSeconds: number
   updatedAtUtc?: string | null
@@ -775,6 +776,7 @@ const defaultTwoFactorSettings: TwoFactorSettings = {
 
 const defaultSecuritySettings: SecuritySettings = {
   maxConcurrentGameAccountsPerDevice: 1,
+  launcherAdminUsernames: [],
   gameSessionHeartbeatIntervalSeconds: 45,
   gameSessionExpirationSeconds: 150,
   updatedAtUtc: null,
@@ -1519,6 +1521,7 @@ function App() {
   const [twoFactorRequiredOnly, setTwoFactorRequiredOnly] = useState(false)
   const [twoFactorLimit, setTwoFactorLimit] = useState(100)
   const [securitySettings, setSecuritySettings] = useState<SecuritySettings>(defaultSecuritySettings)
+  const [launcherAdminUsernamesText, setLauncherAdminUsernamesText] = useState('')
   const [activeGameSessions, setActiveGameSessions] = useState<ActiveGameSession[]>([])
   const [adminPasswordForm, setAdminPasswordForm] = useState<AdminPasswordForm>(defaultAdminPasswordForm)
   const [deliverySettings, setDeliverySettings] = useState<DeliverySettings>(defaultDeliverySettings)
@@ -2304,6 +2307,7 @@ function App() {
         ...defaultSecuritySettings,
         ...loadedSecuritySettings,
       })
+      setLauncherAdminUsernamesText((loadedSecuritySettings.launcherAdminUsernames ?? []).join('\n'))
       setActiveGameSessions(loadedActiveGameSessions)
       setDeliverySettings({
         ...defaultDeliverySettings,
@@ -3796,9 +3800,11 @@ function App() {
         method: 'PUT',
         body: JSON.stringify({
           maxConcurrentGameAccountsPerDevice: Math.max(1, Math.min(10, Number(securitySettings.maxConcurrentGameAccountsPerDevice) || 1)),
+          launcherAdminUsernames: parseAllowedPlayerUsernames(launcherAdminUsernamesText),
         }),
       })
       setSecuritySettings(saved)
+      setLauncherAdminUsernamesText((saved.launcherAdminUsernames ?? []).join('\n'))
       setNotice('Security settings saved.')
       if (token) {
         await loadAdminData(token)
@@ -5143,6 +5149,7 @@ function App() {
     setTwoFactorRequiredOnly(false)
     setTwoFactorLimit(100)
     setSecuritySettings(defaultSecuritySettings)
+    setLauncherAdminUsernamesText('')
     setActiveGameSessions([])
     setAdminPasswordForm(defaultAdminPasswordForm)
     setDeliverySettings(defaultDeliverySettings)
@@ -7031,6 +7038,22 @@ function App() {
                   </button>
                   <small className="muted">
                     Heartbeat: {securitySettings.gameSessionHeartbeatIntervalSeconds}s | expiry: {securitySettings.gameSessionExpirationSeconds}s
+                  </small>
+                </div>
+
+                <div className="action-block">
+                  <h4>Launcher admins</h4>
+                  <small className="muted">
+                    Enter one nickname per line. These players get the launcher admin banner and admin role overlay.
+                  </small>
+                  <textarea
+                    rows={6}
+                    placeholder={'Bivashka\nModeratorNick'}
+                    value={launcherAdminUsernamesText}
+                    onChange={(event) => setLauncherAdminUsernamesText(event.target.value)}
+                  />
+                  <small className="muted">
+                    Saved nicknames: {parseAllowedPlayerUsernames(launcherAdminUsernamesText).length}
                   </small>
                 </div>
 
