@@ -60,7 +60,6 @@ public partial class MainWindowViewModel : ViewModelBase
     private bool _installTelemetrySent;
     private bool _isAutomaticUpdateInProgress;
     private bool _allowAutoSessionRestore = true;
-    private bool _isUpdatingStoredAccountSelection;
     private string _pendingTwoFactorUsername = string.Empty;
     private string _pendingTwoFactorPassword = string.Empty;
     private string _playerAuthToken = string.Empty;
@@ -124,7 +123,7 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             OnPropertyChanged(nameof(HasStoredAccounts));
             OnPropertyChanged(nameof(HasMultipleStoredAccounts));
-            OnPropertyChanged(nameof(AccountPanelSubtitle));
+            NotifyAccountPresentationChanged();
             OnPropertyChanged(nameof(ServerMonitoringText));
             SwitchAccountCommand.NotifyCanExecuteChanged();
             DeleteAccountCommand.NotifyCanExecuteChanged();
@@ -460,10 +459,13 @@ public partial class MainWindowViewModel : ViewModelBase
         ? "News for this branch will appear here."
         : "Новости для этой ветки появятся здесь.";
     public bool HasMultipleStoredAccounts => StoredPlayerAccounts.Count > 1;
-    public string AccountPanelTitle => !string.IsNullOrWhiteSpace(PlayerLoggedInAs)
-        ? PlayerLoggedInAs
-        : (SelectedStoredAccount?.Username?.Trim() ?? ProductName);
+    public string AccountPanelTitle => BuildAccountPanelTitle();
     public string AccountPanelSubtitle => BuildAccountPanelSubtitle();
+    public bool HasAccountPanelSubtitle => !string.IsNullOrWhiteSpace(AccountPanelSubtitle);
+    public bool HasAdminRoleBanner => IsPlayerLoggedIn && HasAdministrativeRole(_playerAuthRoles);
+    public string AdminRoleBannerText => _languageCode == "en" ? "Administrator" : "Администратор";
+    public string LauncherHeaderStatusText => BuildLauncherHeaderStatusText();
+    public bool HasLauncherHeaderStatusText => !string.IsNullOrWhiteSpace(LauncherHeaderStatusText);
     public string UpdateHeaderText => "Launcher update";
     public string CurrentVersionText => $"Current version: {_currentLauncherVersion}";
     public string LatestVersionText => string.IsNullOrWhiteSpace(LatestLauncherVersion)
@@ -634,13 +636,18 @@ public partial class MainWindowViewModel : ViewModelBase
 
     partial void OnPlayerLoggedInAsChanged(string value)
     {
-        OnPropertyChanged(nameof(AccountPanelTitle));
-        OnPropertyChanged(nameof(AccountPanelSubtitle));
+        NotifyAccountPresentationChanged();
     }
 
     partial void OnAuthStatusTextChanged(string value)
     {
-        OnPropertyChanged(nameof(AccountPanelSubtitle));
+        NotifyAccountPresentationChanged();
+        NotifyLauncherHeaderPresentationChanged();
+    }
+
+    partial void OnStatusTextChanged(string value)
+    {
+        NotifyLauncherHeaderPresentationChanged();
     }
 
     partial void OnIsTwoFactorStepActiveChanged(bool value)
@@ -803,29 +810,12 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         SwitchAccountCommand.NotifyCanExecuteChanged();
         DeleteAccountCommand.NotifyCanExecuteChanged();
-        OnPropertyChanged(nameof(AccountPanelTitle));
-        OnPropertyChanged(nameof(AccountPanelSubtitle));
-        if (!IsPlayerLoggedIn && value is not null && !string.IsNullOrWhiteSpace(value.Username))
+        NotifyAccountPresentationChanged();
+        if (!IsPlayerLoggedIn)
         {
-            PlayerUsername = value.Username.Trim();
-        }
-
-        if (_isUpdatingStoredAccountSelection ||
-            value is null ||
-            IsBusy ||
-            string.IsNullOrWhiteSpace(value.AuthToken))
-        {
-            return;
-        }
-
-        if (string.Equals(value.Username, PlayerLoggedInAs, StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        if (SwitchAccountCommand.CanExecute(null))
-        {
-            _ = SwitchAccountCommand.ExecuteAsync(null);
+            PlayerUsername = value?.Username?.Trim() ?? string.Empty;
+            PlayerPassword = string.Empty;
+            ResetTwoFactorState();
         }
     }
 
@@ -866,8 +856,10 @@ public partial class MainWindowViewModel : ViewModelBase
     private bool CanSwitchAccount()
     {
         return !IsBusy &&
+               IsPlayerLoggedIn &&
                SelectedStoredAccount is not null &&
-               !string.IsNullOrWhiteSpace(SelectedStoredAccount.AuthToken);
+               !string.IsNullOrWhiteSpace(SelectedStoredAccount.AuthToken) &&
+               !IsStoredAccountCurrentlyActive(SelectedStoredAccount);
     }
 
     private bool CanLogout()
@@ -958,13 +950,56 @@ public partial class MainWindowViewModel : ViewModelBase
             return AuthStatusText;
         }
 
-        var rolesText = _playerAuthRoles.Count > 0
-            ? string.Join(" · ", _playerAuthRoles)
-            : (_languageCode == "en" ? "player" : "игрок");
-        var accountsText = _languageCode == "en"
-            ? $"{StoredPlayerAccounts.Count} saved"
-            : $"{StoredPlayerAccounts.Count} сохранено";
-        return $"{rolesText} · {accountsText}";
+        return string.Empty;
+    }
+
+    private string BuildAccountPanelTitle()
+    {
+        if (HasMultipleStoredAccounts)
+        {
+            return _languageCode == "en" ? "Accounts" : "Аккаунты";
+        }
+
+        return !string.IsNullOrWhiteSpace(PlayerLoggedInAs)
+            ? PlayerLoggedInAs
+            : (SelectedStoredAccount?.Username?.Trim() ?? ProductName);
+    }
+
+    private string BuildLauncherHeaderStatusText()
+    {
+        var status = StatusText.Trim();
+        if (string.IsNullOrWhiteSpace(status))
+        {
+            return string.Empty;
+        }
+
+        if (!IsLauncherReady)
+        {
+            return status;
+        }
+
+        if (IsBusy || IsFileSyncInProgress)
+        {
+            return status;
+        }
+
+        if (string.Equals(status, T("status.ready"), StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Empty;
+        }
+
+        if (ManagedServers.Count > 0 &&
+            string.Equals(status, F("status.loadedServers", ManagedServers.Count), StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Empty;
+        }
+
+        if (string.Equals(status, AuthStatusText.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Empty;
+        }
+
+        return status;
     }
 
     private async Task RefreshServerOnlineStatusesAsync(bool force = false)
@@ -1613,7 +1648,7 @@ public partial class MainWindowViewModel : ViewModelBase
             HasCrash = false;
             CrashSummary = string.Empty;
 
-            var selectedServer = SelectedServer;
+            ManagedServerItem? selectedServer = null;
             LauncherManifest? manifest = null;
             GameLaunchRoute? launchRoute = null;
             LaunchResult? launchResult = null;
@@ -1622,11 +1657,26 @@ public partial class MainWindowViewModel : ViewModelBase
 
             try
             {
+                var preLaunchAccountSwitchError = await EnsureSelectedStoredAccountReadyForLaunchAsync();
+                if (!string.IsNullOrWhiteSpace(preLaunchAccountSwitchError))
+                {
+                    StatusText = preLaunchAccountSwitchError;
+                    _logService.LogInfo(preLaunchAccountSwitchError);
+                    return;
+                }
+
                 var preLaunchSessionValidationError = await ValidatePlayerSessionBeforeLaunchAsync();
                 if (!string.IsNullOrWhiteSpace(preLaunchSessionValidationError))
                 {
                     StatusText = preLaunchSessionValidationError;
                     _logService.LogInfo(preLaunchSessionValidationError);
+                    return;
+                }
+
+                selectedServer = SelectedServer;
+                if (selectedServer is null)
+                {
+                    StatusText = T("status.noServers");
                     return;
                 }
 
@@ -1729,8 +1779,14 @@ public partial class MainWindowViewModel : ViewModelBase
                 ? F("status.gameExitedCode", launchResult.ExitCode)
                 : F("status.error", reason);
 
+            var crashServer = selectedServer ?? SelectedServer;
+            if (crashServer is null)
+            {
+                return;
+            }
+
             var crashId = await TrySubmitCrashReportAsync(
-                selectedServer,
+                crashServer,
                 manifest,
                 launchRoute,
                 launchResult,
@@ -2225,86 +2281,15 @@ public partial class MainWindowViewModel : ViewModelBase
         await RunBusyAsync(async () =>
         {
             var account = SelectedStoredAccount;
-            var token = (account.AuthToken ?? string.Empty).Trim();
-            if (string.IsNullOrWhiteSpace(token))
+            var switchError = await ActivateStoredAccountAsync(account, refreshLauncherContent: true);
+            if (!string.IsNullOrWhiteSpace(switchError))
             {
-                throw new InvalidOperationException("No saved session token for this account.");
+                StatusText = switchError;
+                _logService.LogInfo(switchError);
+                return;
             }
 
-            var accountApiBaseUrl = NormalizeBaseUrlOrEmpty(account.ApiBaseUrl);
-
-            try
-            {
-                var session = await ExecuteAgainstApiFailoverAsync(
-                    candidate => _launcherApiService.GetSessionAsync(
-                        candidate,
-                        token,
-                        string.IsNullOrWhiteSpace(account.AuthTokenType) ? "Bearer" : account.AuthTokenType),
-                    preferredApiBaseUrl: accountApiBaseUrl);
-                var selectedUsername = (account.Username ?? string.Empty).Trim();
-                var sessionUsername = (session.Username ?? string.Empty).Trim();
-                var selectedExternalId = (account.ExternalId ?? string.Empty).Trim();
-                var sessionExternalId = (session.ExternalId ?? string.Empty).Trim();
-                var usernameMatches = string.Equals(
-                    selectedUsername,
-                    sessionUsername,
-                    StringComparison.OrdinalIgnoreCase);
-                var externalIdMatches = string.IsNullOrWhiteSpace(selectedExternalId) ||
-                                        string.IsNullOrWhiteSpace(sessionExternalId) ||
-                                        string.Equals(
-                                            selectedExternalId,
-                                            sessionExternalId,
-                                            StringComparison.OrdinalIgnoreCase);
-                if (!usernameMatches || !externalIdMatches)
-                {
-                    RemoveStoredAccount(selectedUsername);
-                    _allowAutoSessionRestore = false;
-                    IsPlayerLoggedIn = false;
-                    PlayerPassword = string.Empty;
-                    ResetTwoFactorState();
-                    ClearAuthenticatedPlayerSession();
-                    await PersistSettingsSnapshotAsync();
-                    await RefreshCoreAsync();
-                    StatusText = _languageCode == "en"
-                        ? "Saved account token belongs to another user. Login again."
-                        : "Токен сохранённого аккаунта принадлежит другому пользователю. Войдите снова.";
-                    _logService.LogInfo(
-                        $"Stored account mismatch on switch. Selected={selectedUsername}({selectedExternalId}), " +
-                        $"session={sessionUsername}({sessionExternalId}).");
-                    return;
-                }
-
-                SetAuthenticatedPlayerSession(
-                    token,
-                    account.AuthTokenType,
-                    sessionUsername,
-                    sessionExternalId,
-                    session.Roles,
-                    ApiBaseUrl);
-                await RefreshPlayerCosmeticsAsync(sessionUsername);
-                await PersistSettingsSnapshotAsync();
-                await RefreshCoreAsync();
-                StatusText = T("status.ready");
-            }
-            catch (LauncherApiException apiException) when (
-                apiException.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-            {
-                var isBanNotice = TryShowBanNotice(apiException);
-                RemoveStoredAccount(account.Username);
-                IsPlayerLoggedIn = false;
-                await PersistSettingsSnapshotAsync();
-                await RefreshCoreAsync();
-                if (isBanNotice)
-                {
-                    StatusText = BanNoticeMessage;
-                }
-                else
-                {
-                    StatusText = _languageCode == "en"
-                        ? "Saved account session expired. Login again."
-                        : "Сессия аккаунта истекла. Войдите заново.";
-                }
-            }
+            StatusText = T("status.ready");
         });
     }
 
@@ -2335,7 +2320,6 @@ public partial class MainWindowViewModel : ViewModelBase
             ClearAuthenticatedPlayerSession();
             StatusText = T("status.notLoggedIn");
             await PersistSettingsSnapshotAsync();
-            await RefreshCoreAsync();
         });
     }
 
@@ -2355,7 +2339,6 @@ public partial class MainWindowViewModel : ViewModelBase
         PlayerUsername = string.Empty;
         SetSelectedStoredAccount(null);
         StatusText = _languageCode == "en" ? "Add another account." : "Добавьте новый аккаунт.";
-        _ = RefreshAsync();
     }
 
     private async Task DeleteSelectedAccountAsync()
@@ -2394,7 +2377,6 @@ public partial class MainWindowViewModel : ViewModelBase
                 ResetTwoFactorState();
                 ClearAuthenticatedPlayerSession();
                 await PersistSettingsSnapshotAsync();
-                await RefreshCoreAsync();
                 StatusText = _languageCode == "en"
                     ? "Selected account removed. Login again."
                     : "Выбранный аккаунт удалён. Войдите снова.";
@@ -2432,6 +2414,7 @@ public partial class MainWindowViewModel : ViewModelBase
         _playerAuthRoles = NormalizePlayerRoles(activeStoredAccount.Roles);
         _playerAuthApiBaseUrl = NormalizeBaseUrlOrEmpty(activeStoredAccount.ApiBaseUrl);
         PlayerUsername = activeStoredAccount.Username.Trim();
+        NotifyAccountPresentationChanged();
     }
 
     private async Task TryRestorePlayerSessionAsync()
@@ -2535,6 +2518,117 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             return $"Failed to validate player session before launch: {ex.Message}";
         }
+    }
+
+    private async Task<string> EnsureSelectedStoredAccountReadyForLaunchAsync()
+    {
+        if (!IsPlayerLoggedIn || SelectedStoredAccount is null || IsStoredAccountCurrentlyActive(SelectedStoredAccount))
+        {
+            return string.Empty;
+        }
+
+        return await ActivateStoredAccountAsync(SelectedStoredAccount, refreshLauncherContent: true);
+    }
+
+    private async Task<string> ActivateStoredAccountAsync(StoredPlayerAccount account, bool refreshLauncherContent)
+    {
+        var selectedUsername = (account.Username ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(selectedUsername))
+        {
+            return _languageCode == "en"
+                ? "Selected account is invalid."
+                : "Выбранный аккаунт некорректен.";
+        }
+
+        var token = (account.AuthToken ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            RemoveStoredAccount(selectedUsername);
+            await PersistSettingsSnapshotAsync();
+            return _languageCode == "en"
+                ? "Saved account session is missing. Login again."
+                : "У сохранённого аккаунта отсутствует сессия. Войдите заново.";
+        }
+
+        var accountApiBaseUrl = NormalizeBaseUrlOrEmpty(account.ApiBaseUrl);
+
+        try
+        {
+            var session = await ExecuteAgainstApiFailoverAsync(
+                candidate => _launcherApiService.GetSessionAsync(
+                    candidate,
+                    token,
+                    string.IsNullOrWhiteSpace(account.AuthTokenType) ? "Bearer" : account.AuthTokenType),
+                preferredApiBaseUrl: accountApiBaseUrl);
+
+            var sessionUsername = (session.Username ?? string.Empty).Trim();
+            var sessionExternalId = (session.ExternalId ?? string.Empty).Trim();
+            var selectedExternalId = (account.ExternalId ?? string.Empty).Trim();
+            var usernameMatches = string.Equals(
+                selectedUsername,
+                sessionUsername,
+                StringComparison.OrdinalIgnoreCase);
+            var externalIdMatches = string.IsNullOrWhiteSpace(selectedExternalId) ||
+                                    string.IsNullOrWhiteSpace(sessionExternalId) ||
+                                    string.Equals(
+                                        selectedExternalId,
+                                        sessionExternalId,
+                                        StringComparison.OrdinalIgnoreCase);
+            if (!usernameMatches || !externalIdMatches)
+            {
+                RemoveStoredAccount(selectedUsername);
+                await PersistSettingsSnapshotAsync();
+                _logService.LogInfo(
+                    $"Stored account mismatch on activation. Selected={selectedUsername}({selectedExternalId}), " +
+                    $"session={sessionUsername}({sessionExternalId}).");
+                return _languageCode == "en"
+                    ? "Saved account token belongs to another user. Login again."
+                    : "Токен сохранённого аккаунта принадлежит другому пользователю. Войдите снова.";
+            }
+
+            SetAuthenticatedPlayerSession(
+                token,
+                account.AuthTokenType,
+                sessionUsername,
+                sessionExternalId,
+                session.Roles,
+                string.IsNullOrWhiteSpace(accountApiBaseUrl) ? ApiBaseUrl : accountApiBaseUrl);
+            await RefreshPlayerCosmeticsAsync(sessionUsername);
+            await PersistSettingsSnapshotAsync();
+            if (refreshLauncherContent)
+            {
+                await RefreshCoreAsync();
+            }
+
+            return string.Empty;
+        }
+        catch (LauncherApiException apiException) when (
+            apiException.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+        {
+            var isBanNotice = TryShowBanNotice(apiException);
+            RemoveStoredAccount(selectedUsername);
+            await PersistSettingsSnapshotAsync();
+            return isBanNotice
+                ? BanNoticeMessage
+                : (_languageCode == "en"
+                    ? "Saved account session expired. Login again."
+                    : "Сессия сохранённого аккаунта истекла. Войдите заново.");
+        }
+    }
+
+    private bool IsStoredAccountCurrentlyActive(StoredPlayerAccount account)
+    {
+        var selectedUsername = (account.Username ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(selectedUsername) &&
+            string.Equals(selectedUsername, PlayerLoggedInAs, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var selectedExternalId = (account.ExternalId ?? string.Empty).Trim();
+        return !string.IsNullOrWhiteSpace(selectedExternalId) &&
+               !string.IsNullOrWhiteSpace(_playerAuthExternalId) &&
+               string.Equals(selectedExternalId, _playerAuthExternalId, StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task<PublicGameSessionStartResponse?> TryStartGameSessionAsync(ManagedServerItem server)
@@ -2696,6 +2790,7 @@ public partial class MainWindowViewModel : ViewModelBase
         PlayerLoggedInAs = normalizedUsername;
         PlayerUsername = normalizedUsername;
         AuthStatusText = F("status.loggedInAs", normalizedUsername, string.Join(", ", _playerAuthRoles));
+        NotifyAccountPresentationChanged();
     }
 
     private async Task RefreshPlayerCosmeticsAsync(string username)
@@ -2733,6 +2828,7 @@ public partial class MainWindowViewModel : ViewModelBase
         _playerAuthRoles = [];
         _playerAuthApiBaseUrl = string.Empty;
         PlayerLoggedInAs = string.Empty;
+        NotifyAccountPresentationChanged();
     }
 
     private static List<string> NormalizePlayerRoles(IEnumerable<string>? roles)
@@ -2749,6 +2845,13 @@ public partial class MainWindowViewModel : ViewModelBase
         }
 
         return normalized;
+    }
+
+    private static bool HasAdministrativeRole(IEnumerable<string> roles)
+    {
+        return roles.Any(role =>
+            string.Equals(role, "admin", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(role, "administrator", StringComparison.OrdinalIgnoreCase));
     }
 
     private static List<StoredPlayerAccount> NormalizeStoredAccounts(IEnumerable<StoredPlayerAccount>? accounts)
@@ -2864,9 +2967,7 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private void SetSelectedStoredAccount(StoredPlayerAccount? account)
     {
-        _isUpdatingStoredAccountSelection = true;
         SelectedStoredAccount = account;
-        _isUpdatingStoredAccountSelection = false;
     }
 
     private void ResetTwoFactorState()
@@ -2947,8 +3048,8 @@ public partial class MainWindowViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsLoginRequired));
         OnPropertyChanged(nameof(IsLauncherReady));
         OnPropertyChanged(nameof(ServerMonitoringText));
-        OnPropertyChanged(nameof(AccountPanelTitle));
-        OnPropertyChanged(nameof(AccountPanelSubtitle));
+        NotifyAccountPresentationChanged();
+        NotifyLauncherHeaderPresentationChanged();
 
         if (!value)
         {
@@ -4394,9 +4495,24 @@ public partial class MainWindowViewModel : ViewModelBase
         OnPropertyChanged(nameof(HasSelectedNewsPlaceholder));
         OnPropertyChanged(nameof(EmptyNewsText));
         OnPropertyChanged(nameof(HasMultipleStoredAccounts));
+        NotifyAccountPresentationChanged();
+        OnPropertyChanged(nameof(ServerMonitoringText));
+        NotifyLauncherHeaderPresentationChanged();
+    }
+
+    private void NotifyAccountPresentationChanged()
+    {
         OnPropertyChanged(nameof(AccountPanelTitle));
         OnPropertyChanged(nameof(AccountPanelSubtitle));
-        OnPropertyChanged(nameof(ServerMonitoringText));
+        OnPropertyChanged(nameof(HasAccountPanelSubtitle));
+        OnPropertyChanged(nameof(HasAdminRoleBanner));
+        OnPropertyChanged(nameof(AdminRoleBannerText));
+    }
+
+    private void NotifyLauncherHeaderPresentationChanged()
+    {
+        OnPropertyChanged(nameof(LauncherHeaderStatusText));
+        OnPropertyChanged(nameof(HasLauncherHeaderStatusText));
     }
 
     private readonly record struct ServerOnlineProbeResult(

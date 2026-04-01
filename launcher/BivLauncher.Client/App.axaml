@@ -2,8 +2,8 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="BivLauncher.Client.App"
              xmlns:local="using:BivLauncher.Client"
-             RequestedThemeVariant="Default">
-             <!-- "Default" ThemeVariant follows system theme variant. "Dark" or "Light" are other available options. -->
+             RequestedThemeVariant="Dark">
+             <!-- Launcher stays on the dark theme regardless of the system theme variant. -->
 
     <Application.DataTemplates>
         <local:ViewLocator/>

@@ -138,6 +138,29 @@
     </Setter>
   </Style>
 
+  <Style Selector="Border.adminRoleBanner">
+    <Setter Property="HorizontalAlignment" Value="Left" />
+    <Setter Property="Padding" Value="14,7" />
+    <Setter Property="CornerRadius" Value="999" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="BorderBrush" Value="#FF8F9A" />
+    <Setter Property="Background">
+      <Setter.Value>
+        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+          <GradientStop Offset="0" Color="#44202AEE" />
+          <GradientStop Offset="1" Color="#2B1620EE" />
+        </LinearGradientBrush>
+      </Setter.Value>
+    </Setter>
+    <Setter Property="BoxShadow" Value="0 12 24 0 #22070C66" />
+  </Style>
+
+  <Style Selector="TextBlock.adminRoleBannerText">
+    <Setter Property="Foreground" Value="#FF8F9A" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="FontSize" Value="14" />
+  </Style>
+
   <Style Selector="Border.newsPlaceholderArt">
     <Setter Property="Width" Value="124" />
     <Setter Property="Height" Value="124" />

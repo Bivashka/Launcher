@@ -74,6 +74,22 @@ public sealed class ExternalAuthServiceTests
     }
 
     [Fact]
+    public async Task AuthenticateAsync_WhenLegacyResponseContainsAdminStaffRole_ReturnsAdminRole()
+    {
+        await using var fixture = await TestFixture.CreateAsync();
+        var service = fixture.CreateService(
+            """{"Success":true,"Login":"player","UserUuid":"user-42","StaffRole":"admin"}""");
+
+        var result = await service.AuthenticateAsync("player", "secret", string.Empty, CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Equal("user-42", result.ExternalId);
+        Assert.Equal("player", result.Username);
+        Assert.Equal(["player", "admin"], result.Roles);
+        Assert.False(result.Banned);
+    }
+
+    [Fact]
     public async Task AuthenticateAsync_WhenResponseContainsExplicitFailure_ReturnsFailureMessage()
     {
         await using var fixture = await TestFixture.CreateAsync();

@@ -112,12 +112,13 @@
               ColumnDefinitions="*,392"
               ColumnSpacing="16">
           <Border Classes="featurePanel">
-            <Grid RowDefinitions="Auto,Auto,Auto,Auto,*,Auto" RowSpacing="14">
+            <Grid RowDefinitions="Auto,Auto,*,Auto" RowSpacing="14">
               <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
                 <TextBlock Classes="subtle"
                            Foreground="{Binding SecondaryTextBrush}"
                            VerticalAlignment="Center"
-                           Text="{Binding StatusText}"
+                           Text="{Binding LauncherHeaderStatusText}"
+                           IsVisible="{Binding HasLauncherHeaderStatusText}"
                            TextWrapping="Wrap" />
                 <Button Grid.Column="1"
                         Classes="toolbarIconButton"
@@ -133,23 +134,7 @@
                   <TextBlock Text="&#xE713;" FontFamily="Segoe MDL2 Assets" />
                 </Button>
               </Grid>
-              <TextBlock Grid.Row="1"
-                         Classes="heroTitle"
-                         FontSize="24"
-                         FontWeight="SemiBold"
-                         Foreground="{Binding PrimaryTextBrush}"
-                         Text="{Binding SelectedServer.DisplayName, TargetNullValue='No server selected'}"
-                         TextWrapping="Wrap" />
-              <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8">
-                <Ellipse Width="10"
-                         Height="10"
-                         VerticalAlignment="Center"
-                         Fill="{Binding SelectedServer.OnlineStatusBrush, TargetNullValue=#8EA3C0}" />
-                <TextBlock Classes="subtle"
-                           Foreground="{Binding SecondaryTextBrush}"
-                           Text="{Binding SelectedServer.OnlineStatusText, TargetNullValue='РџСЂРѕРІРµСЂРєР°...'}" />
-              </StackPanel>
-              <Border Grid.Row="3"
+              <Border Grid.Row="1"
                       Classes="syncCard"
                       IsVisible="{Binding IsFileSyncInProgress}">
                 <StackPanel Spacing="7">
@@ -176,7 +161,7 @@
                 </StackPanel>
               </Border>
 
-              <Grid Grid.Row="4"
+              <Grid Grid.Row="2"
                     RowDefinitions="*,Auto"
                     RowSpacing="14">
                 <Border Classes="panel heroPanel">
@@ -213,20 +198,17 @@
                                  Height="96"
                                  Stretch="UniformToFill" />
                         </Border>
-                        <TextBlock Classes="heroMeta"
-                                   HorizontalAlignment="Center"
-                                   Text="{Binding SelectedServer.RuntimeDisplay}" />
                       </StackPanel>
                     </Grid>
                   </Grid>
                 </Border>
 
                 <Border Grid.Row="1"
-                        Classes="panel newsRailPanel">
+                        Classes="panel newsRailPanel"
+                        IsVisible="{Binding HasSelectedNews}">
                   <ListBox Classes="newsRailList"
                            ItemsSource="{Binding NewsItems}"
-                           SelectedItem="{Binding SelectedNewsItem}"
-                           IsVisible="{Binding HasSelectedNews}">
+                           SelectedItem="{Binding SelectedNewsItem}">
                     <ListBox.ItemTemplate>
                       <DataTemplate>
                         <Border Classes="newsMiniCard">
@@ -252,7 +234,7 @@
                 </Border>
               </Grid>
 
-              <StackPanel Grid.Row="5"
+              <StackPanel Grid.Row="3"
                           Orientation="Horizontal"
                           Spacing="8"
                           VerticalAlignment="Bottom">
@@ -271,7 +253,7 @@
 
           <Grid Grid.Column="1" RowDefinitions="Auto,*" RowSpacing="14">
             <Border Classes="panel accountCornerPanel">
-              <Grid RowDefinitions="Auto,Auto,Auto" RowSpacing="10">
+              <Grid RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="10">
                 <Grid ColumnDefinitions="Auto,*"
                       ColumnSpacing="14">
                   <Border Classes="accountAvatar">
@@ -290,11 +272,19 @@
                     <TextBlock Classes="subtle"
                                Foreground="{Binding SecondaryTextBrush}"
                                Text="{Binding AccountPanelSubtitle}"
+                               IsVisible="{Binding HasAccountPanelSubtitle}"
                                TextWrapping="Wrap" />
                   </StackPanel>
                 </Grid>
 
-                <ComboBox Grid.Row="1"
+                <Border Grid.Row="1"
+                        Classes="adminRoleBanner"
+                        IsVisible="{Binding HasAdminRoleBanner}">
+                  <TextBlock Classes="adminRoleBannerText"
+                             Text="{Binding AdminRoleBannerText}" />
+                </Border>
+
+                <ComboBox Grid.Row="2"
                           Classes="accountSelect"
                           ItemsSource="{Binding StoredPlayerAccounts}"
                           SelectedItem="{Binding SelectedStoredAccount}"
@@ -306,7 +296,7 @@
                   </ComboBox.ItemTemplate>
                 </ComboBox>
 
-                <Grid Grid.Row="2"
+                <Grid Grid.Row="3"
                       ColumnDefinitions="*,*"
                       RowDefinitions="Auto,Auto"
                       ColumnSpacing="8"
@@ -331,15 +321,10 @@
             <Border Grid.Row="1"
                     Classes="panel serverShelfPanel">
               <Grid RowDefinitions="Auto,*" RowSpacing="10">
-                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                <Grid ColumnDefinitions="*">
                   <TextBlock Classes="sectionTitle"
                              Foreground="{Binding PrimaryTextBrush}"
                              Text="{Binding ServersHeaderText}" />
-                  <Border Grid.Column="1"
-                          Classes="infoChip">
-                    <TextBlock Classes="heroMeta"
-                               Text="{Binding ServerMonitoringText}" />
-                  </Border>
                 </Grid>
                 <ListBox Grid.Row="1"
                          Classes="serverShelfList"
@@ -352,34 +337,22 @@
                           <Border Classes="serverIconWrap">
                             <Image Source="{Binding Icon}" Stretch="UniformToFill" />
                           </Border>
-                          <Grid Grid.Column="1" RowDefinitions="Auto,Auto,Auto" RowSpacing="5">
-                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
-                              <TextBlock Text="{Binding DisplayName}"
-                                         FontSize="17"
-                                         FontWeight="SemiBold"
-                                         TextWrapping="Wrap" />
-                              <Border Grid.Column="1"
-                                      Classes="serverStatusBadge">
-                                <StackPanel Orientation="Horizontal"
-                                            Spacing="6">
-                                  <Ellipse Width="8"
-                                           Height="8"
-                                           VerticalAlignment="Center"
-                                           Fill="{Binding OnlineStatusBrush}" />
-                                  <TextBlock Text="{Binding OnlineStatusText}"
-                                             Foreground="#FFF8F3"
-                                             FontSize="12"
-                                             FontWeight="SemiBold" />
-                                </StackPanel>
-                              </Border>
-                            </Grid>
-                            <TextBlock Grid.Row="1"
-                                       Classes="subtle"
-                                       Opacity="0.9"
-                                       Text="{Binding RuntimeDisplay}" />
-                            <TextBlock Grid.Row="2"
-                                       Classes="heroMeta"
-                                       Text="{Binding Address}" />
+                          <Grid Grid.Column="1" RowDefinitions="Auto,Auto" RowSpacing="8">
+                            <TextBlock Text="{Binding DisplayName}"
+                                       FontSize="17"
+                                       FontWeight="SemiBold"
+                                       TextWrapping="Wrap" />
+                            <StackPanel Grid.Row="1"
+                                        Orientation="Horizontal"
+                                        Spacing="8">
+                              <Ellipse Width="9"
+                                       Height="9"
+                                       VerticalAlignment="Center"
+                                       Fill="{Binding OnlineStatusBrush}" />
+                              <TextBlock Classes="subtle"
+                                         VerticalAlignment="Center"
+                                         Text="{Binding OnlineStatusText}" />
+                            </StackPanel>
                           </Grid>
                         </Grid>
                       </Border>

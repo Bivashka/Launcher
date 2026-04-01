@@ -128,11 +128,13 @@ public sealed class AdminBansController(
             return BadRequest(new { error = "ExpiresAtUtc must be in the future." });
         }
 
-        var account = await ResolveAccountByUserAsync(normalizedUser, cancellationToken);
-        if (account is null)
+        var resolvedAccount = await ResolveAccountByUserAsync(normalizedUser, cancellationToken);
+        if (resolvedAccount is null)
         {
             return NotFound(new { error = "Account not found." });
         }
+
+        var account = resolvedAccount.Account;
 
         var now = DateTime.UtcNow;
         var alreadyActive = await dbContext.HardwareBans.AnyAsync(
@@ -146,8 +148,8 @@ public sealed class AdminBansController(
         var ban = new HardwareBan
         {
             AccountId = account.Id,
-            HwidHash = NormalizeHwidHash(account.HwidHash),
-            DeviceUserName = NormalizeDeviceUserName(account.DeviceUserName),
+            HwidHash = resolvedAccount.HwidHash,
+            DeviceUserName = resolvedAccount.DeviceUserName,
             Reason = NormalizeReason(request.Reason),
             CreatedAtUtc = DateTime.UtcNow,
             ExpiresAtUtc = request.ExpiresAtUtc
@@ -193,11 +195,13 @@ public sealed class AdminBansController(
             return BadRequest(new { error = "User is required." });
         }
 
-        var account = await ResolveAccountByUserAsync(normalizedUser, cancellationToken);
-        if (account is null)
+        var resolvedAccount = await ResolveAccountByUserAsync(normalizedUser, cancellationToken);
+        if (resolvedAccount is null)
         {
             return NotFound(new { error = "Account not found." });
         }
+
+        var account = resolvedAccount.Account;
 
         account.HwidHash = string.Empty;
         account.UpdatedAtUtc = DateTime.UtcNow;
@@ -317,7 +321,66 @@ public sealed class AdminBansController(
         return normalized.Length > 128 ? normalized[..128] : normalized;
     }
 
-    private async Task<AuthAccount?> ResolveAccountByUserAsync(string normalizedUser, CancellationToken cancellationToken)
+    private async Task<ResolvedAccountContext?> ResolveAccountByUserAsync(string normalizedUser, CancellationToken cancellationToken)
+    {
+        var now = DateTime.UtcNow;
+        var account = await ResolveDirectAccountByUserAsync(normalizedUser, cancellationToken);
+        var sessionSnapshot = account is not null
+            ? await ResolveLatestSessionByAccountAsync(account.Id, cancellationToken)
+            : await ResolveLatestSessionByUserAsync(normalizedUser, cancellationToken);
+
+        if (account is null && sessionSnapshot is not null)
+        {
+            account = await dbContext.AuthAccounts.FirstOrDefaultAsync(
+                x => x.Id == sessionSnapshot.AccountId,
+                cancellationToken);
+        }
+
+        if (account is null)
+        {
+            return null;
+        }
+
+        var resolvedHwidHash = sessionSnapshot is not null
+            ? NormalizeHwidHash(sessionSnapshot.HwidHash)
+            : string.Empty;
+        if (string.IsNullOrWhiteSpace(resolvedHwidHash))
+        {
+            resolvedHwidHash = NormalizeHwidHash(account.HwidHash);
+        }
+
+        var resolvedDeviceUserName = sessionSnapshot is not null
+            ? NormalizeDeviceUserName(sessionSnapshot.DeviceUserName)
+            : string.Empty;
+        if (string.IsNullOrWhiteSpace(resolvedDeviceUserName))
+        {
+            resolvedDeviceUserName = NormalizeDeviceUserName(account.DeviceUserName);
+        }
+
+        var accountUpdated = false;
+        if (!string.IsNullOrWhiteSpace(resolvedHwidHash) &&
+            !string.Equals(account.HwidHash, resolvedHwidHash, StringComparison.Ordinal))
+        {
+            account.HwidHash = resolvedHwidHash;
+            accountUpdated = true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(resolvedDeviceUserName) &&
+            !string.Equals(account.DeviceUserName, resolvedDeviceUserName, StringComparison.Ordinal))
+        {
+            account.DeviceUserName = resolvedDeviceUserName;
+            accountUpdated = true;
+        }
+
+        if (accountUpdated)
+        {
+            account.UpdatedAtUtc = now;
+        }
+
+        return new ResolvedAccountContext(account, resolvedHwidHash, resolvedDeviceUserName);
+    }
+
+    private async Task<AuthAccount?> ResolveDirectAccountByUserAsync(string normalizedUser, CancellationToken cancellationToken)
     {
         var byExternalExact = await dbContext.AuthAccounts.FirstOrDefaultAsync(
             x => x.ExternalId == normalizedUser,
@@ -333,4 +396,29 @@ public sealed class AdminBansController(
             .OrderByDescending(x => x.UpdatedAtUtc)
             .FirstOrDefaultAsync(cancellationToken);
     }
+
+    private async Task<GameSessionSnapshot?> ResolveLatestSessionByAccountAsync(Guid accountId, CancellationToken cancellationToken)
+    {
+        return await dbContext.ActiveGameSessions
+            .AsNoTracking()
+            .Where(x => x.AccountId == accountId)
+            .OrderByDescending(x => x.LastHeartbeatAtUtc)
+            .Select(x => new GameSessionSnapshot(x.AccountId, x.HwidHash, x.DeviceUserName))
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    private async Task<GameSessionSnapshot?> ResolveLatestSessionByUserAsync(string normalizedUser, CancellationToken cancellationToken)
+    {
+        var normalizedUserLower = normalizedUser.ToLowerInvariant();
+        return await dbContext.ActiveGameSessions
+            .AsNoTracking()
+            .Where(x => x.Username.ToLower() == normalizedUserLower || x.Account!.ExternalId.ToLower() == normalizedUserLower)
+            .OrderByDescending(x => x.LastHeartbeatAtUtc)
+            .Select(x => new GameSessionSnapshot(x.AccountId, x.HwidHash, x.DeviceUserName))
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    private sealed record ResolvedAccountContext(AuthAccount Account, string HwidHash, string DeviceUserName);
+
+    private sealed record GameSessionSnapshot(Guid AccountId, string HwidHash, string DeviceUserName);
 }

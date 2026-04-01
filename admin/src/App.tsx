@@ -6951,7 +6951,7 @@ function App() {
                 </div>
               </section>
 
-              <section>
+              <section className="security-two-factor-listing">
                 <h3>2FA Status & Accounts</h3>
                 <ul className="list">
                   <li>

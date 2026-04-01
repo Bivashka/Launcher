@@ -175,6 +175,10 @@ public sealed class ExternalAuthService(
             var resolvedExternalId = externalId ?? username ?? fallbackUsername;
             var resolvedUsername = username ?? externalId ?? fallbackUsername;
             var roles = GetRoles(root);
+            if (roles.Count == 0 && IsLegacyAdmin(root))
+            {
+                roles = ["player", "admin"];
+            }
             var banned = TryGetBoolean(root, out var bannedValue, "banned") && bannedValue;
 
             return new ExternalAuthResult
@@ -220,6 +224,22 @@ public sealed class ExternalAuthService(
         }
 
         return [];
+    }
+
+    private static bool IsLegacyAdmin(JsonElement root)
+    {
+        var staffRole = GetString(root, "staffRole", "staff_role");
+        if (!string.IsNullOrWhiteSpace(staffRole) &&
+            (staffRole.Equals("admin", StringComparison.OrdinalIgnoreCase) ||
+             staffRole.Equals("administrator", StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        var staffRoleName = GetString(root, "staffRoleName", "staff_role_name");
+        return !string.IsNullOrWhiteSpace(staffRoleName) &&
+               (staffRoleName.Contains("admin", StringComparison.OrdinalIgnoreCase) ||
+                staffRoleName.Contains("админ", StringComparison.OrdinalIgnoreCase));
     }
 
     private static string? GetString(JsonElement root, params string[] propertyNames)
