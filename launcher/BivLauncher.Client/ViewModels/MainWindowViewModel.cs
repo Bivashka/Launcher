@@ -1470,6 +1470,11 @@ public partial class MainWindowViewModel : ViewModelBase
         _discordRpcService.ConfigurePolicy(discordRpcEnabled, discordRpcPrivacyMode, ProductName);
         ApplyLauncherUpdateInfo(bootstrap.LauncherUpdate);
 
+        if (IsPlayerLoggedIn && !string.IsNullOrWhiteSpace(_playerAuthToken))
+        {
+            await TryRefreshCurrentPlayerSessionStateAsync();
+        }
+
         var totalMemoryMb = GetTotalAvailableMemoryMb();
         RamMinMb = Math.Max(bootstrap.Constraints.MinRamMb, 512);
         RamMaxMb = Math.Max(RamMinMb, totalMemoryMb - Math.Max(bootstrap.Constraints.ReservedSystemRamMb, 512));
@@ -1578,6 +1583,8 @@ public partial class MainWindowViewModel : ViewModelBase
             ?? ManagedServers[0];
 
         StatusText = F("status.loadedServers", ManagedServers.Count);
+        NotifyLauncherHeaderPresentationChanged();
+        NotifyAccountPresentationChanged();
 
         if (IsPlayerLoggedIn)
         {
@@ -2517,6 +2524,45 @@ public partial class MainWindowViewModel : ViewModelBase
         catch (Exception ex)
         {
             return $"Failed to validate player session before launch: {ex.Message}";
+        }
+    }
+
+    private async Task TryRefreshCurrentPlayerSessionStateAsync()
+    {
+        try
+        {
+            var session = await ExecuteAgainstApiFailoverAsync(
+                candidate => _launcherApiService.GetSessionAsync(candidate, _playerAuthToken, _playerAuthTokenType),
+                preferredApiBaseUrl: _playerAuthApiBaseUrl);
+            SetAuthenticatedPlayerSession(
+                _playerAuthToken,
+                _playerAuthTokenType,
+                session.Username,
+                session.ExternalId,
+                session.Roles,
+                ApiBaseUrl);
+            await PersistSettingsSnapshotAsync();
+        }
+        catch (LauncherApiException apiException) when (
+            apiException.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+        {
+            var isBanNotice = TryShowBanNotice(apiException);
+            if (!string.IsNullOrWhiteSpace(PlayerLoggedInAs))
+            {
+                RemoveStoredAccount(PlayerLoggedInAs);
+            }
+
+            ClearAuthenticatedPlayerSession();
+            await PersistSettingsSnapshotAsync();
+            StatusText = isBanNotice
+                ? BanNoticeMessage
+                : (_languageCode == "en"
+                    ? "Player session expired. Login again."
+                    : "Сессия игрока истекла. Войдите заново.");
+        }
+        catch (Exception ex)
+        {
+            _logService.LogError($"Player session refresh failed: {ex.Message}");
         }
     }
 
