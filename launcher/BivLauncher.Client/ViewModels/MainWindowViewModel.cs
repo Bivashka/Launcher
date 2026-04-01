@@ -1622,6 +1622,7 @@ public partial class MainWindowViewModel : ViewModelBase
                     _playerAuthToken,
                     _playerAuthTokenType);
                 ApplyProfileRuntimeFallback(manifest, SelectedServer.ProfileSlug);
+                StatusText = _languageCode == "en" ? "Preparing files..." : "Подготовка файлов...";
 
                 var progress = new Progress<InstallProgressInfo>(info =>
                 {
@@ -1706,6 +1707,7 @@ public partial class MainWindowViewModel : ViewModelBase
                         _playerAuthToken,
                         _playerAuthTokenType));
                 ApplyProfileRuntimeFallback(manifest, selectedServer.ProfileSlug);
+                StatusText = _languageCode == "en" ? "Preparing files..." : "Подготовка файлов...";
 
                 StartFileSyncProgress();
                 var progress = new Progress<InstallProgressInfo>(info =>

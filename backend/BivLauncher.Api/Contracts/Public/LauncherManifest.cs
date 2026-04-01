@@ -17,10 +17,12 @@ public sealed record LauncherManifest(
     IReadOnlyList<LauncherManifestFile> Files,
     string LaunchMode = "jar",
     string LaunchMainClass = "",
-    IReadOnlyList<string>? LaunchClasspath = null);
+    IReadOnlyList<string>? LaunchClasspath = null,
+    string? JavaRuntimeArtifactUrl = null);
 
 public sealed record LauncherManifestFile(
     string Path,
     string Sha256,
     long Size,
-    string S3Key);
+    string S3Key,
+    string? DownloadUrl = null);

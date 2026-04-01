@@ -255,7 +255,45 @@ public sealed class PublicController(
 
         return manifest is null
             ? StatusCode(StatusCodes.Status500InternalServerError, new { error = "Manifest content is invalid." })
-            : Ok(manifest);
+            : Ok(EnrichManifest(manifest));
+    }
+
+    private LauncherManifest EnrichManifest(LauncherManifest manifest)
+    {
+        var runtimeArtifactUrl = string.IsNullOrWhiteSpace(manifest.JavaRuntimeArtifactKey)
+            ? manifest.JavaRuntimeArtifactUrl
+            : assetUrlService.BuildPublicUrl(manifest.JavaRuntimeArtifactKey);
+
+        var files = manifest.Files
+            .Select(file => new LauncherManifestFile(
+                Path: file.Path,
+                Sha256: file.Sha256,
+                Size: file.Size,
+                S3Key: file.S3Key,
+                DownloadUrl: string.IsNullOrWhiteSpace(file.S3Key)
+                    ? file.DownloadUrl
+                    : assetUrlService.BuildPublicUrl(file.S3Key)))
+            .ToList();
+
+        return new LauncherManifest(
+            ProfileSlug: manifest.ProfileSlug,
+            BuildId: manifest.BuildId,
+            LoaderType: manifest.LoaderType,
+            McVersion: manifest.McVersion,
+            ClientVersion: manifest.ClientVersion,
+            CreatedAtUtc: manifest.CreatedAtUtc,
+            JvmArgsDefault: manifest.JvmArgsDefault,
+            GameArgsDefault: manifest.GameArgsDefault,
+            JavaRuntime: manifest.JavaRuntime,
+            JavaRuntimeArtifactKey: manifest.JavaRuntimeArtifactKey,
+            JavaRuntimeArtifactSha256: manifest.JavaRuntimeArtifactSha256,
+            JavaRuntimeArtifactSizeBytes: manifest.JavaRuntimeArtifactSizeBytes,
+            JavaRuntimeArtifactContentType: manifest.JavaRuntimeArtifactContentType,
+            JavaRuntimeArtifactUrl: runtimeArtifactUrl,
+            Files: files,
+            LaunchMode: manifest.LaunchMode,
+            LaunchMainClass: manifest.LaunchMainClass,
+            LaunchClasspath: manifest.LaunchClasspath);
     }
 
     private async Task<string> ResolvePublishedManifestKeyAsync(

@@ -188,6 +188,7 @@ public sealed class BuildPipelineService(
                 JavaRuntimeArtifactSha256: javaRuntimeArtifactMetadata.Sha256,
                 JavaRuntimeArtifactSizeBytes: javaRuntimeArtifactMetadata.SizeBytes,
                 JavaRuntimeArtifactContentType: javaRuntimeArtifactMetadata.ContentType,
+                JavaRuntimeArtifactUrl: null,
                 Files: manifestFiles,
                 LaunchMode: launchProfile.Mode,
                 LaunchMainClass: launchProfile.MainClass,

@@ -56,7 +56,8 @@ public sealed class ManifestInstallerService(
                     File.Delete(tempPath);
                 }
 
-                await using (var sourceStream = await launcherApiService.OpenAssetReadStreamAsync(apiBaseUrl, file.S3Key, cancellationToken))
+                var assetReference = string.IsNullOrWhiteSpace(file.DownloadUrl) ? file.S3Key : file.DownloadUrl;
+                await using (var sourceStream = await launcherApiService.OpenAssetReadStreamAsync(apiBaseUrl, assetReference, cancellationToken))
                 await using (var targetStream = File.Create(tempPath))
                 {
                     await sourceStream.CopyToAsync(targetStream, cancellationToken);
@@ -267,7 +268,10 @@ public sealed class ManifestInstallerService(
             File.Delete(runtimeArtifactPath);
         }
 
-        await using (var sourceStream = await launcherApiService.OpenAssetReadStreamAsync(apiBaseUrl, runtimeArtifactKey, cancellationToken))
+        var runtimeArtifactReference = string.IsNullOrWhiteSpace(manifest.JavaRuntimeArtifactUrl)
+            ? runtimeArtifactKey
+            : manifest.JavaRuntimeArtifactUrl;
+        await using (var sourceStream = await launcherApiService.OpenAssetReadStreamAsync(apiBaseUrl, runtimeArtifactReference, cancellationToken))
         await using (var targetStream = File.Create(runtimeArtifactPath))
         {
             await sourceStream.CopyToAsync(targetStream, cancellationToken);

@@ -260,9 +260,17 @@ public sealed class LauncherApiService : ILauncherApiService
 
     public async Task<Stream> OpenAssetReadStreamAsync(string apiBaseUrl, string s3Key, CancellationToken cancellationToken = default)
     {
-        var escaped = string.Join('/',
-            s3Key.Split('/', StringSplitOptions.RemoveEmptyEntries).Select(Uri.EscapeDataString));
-        var uri = BuildUri(apiBaseUrl, $"/api/public/assets/{escaped}");
+        Uri uri;
+        if (Uri.TryCreate(s3Key?.Trim(), UriKind.Absolute, out var absoluteUri))
+        {
+            uri = absoluteUri;
+        }
+        else
+        {
+            var escaped = string.Join('/',
+                (s3Key ?? string.Empty).Split('/', StringSplitOptions.RemoveEmptyEntries).Select(Uri.EscapeDataString));
+            uri = BuildUri(apiBaseUrl, $"/api/public/assets/{escaped}");
+        }
 
         var response = await _httpClient.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         response.EnsureSuccessStatusCode();

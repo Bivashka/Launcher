@@ -131,6 +131,33 @@ public sealed class PublicControllerTests
         Assert.Equal("build-private", payload.BuildId);
     }
 
+    [Fact]
+    public async Task Manifest_ResolvesRuntimeAndFileDownloadUrls_FromDeliverySettings()
+    {
+        await using var fixture = await TestFixture.CreateAsync();
+        await fixture.SeedManifestAsync(
+            "public",
+            isPrivate: false,
+            allowedPlayerUsernames: string.Empty,
+            "runtime/public-runtime.zip",
+            [
+                new LauncherManifestFile(
+                    Path: "mods/example.jar",
+                    Sha256: "abc",
+                    Size: 123,
+                    S3Key: "clients/public/build-public/mods/example.jar")
+            ]);
+
+        var controller = fixture.CreateController();
+        var response = await controller.Manifest("public", CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(response);
+        var payload = Assert.IsType<LauncherManifest>(ok.Value);
+        Assert.Equal("https://cdn.local/runtime/public-runtime.zip", payload.JavaRuntimeArtifactUrl);
+        var file = Assert.Single(payload.Files);
+        Assert.Equal("https://cdn.local/clients/public/build-public/mods/example.jar", file.DownloadUrl);
+    }
+
     private sealed class TestFixture : IAsyncDisposable
     {
         private readonly InMemoryObjectStorageService _objectStorage = new();
@@ -184,7 +211,14 @@ public sealed class PublicControllerTests
             await DbContext.SaveChangesAsync();
         }
 
-        public async Task SeedManifestAsync(string slug, bool isPrivate, string allowedPlayerUsernames)
+        public InMemoryObjectStorageService ObjectStorage => _objectStorage;
+
+        public async Task SeedManifestAsync(
+            string slug,
+            bool isPrivate,
+            string allowedPlayerUsernames,
+            string? javaRuntimeArtifactKey = null,
+            IReadOnlyList<LauncherManifestFile>? files = null)
         {
             var profile = new Profile
             {
@@ -212,11 +246,12 @@ public sealed class PublicControllerTests
                 JvmArgsDefault: "-Xmx2G",
                 GameArgsDefault: string.Empty,
                 JavaRuntime: null,
-                JavaRuntimeArtifactKey: null,
+                JavaRuntimeArtifactKey: javaRuntimeArtifactKey,
                 JavaRuntimeArtifactSha256: null,
                 JavaRuntimeArtifactSizeBytes: null,
                 JavaRuntimeArtifactContentType: null,
-                Files: []);
+                JavaRuntimeArtifactUrl: null,
+                Files: files ?? []);
 
             await _objectStorage.UploadJsonAsync(profile.LatestManifestKey, manifest);
         }

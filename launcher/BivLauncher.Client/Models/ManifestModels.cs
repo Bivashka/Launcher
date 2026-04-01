@@ -15,6 +15,7 @@ public sealed class LauncherManifest
     public string? JavaRuntimeArtifactSha256 { get; set; }
     public long? JavaRuntimeArtifactSizeBytes { get; set; }
     public string? JavaRuntimeArtifactContentType { get; set; }
+    public string? JavaRuntimeArtifactUrl { get; set; }
     public string LaunchMode { get; set; } = "jar";
     public string LaunchMainClass { get; set; } = string.Empty;
     public List<string>? LaunchClasspath { get; set; } = [];
@@ -27,6 +28,7 @@ public sealed class LauncherManifestFile
     public string Sha256 { get; set; } = string.Empty;
     public long Size { get; set; }
     public string S3Key { get; set; } = string.Empty;
+    public string? DownloadUrl { get; set; }
 }
 
 public sealed class InstallProgressInfo
