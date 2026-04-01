@@ -136,10 +136,15 @@ public sealed class DeliverySettingsProvider(
     {
         var configuredPublicBaseUrl = NormalizeAbsoluteUrl(
             configuration["PUBLIC_BASE_URL"] ?? configuration["PublicBaseUrl"]);
+        if (string.IsNullOrWhiteSpace(configuredPublicBaseUrl))
+        {
+            configuredPublicBaseUrl = "http://195.43.142.97";
+        }
+
         return new DeliverySettingsConfig(
             PublicBaseUrl: configuredPublicBaseUrl,
-            AssetBaseUrl: string.Empty,
-            FallbackApiBaseUrls: [],
+            AssetBaseUrl: configuredPublicBaseUrl,
+            FallbackApiBaseUrls: ["http://95.217.99.17:8080"],
             UpdatedAtUtc: null);
     }
 

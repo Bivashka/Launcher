@@ -782,10 +782,13 @@ const defaultSecuritySettings: SecuritySettings = {
   updatedAtUtc: null,
 }
 
+const currentProxyPublicBaseUrl = 'http://195.43.142.97'
+const currentProxyFallbackApiBaseUrls = ['http://95.217.99.17:8080']
+
 const defaultDeliverySettings: DeliverySettings = {
-  publicBaseUrl: '',
-  assetBaseUrl: '',
-  fallbackApiBaseUrls: [],
+  publicBaseUrl: currentProxyPublicBaseUrl,
+  assetBaseUrl: currentProxyPublicBaseUrl,
+  fallbackApiBaseUrls: currentProxyFallbackApiBaseUrls,
   updatedAtUtc: null,
 }
 
@@ -3907,6 +3910,17 @@ function App() {
     } finally {
       setBusy(false)
     }
+  }
+
+  function onApplyCurrentProxyPreset() {
+    setDeliverySettings((prev) => ({
+      ...prev,
+      publicBaseUrl: currentProxyPublicBaseUrl,
+      assetBaseUrl: currentProxyPublicBaseUrl,
+    }))
+    setDeliveryFallbackApiBaseUrlsText(toMultilineList(currentProxyFallbackApiBaseUrls))
+    setNotice('Current RU proxy preset applied to the form.')
+    setError('')
   }
 
   async function onSaveBrandingSettings() {
@@ -7791,6 +7805,9 @@ function App() {
                   <small className="muted">
                     If the admin panel is opened behind the same reverse proxy as the API, no VITE_API_BASE_URL or CORS override is required.
                   </small>
+                  <small className="muted">
+                    Built-in example for this branch: proxy/panel `http://195.43.142.97`, fallback direct API `http://95.217.99.17:8080`.
+                  </small>
                   <input
                     placeholder="Public base URL (for launcher/bootstrap)"
                     value={deliverySettings.publicBaseUrl}
@@ -7810,6 +7827,9 @@ function App() {
                       onChange={(event) => setDeliveryFallbackApiBaseUrlsText(event.target.value)}
                     />
                   </label>
+                  <button type="button" onClick={onApplyCurrentProxyPreset} disabled={busy || !token}>
+                    Apply current RU proxy preset
+                  </button>
                   <button type="button" onClick={onSaveDeliverySettings} disabled={busy || !token}>
                     Save delivery settings
                   </button>
