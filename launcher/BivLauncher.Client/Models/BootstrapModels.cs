@@ -159,7 +159,9 @@ public sealed partial class ManagedServerItem : ObservableObject
     public required string DiscordRpcSmallImageText { get; init; }
     public required bool DiscordRpcEnabled { get; init; }
     public required string DiscordPreview { get; init; }
-    public required IImage? Icon { get; init; }
+    [ObservableProperty]
+    private IImage? _icon;
+
     public required string MainAddress { get; init; }
     public required int MainPort { get; init; }
     public required string MainJarPath { get; init; }

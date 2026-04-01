@@ -33,12 +33,13 @@ public partial class MainWindowViewModel : ViewModelBase
     private readonly ILauncherUpdateService _launcherUpdateService;
     private readonly IPendingSubmissionService _pendingSubmissionService;
     private readonly ILogService _logService;
-    private readonly HttpClient _iconHttpClient = new() { Timeout = TimeSpan.FromSeconds(20) };
+    private readonly HttpClient _iconHttpClient = new() { Timeout = TimeSpan.FromMinutes(10) };
     private readonly Dictionary<string, IImage?> _iconCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, IImage?> _brandingImageCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, byte[]?> _windowIconCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly Queue<string> _liveLogLines = new();
     private readonly SemaphoreSlim _serverOnlineRefreshLock = new(1, 1);
+    private readonly object _assetCacheSyncRoot = new();
     private readonly DispatcherTimer _serverOnlineRefreshTimer;
     private const int MaxLiveLogLines = 500;
     private const int ServerOnlineTimeoutMs = 3500;
@@ -58,6 +59,7 @@ public partial class MainWindowViewModel : ViewModelBase
     private bool _isSyncingJavaModeOption;
     private bool _isSyncingRouteOption;
     private bool _installTelemetrySent;
+    private int _assetRefreshVersion;
     private bool _isAutomaticUpdateInProgress;
     private bool _allowAutoSessionRestore = true;
     private string _pendingTwoFactorUsername = string.Empty;
@@ -529,9 +531,8 @@ public partial class MainWindowViewModel : ViewModelBase
         ResetTwoFactorState();
         AuthStatusText = T("status.notLoggedIn");
         LoadStoredPlayerSessionState();
-        await TryRestorePlayerSessionAsync();
-
         await RefreshAsync();
+        await TryRestorePlayerSessionAsync();
         await TryApplyAutomaticUpdateAsync();
         StatusText = T("status.ready");
     }
@@ -1460,11 +1461,12 @@ public partial class MainWindowViewModel : ViewModelBase
             MergeKnownApiBaseUrls([bootstrapApiBaseUrl]);
         }
         MergeKnownApiBaseUrls(bootstrap.FallbackApiBaseUrls);
+        var assetRefreshVersion = Interlocked.Increment(ref _assetRefreshVersion);
         _ = FlushPendingSubmissionsAsync();
-        await TrySubmitInstallTelemetryAsync(bootstrap);
+        _ = TrySubmitInstallTelemetryAsync(bootstrap);
 
         await ApplyLauncherDirectoryNameAsync(bootstrap.Branding);
-        await ApplyBrandingAsync(ApiBaseUrl, bootstrap.Branding);
+        ApplyBranding(ApiBaseUrl, bootstrap.Branding, assetRefreshVersion);
         var discordRpcEnabled = bootstrap.Constraints.DiscordRpcEnabled;
         var discordRpcPrivacyMode = bootstrap.Constraints.DiscordRpcPrivacyMode;
         _discordRpcService.ConfigurePolicy(discordRpcEnabled, discordRpcPrivacyMode, ProductName);
@@ -1481,6 +1483,7 @@ public partial class MainWindowViewModel : ViewModelBase
         RamMb = Math.Clamp(RamMb, RamMinMb, RamMaxMb);
 
         var allServers = new List<ManagedServerItem>();
+        var missingServerIconCandidates = new List<(Guid ServerId, string ServerIconUrl, string ProfileIconUrl)>();
         var orderedProfiles = bootstrap.Profiles.OrderBy(profile => profile.Priority);
         _profileBundledRuntimeKeys.Clear();
         foreach (var profile in orderedProfiles)
@@ -1500,7 +1503,12 @@ public partial class MainWindowViewModel : ViewModelBase
                 var effectiveRpcState = discordRpcPrivacyMode ? string.Empty : (rpc?.StateText ?? string.Empty);
                 var effectiveRpcLargeText = discordRpcPrivacyMode ? string.Empty : (rpc?.LargeImageText ?? string.Empty);
                 var effectiveRpcSmallText = discordRpcPrivacyMode ? string.Empty : (rpc?.SmallImageText ?? string.Empty);
-                var icon = await ResolveServerIconAsync(ApiBaseUrl, server.IconUrl, profile.IconUrl);
+                var icon = TryResolveServerIconFromCache(ApiBaseUrl, server.IconUrl, profile.IconUrl);
+                if (icon is null)
+                {
+                    missingServerIconCandidates.Add((server.Id, server.IconUrl, profile.IconUrl));
+                }
+
                 allServers.Add(new ManagedServerItem
                 {
                     ServerId = server.Id,
@@ -1585,6 +1593,7 @@ public partial class MainWindowViewModel : ViewModelBase
         StatusText = F("status.loadedServers", ManagedServers.Count);
         NotifyLauncherHeaderPresentationChanged();
         NotifyAccountPresentationChanged();
+        QueueServerIconRefresh(ApiBaseUrl, assetRefreshVersion, missingServerIconCandidates);
 
         if (IsPlayerLoggedIn)
         {
@@ -2431,15 +2440,13 @@ public partial class MainWindowViewModel : ViewModelBase
             return;
         }
 
-        var currentApiBaseUrl = NormalizeBaseUrl(ApiBaseUrl);
-
         var fallbackStoredUsername = SelectedStoredAccount?.Username?.Trim() ?? string.Empty;
 
         try
         {
             var session = await ExecuteAgainstApiFailoverAsync(
                 candidate => _launcherApiService.GetSessionAsync(candidate, _playerAuthToken, _playerAuthTokenType),
-                preferredApiBaseUrl: _playerAuthApiBaseUrl);
+                preferredApiBaseUrl: ResolvePreferredPlayerApiBaseUrl());
             SetAuthenticatedPlayerSession(
                 _playerAuthToken,
                 _playerAuthTokenType,
@@ -2475,6 +2482,19 @@ public partial class MainWindowViewModel : ViewModelBase
         }
     }
 
+    private string ResolvePreferredPlayerApiBaseUrl(string? storedPreferredApiBaseUrl = null)
+    {
+        var currentApiBaseUrl = NormalizeBaseUrlOrEmpty(ApiBaseUrl);
+        if (!string.IsNullOrWhiteSpace(currentApiBaseUrl))
+        {
+            return currentApiBaseUrl;
+        }
+
+        return NormalizeBaseUrlOrEmpty(string.IsNullOrWhiteSpace(storedPreferredApiBaseUrl)
+            ? _playerAuthApiBaseUrl
+            : storedPreferredApiBaseUrl);
+    }
+
     private async Task<string> ValidatePlayerSessionBeforeLaunchAsync()
     {
         if (!IsPlayerLoggedIn)
@@ -2495,7 +2515,7 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             var session = await ExecuteAgainstApiFailoverAsync(
                 candidate => _launcherApiService.GetSessionAsync(candidate, _playerAuthToken, _playerAuthTokenType),
-                preferredApiBaseUrl: _playerAuthApiBaseUrl);
+                preferredApiBaseUrl: ResolvePreferredPlayerApiBaseUrl());
             SetAuthenticatedPlayerSession(
                 _playerAuthToken,
                 _playerAuthTokenType,
@@ -2533,7 +2553,7 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             var session = await ExecuteAgainstApiFailoverAsync(
                 candidate => _launcherApiService.GetSessionAsync(candidate, _playerAuthToken, _playerAuthTokenType),
-                preferredApiBaseUrl: _playerAuthApiBaseUrl);
+                preferredApiBaseUrl: ResolvePreferredPlayerApiBaseUrl());
             SetAuthenticatedPlayerSession(
                 _playerAuthToken,
                 _playerAuthTokenType,
@@ -2605,7 +2625,7 @@ public partial class MainWindowViewModel : ViewModelBase
                     candidate,
                     token,
                     string.IsNullOrWhiteSpace(account.AuthTokenType) ? "Bearer" : account.AuthTokenType),
-                preferredApiBaseUrl: accountApiBaseUrl);
+                preferredApiBaseUrl: ResolvePreferredPlayerApiBaseUrl(accountApiBaseUrl));
 
             var sessionUsername = (session.Username ?? string.Empty).Trim();
             var sessionExternalId = (session.ExternalId ?? string.Empty).Trim();
@@ -2638,7 +2658,7 @@ public partial class MainWindowViewModel : ViewModelBase
                 sessionUsername,
                 sessionExternalId,
                 session.Roles,
-                string.IsNullOrWhiteSpace(accountApiBaseUrl) ? ApiBaseUrl : accountApiBaseUrl);
+                ApiBaseUrl);
             await RefreshPlayerCosmeticsAsync(sessionUsername);
             await PersistSettingsSnapshotAsync();
             if (refreshLauncherContent)
@@ -2696,7 +2716,7 @@ public partial class MainWindowViewModel : ViewModelBase
                         ServerId = server.ServerId,
                         ServerName = server.DisplayName
                     }),
-                preferredApiBaseUrl: _playerAuthApiBaseUrl);
+                preferredApiBaseUrl: ResolvePreferredPlayerApiBaseUrl());
 
             if (session.Limit > 0)
             {
@@ -2744,7 +2764,7 @@ public partial class MainWindowViewModel : ViewModelBase
                             cancellationToken);
                         return true;
                     },
-                    preferredApiBaseUrl: _playerAuthApiBaseUrl,
+                    preferredApiBaseUrl: ResolvePreferredPlayerApiBaseUrl(),
                     persistSuccess: false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -2785,7 +2805,7 @@ public partial class MainWindowViewModel : ViewModelBase
                         sessionId);
                     return true;
                 },
-                preferredApiBaseUrl: _playerAuthApiBaseUrl,
+                preferredApiBaseUrl: ResolvePreferredPlayerApiBaseUrl(),
                 persistSuccess: false);
         }
         catch (Exception ex)
@@ -3374,7 +3394,7 @@ public partial class MainWindowViewModel : ViewModelBase
         await _settingsService.SaveAsync(_settings);
     }
 
-    private async Task ApplyBrandingAsync(string apiBaseUrl, BrandingConfig? branding)
+    private void ApplyBranding(string apiBaseUrl, BrandingConfig? branding, int assetRefreshVersion)
     {
         branding ??= new BrandingConfig();
 
@@ -3452,8 +3472,12 @@ public partial class MainWindowViewModel : ViewModelBase
         var requestedWidth = branding.LoginCardWidth <= 0 ? 460 : branding.LoginCardWidth;
         LoginCardWidth = Math.Clamp(requestedWidth, 340, 640);
 
-        BrandingBackgroundImage = await ResolveBrandingImageAsync(apiBaseUrl, branding.BackgroundImageUrl);
-        await ApplyLauncherWindowIconAsync(apiBaseUrl, branding.LauncherIconUrl);
+        var backgroundUrl = branding.BackgroundImageUrl;
+        var launcherIconUrl = branding.LauncherIconUrl;
+        var cachedBackground = TryResolveBrandingImageFromCache(apiBaseUrl, backgroundUrl);
+        BrandingBackgroundImage = cachedBackground;
+        ApplyLauncherWindowIconFromCache(apiBaseUrl, launcherIconUrl);
+        QueueBrandingAssetRefresh(apiBaseUrl, assetRefreshVersion, backgroundUrl, launcherIconUrl);
     }
 
     private static bool ArePathsEqual(string? left, string? right)
@@ -4180,6 +4204,136 @@ public partial class MainWindowViewModel : ViewModelBase
         return F("rpc.preview", appId.Trim(), text);
     }
 
+    private void QueueBrandingAssetRefresh(string apiBaseUrl, int assetRefreshVersion, string? backgroundImageUrl, string? launcherIconUrl)
+    {
+        var backgroundTask = string.IsNullOrWhiteSpace(backgroundImageUrl)
+            ? Task.FromResult<IImage?>(null)
+            : ResolveBrandingImageAsync(apiBaseUrl, backgroundImageUrl);
+        var windowIconTask = string.IsNullOrWhiteSpace(launcherIconUrl)
+            ? Task.FromResult<Avalonia.Controls.WindowIcon?>(null)
+            : ResolveLauncherWindowIconAsync(apiBaseUrl, launcherIconUrl);
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var backgroundImage = await backgroundTask;
+                if (IsCurrentAssetRefresh(assetRefreshVersion))
+                {
+                    await Dispatcher.UIThread.InvokeAsync(() =>
+                    {
+                        if (IsCurrentAssetRefresh(assetRefreshVersion))
+                        {
+                            BrandingBackgroundImage = backgroundImage;
+                        }
+                    });
+                }
+
+                var brandingIcon = await windowIconTask;
+                if (IsCurrentAssetRefresh(assetRefreshVersion))
+                {
+                    await Dispatcher.UIThread.InvokeAsync(() =>
+                    {
+                        if (IsCurrentAssetRefresh(assetRefreshVersion))
+                        {
+                            ApplyResolvedWindowIcon(brandingIcon);
+                        }
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                _logService.LogError($"Branding asset refresh failed: {ex.Message}");
+            }
+        });
+    }
+
+    private void QueueServerIconRefresh(
+        string apiBaseUrl,
+        int assetRefreshVersion,
+        IReadOnlyCollection<(Guid ServerId, string ServerIconUrl, string ProfileIconUrl)> candidates)
+    {
+        if (candidates.Count == 0)
+        {
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            foreach (var candidate in candidates)
+            {
+                if (!IsCurrentAssetRefresh(assetRefreshVersion))
+                {
+                    return;
+                }
+
+                try
+                {
+                    var icon = await ResolveServerIconAsync(apiBaseUrl, candidate.ServerIconUrl, candidate.ProfileIconUrl);
+                    if (icon is null || !IsCurrentAssetRefresh(assetRefreshVersion))
+                    {
+                        continue;
+                    }
+
+                    await Dispatcher.UIThread.InvokeAsync(() =>
+                    {
+                        if (!IsCurrentAssetRefresh(assetRefreshVersion))
+                        {
+                            return;
+                        }
+
+                        var target = ManagedServers.FirstOrDefault(server => server.ServerId == candidate.ServerId);
+                        if (target is not null)
+                        {
+                            target.Icon = icon;
+                        }
+                    });
+                }
+                catch (Exception ex)
+                {
+                    _logService.LogError($"Server icon refresh failed for {candidate.ServerId}: {ex.Message}");
+                }
+            }
+        });
+    }
+
+    private bool IsCurrentAssetRefresh(int assetRefreshVersion) =>
+        assetRefreshVersion == Volatile.Read(ref _assetRefreshVersion);
+
+    private IImage? TryResolveServerIconFromCache(string apiBaseUrl, string? serverIconUrl, string? profileIconUrl)
+    {
+        var candidates = new[] { serverIconUrl, profileIconUrl };
+        foreach (var candidate in candidates)
+        {
+            var absoluteUrl = ToAbsoluteUrl(apiBaseUrl, candidate);
+            if (string.IsNullOrWhiteSpace(absoluteUrl))
+            {
+                continue;
+            }
+
+            var cached = TryResolveImageFromCache(_iconCache, absoluteUrl);
+            if (cached is not null)
+            {
+                return cached;
+            }
+        }
+
+        return null;
+    }
+
+    private IImage? TryResolveBrandingImageFromCache(string apiBaseUrl, string? brandingImageUrl)
+    {
+        var absoluteUrl = ToAbsoluteUrl(apiBaseUrl, brandingImageUrl);
+        return string.IsNullOrWhiteSpace(absoluteUrl)
+            ? null
+            : TryResolveImageFromCache(_brandingImageCache, absoluteUrl);
+    }
+
+    private void ApplyLauncherWindowIconFromCache(string apiBaseUrl, string? launcherIconUrl)
+    {
+        ApplyResolvedWindowIcon(TryResolveLauncherWindowIconFromCache(apiBaseUrl, launcherIconUrl));
+    }
+
     private async Task<IImage?> ResolveServerIconAsync(string apiBaseUrl, string? serverIconUrl, string? profileIconUrl)
     {
         var candidates = new[] { serverIconUrl, profileIconUrl };
@@ -4191,25 +4345,31 @@ public partial class MainWindowViewModel : ViewModelBase
                 continue;
             }
 
-            if (_iconCache.TryGetValue(absoluteUrl, out var cached))
+            var cached = TryResolveImageFromCache(_iconCache, absoluteUrl);
+            if (cached is not null)
             {
                 return cached;
             }
 
-            try
+            var payload = await DownloadAssetPayloadAsync(absoluteUrl);
+            if (payload is null)
             {
-                await using var stream = await _iconHttpClient.GetStreamAsync(absoluteUrl);
-                using var memory = new MemoryStream();
-                await stream.CopyToAsync(memory);
-                memory.Position = 0;
-
-                var bitmap = new Bitmap(memory);
-                _iconCache[absoluteUrl] = bitmap;
-                return bitmap;
+                lock (_assetCacheSyncRoot)
+                {
+                    _iconCache[absoluteUrl] = null;
+                }
+                continue;
             }
-            catch
+
+            var bitmap = CreateBitmap(payload);
+            lock (_assetCacheSyncRoot)
             {
-                _iconCache[absoluteUrl] = null;
+                _iconCache[absoluteUrl] = bitmap;
+            }
+
+            if (bitmap is not null)
+            {
+                return bitmap;
             }
         }
 
@@ -4224,30 +4384,32 @@ public partial class MainWindowViewModel : ViewModelBase
             return null;
         }
 
-        if (_brandingImageCache.TryGetValue(absoluteUrl, out var cached))
+        var cached = TryResolveImageFromCache(_brandingImageCache, absoluteUrl);
+        if (cached is not null)
         {
             return cached;
         }
 
-        try
+        var payload = await DownloadAssetPayloadAsync(absoluteUrl);
+        if (payload is null)
         {
-            await using var stream = await _iconHttpClient.GetStreamAsync(absoluteUrl);
-            using var memory = new MemoryStream();
-            await stream.CopyToAsync(memory);
-            memory.Position = 0;
-
-            var bitmap = new Bitmap(memory);
-            _brandingImageCache[absoluteUrl] = bitmap;
-            return bitmap;
-        }
-        catch
-        {
-            _brandingImageCache[absoluteUrl] = null;
+            lock (_assetCacheSyncRoot)
+            {
+                _brandingImageCache[absoluteUrl] = null;
+            }
             return null;
         }
+
+        var bitmap = CreateBitmap(payload);
+        lock (_assetCacheSyncRoot)
+        {
+            _brandingImageCache[absoluteUrl] = bitmap;
+        }
+
+        return bitmap;
     }
 
-    private async Task ApplyLauncherWindowIconAsync(string apiBaseUrl, string? launcherIconUrl)
+    private void ApplyResolvedWindowIcon(Avalonia.Controls.WindowIcon? brandingIcon)
     {
         var mainWindow = (Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.MainWindow;
         if (mainWindow is null)
@@ -4256,9 +4418,38 @@ public partial class MainWindowViewModel : ViewModelBase
         }
 
         _defaultWindowIcon ??= mainWindow.Icon;
-
-        var brandingIcon = await ResolveLauncherWindowIconAsync(apiBaseUrl, launcherIconUrl);
         mainWindow.Icon = brandingIcon ?? _defaultWindowIcon;
+    }
+
+    private Avalonia.Controls.WindowIcon? TryResolveLauncherWindowIconFromCache(string apiBaseUrl, string? launcherIconUrl)
+    {
+        var absoluteUrl = ToAbsoluteUrl(apiBaseUrl, launcherIconUrl);
+        if (string.IsNullOrWhiteSpace(absoluteUrl))
+        {
+            return null;
+        }
+
+        byte[]? cachedPayload;
+        lock (_assetCacheSyncRoot)
+        {
+            if (_windowIconCache.TryGetValue(absoluteUrl, out cachedPayload))
+            {
+                return CreateWindowIcon(cachedPayload);
+            }
+        }
+
+        cachedPayload = TryReadCachedAssetPayload(absoluteUrl);
+        if (cachedPayload is null)
+        {
+            return null;
+        }
+
+        lock (_assetCacheSyncRoot)
+        {
+            _windowIconCache[absoluteUrl] = cachedPayload;
+        }
+
+        return CreateWindowIcon(cachedPayload);
     }
 
     private async Task<Avalonia.Controls.WindowIcon?> ResolveLauncherWindowIconAsync(string apiBaseUrl, string? launcherIconUrl)
@@ -4269,22 +4460,28 @@ public partial class MainWindowViewModel : ViewModelBase
             return null;
         }
 
-        if (_windowIconCache.TryGetValue(absoluteUrl, out var cachedPayload))
+        var cached = TryResolveLauncherWindowIconFromCache(apiBaseUrl, launcherIconUrl);
+        if (cached is not null)
         {
-            return CreateWindowIcon(cachedPayload);
+            return cached;
         }
 
-        try
+        var payload = await DownloadAssetPayloadAsync(absoluteUrl);
+        if (payload is null)
         {
-            var payload = await _iconHttpClient.GetByteArrayAsync(absoluteUrl);
-            _windowIconCache[absoluteUrl] = payload;
-            return CreateWindowIcon(payload);
-        }
-        catch
-        {
-            _windowIconCache[absoluteUrl] = null;
+            lock (_assetCacheSyncRoot)
+            {
+                _windowIconCache[absoluteUrl] = null;
+            }
             return null;
         }
+
+        lock (_assetCacheSyncRoot)
+        {
+            _windowIconCache[absoluteUrl] = payload;
+        }
+
+        return CreateWindowIcon(payload);
     }
 
     private static Avalonia.Controls.WindowIcon? CreateWindowIcon(byte[]? payload)
@@ -4296,6 +4493,113 @@ public partial class MainWindowViewModel : ViewModelBase
 
         var stream = new MemoryStream(payload, writable: false);
         return new Avalonia.Controls.WindowIcon(stream);
+    }
+
+    private IImage? TryResolveImageFromCache(Dictionary<string, IImage?> cache, string absoluteUrl)
+    {
+        lock (_assetCacheSyncRoot)
+        {
+            if (cache.TryGetValue(absoluteUrl, out var cached))
+            {
+                return cached;
+            }
+        }
+
+        var payload = TryReadCachedAssetPayload(absoluteUrl);
+        if (payload is null)
+        {
+            return null;
+        }
+
+        var image = CreateBitmap(payload);
+        lock (_assetCacheSyncRoot)
+        {
+            cache[absoluteUrl] = image;
+        }
+
+        return image;
+    }
+
+    private Bitmap? CreateBitmap(byte[] payload)
+    {
+        if (payload.Length == 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            using var memory = new MemoryStream(payload, writable: false);
+            return new Bitmap(memory);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private async Task<byte[]?> DownloadAssetPayloadAsync(string absoluteUrl)
+    {
+        try
+        {
+            var payload = await _iconHttpClient.GetByteArrayAsync(absoluteUrl);
+            TryWriteCachedAssetPayload(absoluteUrl, payload);
+            return payload;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private byte[]? TryReadCachedAssetPayload(string absoluteUrl)
+    {
+        try
+        {
+            var cachePath = GetAssetCachePath(absoluteUrl);
+            return File.Exists(cachePath) ? File.ReadAllBytes(cachePath) : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private void TryWriteCachedAssetPayload(string absoluteUrl, byte[] payload)
+    {
+        if (payload.Length == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var cachePath = GetAssetCachePath(absoluteUrl);
+            var cacheDirectory = Path.GetDirectoryName(cachePath);
+            if (!string.IsNullOrWhiteSpace(cacheDirectory))
+            {
+                Directory.CreateDirectory(cacheDirectory);
+            }
+
+            File.WriteAllBytes(cachePath, payload);
+        }
+        catch
+        {
+        }
+    }
+
+    private string GetAssetCachePath(string absoluteUrl)
+    {
+        var uri = new Uri(absoluteUrl, UriKind.Absolute);
+        var extension = Path.GetExtension(uri.AbsolutePath);
+        if (string.IsNullOrWhiteSpace(extension) || extension.Length > 10)
+        {
+            extension = ".bin";
+        }
+
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(absoluteUrl))).ToLowerInvariant();
+        var settingsDirectory = Path.GetDirectoryName(_settingsService.GetSettingsFilePath()) ?? AppContext.BaseDirectory;
+        return Path.Combine(settingsDirectory, "asset-cache", $"{hash}{extension}");
     }
 
     private static string ToAbsoluteUrl(string apiBaseUrl, string? maybeUrl)
