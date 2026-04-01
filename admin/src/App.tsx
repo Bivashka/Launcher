@@ -6897,8 +6897,8 @@ function App() {
             )}
 
             {activePage === 'security' && (
-            <div className="grid-2">
-              <section className="form form-small form-actions">
+            <div className="grid-2 security-two-factor-grid">
+              <section className="form form-small form-actions security-two-factor-sidebar">
                 <h3>Two-factor authentication (2FA)</h3>
                 <div className="action-block">
                 <label className="checkbox">

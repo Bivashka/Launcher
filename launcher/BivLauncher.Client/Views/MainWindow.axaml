@@ -1,4 +1,4 @@
-<Window xmlns="https://github.com/avaloniaui"
+﻿<Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:BivLauncher.Client.ViewModels"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -60,9 +60,6 @@
             </ComboBox>
             <Button Grid.Row="4"
                     Content="{Binding DeleteAccountButtonText}"
-                    Background="{Binding PrimaryButtonBackgroundBrush}"
-                    BorderBrush="{Binding PrimaryButtonBorderBrush}"
-                    Foreground="{Binding PrimaryButtonForegroundBrush}"
                     Command="{Binding DeleteAccountCommand}"
                     IsVisible="{Binding HasStoredAccounts}" />
 
@@ -88,9 +85,6 @@
             <Button Grid.Row="9"
                     Classes="playButton"
                     Content="{Binding LoginButtonText}"
-                    Background="{Binding PlayButtonBackgroundBrush}"
-                    BorderBrush="{Binding PlayButtonBorderBrush}"
-                    Foreground="{Binding PlayButtonForegroundBrush}"
                     Command="{Binding LoginCommand}" />
 
             <TextBlock Grid.Row="10"
@@ -115,30 +109,26 @@
         </Border>
 
         <Grid IsVisible="{Binding IsLauncherReady}"
-              ColumnDefinitions="*,420"
+              ColumnDefinitions="*,392"
               ColumnSpacing="16">
-          <Border Classes="featurePanel"
-                  Background="{Binding PanelBackgroundBrush}"
-                  BorderBrush="{Binding PanelBorderBrush}">
+          <Border Classes="featurePanel">
             <Grid RowDefinitions="Auto,Auto,Auto,Auto,*,Auto" RowSpacing="14">
-              <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
+              <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
                 <TextBlock Classes="subtle"
                            Foreground="{Binding SecondaryTextBrush}"
                            VerticalAlignment="Center"
                            Text="{Binding StatusText}"
                            TextWrapping="Wrap" />
                 <Button Grid.Column="1"
-                        Classes="ghostButton compactAccountButton"
-                        Content="{Binding RefreshButtonText}"
-                        Background="{Binding PrimaryButtonBackgroundBrush}"
-                        BorderBrush="{Binding PrimaryButtonBorderBrush}"
-                        Foreground="{Binding PrimaryButtonForegroundBrush}"
-                        Command="{Binding RefreshCommand}" />
+                        Classes="toolbarIconButton"
+                        Command="{Binding RefreshCommand}">
+                  <TextBlock Text="&#x21BB;"
+                             FontSize="16"
+                             VerticalAlignment="Center"
+                             HorizontalAlignment="Center" />
+                </Button>
                 <Button Grid.Column="2"
-                        Classes="iconButton"
-                        Background="{Binding PrimaryButtonBackgroundBrush}"
-                        BorderBrush="{Binding PrimaryButtonBorderBrush}"
-                        Foreground="{Binding PrimaryButtonForegroundBrush}"
+                        Classes="toolbarIconButton"
                         Command="{Binding ToggleSettingsCommand}">
                   <TextBlock Text="&#xE713;" FontFamily="Segoe MDL2 Assets" />
                 </Button>
@@ -157,15 +147,11 @@
                          Fill="{Binding SelectedServer.OnlineStatusBrush, TargetNullValue=#8EA3C0}" />
                 <TextBlock Classes="subtle"
                            Foreground="{Binding SecondaryTextBrush}"
-                           Text="{Binding SelectedServer.OnlineStatusText, TargetNullValue='Проверка...'}" />
+                           Text="{Binding SelectedServer.OnlineStatusText, TargetNullValue='РџСЂРѕРІРµСЂРєР°...'}" />
               </StackPanel>
               <Border Grid.Row="3"
-                      IsVisible="{Binding IsFileSyncInProgress}"
-                      CornerRadius="12"
-                      BorderThickness="1"
-                      Background="{Binding ListBackgroundBrush}"
-                      BorderBrush="{Binding ListBorderBrush}"
-                      Padding="12">
+                      Classes="syncCard"
+                      IsVisible="{Binding IsFileSyncInProgress}">
                 <StackPanel Spacing="7">
                   <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
                     <TextBlock Foreground="{Binding PrimaryTextBrush}"
@@ -191,58 +177,75 @@
               </Border>
 
               <Grid Grid.Row="4"
-                    ColumnDefinitions="1.18*,0.82*"
-                    ColumnSpacing="14">
-                <Border Classes="panel heroPanel"
-                        Background="{Binding PanelBackgroundBrush}"
-                        BorderBrush="{Binding PanelBorderBrush}">
-                  <Grid RowDefinitions="Auto,Auto,*" RowSpacing="10">
-                    <TextBlock Classes="heroMeta"
-                               Foreground="{Binding SecondaryTextBrush}"
-                               Text="{Binding SelectedNewsMetaText}" />
-                    <TextBlock Grid.Row="1"
-                               FontSize="24"
-                               FontWeight="SemiBold"
-                               Foreground="{Binding PrimaryTextBrush}"
-                               Text="{Binding SelectedNewsHeadlineText}"
-                               TextWrapping="Wrap" />
-                    <ScrollViewer Grid.Row="2"
-                                  VerticalScrollBarVisibility="Auto"
-                                  HorizontalScrollBarVisibility="Disabled">
-                      <TextBlock Foreground="{Binding PrimaryTextBrush}"
-                                 Text="{Binding SelectedNewsBodyText}"
-                                 TextWrapping="Wrap"
-                                 LineHeight="22" />
-                    </ScrollViewer>
+                    RowDefinitions="*,Auto"
+                    RowSpacing="14">
+                <Border Classes="panel heroPanel">
+                  <Grid>
+                    <Grid RowDefinitions="Auto,Auto,*"
+                          RowSpacing="10"
+                          IsVisible="{Binding HasSelectedNews}">
+                      <TextBlock Classes="heroMeta"
+                                 Foreground="{Binding SecondaryTextBrush}"
+                                 Text="{Binding SelectedNewsMetaText}" />
+                      <TextBlock Grid.Row="1"
+                                 FontSize="24"
+                                 FontWeight="SemiBold"
+                                 Foreground="{Binding PrimaryTextBrush}"
+                                 Text="{Binding SelectedNewsHeadlineText}"
+                                 TextWrapping="Wrap" />
+                      <ScrollViewer Grid.Row="2"
+                                    VerticalScrollBarVisibility="Auto"
+                                    HorizontalScrollBarVisibility="Disabled">
+                        <TextBlock Foreground="{Binding PrimaryTextBrush}"
+                                   Text="{Binding SelectedNewsBodyText}"
+                                   TextWrapping="Wrap"
+                                   LineHeight="22" />
+                      </ScrollViewer>
+                    </Grid>
+
+                    <Grid IsVisible="{Binding HasSelectedNewsPlaceholder}">
+                      <StackPanel HorizontalAlignment="Center"
+                                  VerticalAlignment="Center"
+                                  Spacing="14">
+                        <Border Classes="newsPlaceholderArt">
+                          <Image Source="{Binding SelectedServer.Icon}"
+                                 Width="96"
+                                 Height="96"
+                                 Stretch="UniformToFill" />
+                        </Border>
+                        <TextBlock Classes="heroMeta"
+                                   HorizontalAlignment="Center"
+                                   Text="{Binding SelectedServer.RuntimeDisplay}" />
+                      </StackPanel>
+                    </Grid>
                   </Grid>
                 </Border>
 
-                <Border Grid.Column="1"
-                        Classes="panel"
-                        Background="{Binding PanelBackgroundBrush}"
-                        BorderBrush="{Binding PanelBorderBrush}">
-                  <ListBox Background="{Binding ListBackgroundBrush}"
-                           BorderBrush="{Binding ListBorderBrush}"
-                           Foreground="{Binding InputForegroundBrush}"
+                <Border Grid.Row="1"
+                        Classes="panel newsRailPanel">
+                  <ListBox Classes="newsRailList"
                            ItemsSource="{Binding NewsItems}"
-                           SelectedItem="{Binding SelectedNewsItem}">
+                           SelectedItem="{Binding SelectedNewsItem}"
+                           IsVisible="{Binding HasSelectedNews}">
                     <ListBox.ItemTemplate>
                       <DataTemplate>
-                        <Grid Margin="2,4" RowDefinitions="Auto,Auto,Auto" RowSpacing="4">
-                          <TextBlock Text="{Binding Title}"
-                                     FontWeight="SemiBold"
-                                     TextWrapping="Wrap" />
-                          <TextBlock Grid.Row="1"
-                                     Classes="subtle"
-                                     Opacity="0.84"
-                                     Text="{Binding Meta}"
-                                     TextWrapping="Wrap" />
-                          <TextBlock Grid.Row="2"
-                                     Opacity="0.84"
-                                     Text="{Binding Preview}"
-                                     TextWrapping="Wrap"
-                                     MaxHeight="54" />
-                        </Grid>
+                        <Border Classes="newsMiniCard">
+                          <Grid RowDefinitions="Auto,Auto,Auto" RowSpacing="4">
+                            <TextBlock Text="{Binding Title}"
+                                       FontWeight="SemiBold"
+                                       TextWrapping="Wrap" />
+                            <TextBlock Grid.Row="1"
+                                       Classes="subtle"
+                                       Opacity="0.84"
+                                       Text="{Binding Meta}"
+                                       TextWrapping="Wrap" />
+                            <TextBlock Grid.Row="2"
+                                       Opacity="0.84"
+                                       Text="{Binding Preview}"
+                                       TextWrapping="Wrap"
+                                       MaxHeight="54" />
+                          </Grid>
+                        </Border>
                       </DataTemplate>
                     </ListBox.ItemTemplate>
                   </ListBox>
@@ -251,51 +254,51 @@
 
               <StackPanel Grid.Row="5"
                           Orientation="Horizontal"
-                          Spacing="10"
+                          Spacing="8"
                           VerticalAlignment="Bottom">
                 <Button Classes="playButton"
                         Content="{Binding PlayButtonText}"
-                        Background="{Binding PlayButtonBackgroundBrush}"
-                        BorderBrush="{Binding PlayButtonBorderBrush}"
-                        Foreground="{Binding PlayButtonForegroundBrush}"
                         Command="{Binding LaunchCommand}" />
-                <Button Content="{Binding VerifyFilesButtonText}"
-                        Background="{Binding PrimaryButtonBackgroundBrush}"
-                        BorderBrush="{Binding PrimaryButtonBorderBrush}"
-                        Foreground="{Binding PrimaryButtonForegroundBrush}"
+                <Button Classes="secondaryActionButton"
+                        Content="{Binding VerifyFilesButtonText}"
                         Command="{Binding VerifyFilesCommand}" />
-                <Button Content="{Binding OpenLogsFolderButtonText}"
-                        Background="{Binding PrimaryButtonBackgroundBrush}"
-                        BorderBrush="{Binding PrimaryButtonBorderBrush}"
-                        Foreground="{Binding PrimaryButtonForegroundBrush}"
+                <Button Classes="secondaryActionButton"
+                        Content="{Binding OpenLogsFolderButtonText}"
                         Command="{Binding OpenLogsFolderCommand}" />
               </StackPanel>
             </Grid>
           </Border>
 
           <Grid Grid.Column="1" RowDefinitions="Auto,*" RowSpacing="14">
-            <Border Classes="panel accountCornerPanel"
-                    Background="{Binding PanelBackgroundBrush}"
-                    BorderBrush="{Binding PanelBorderBrush}">
-              <Grid RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="10">
-                <StackPanel>
-                  <TextBlock FontSize="22"
-                             FontWeight="SemiBold"
-                             Foreground="{Binding PrimaryTextBrush}"
-                             Text="{Binding PlayerLoggedInAs}" />
-                  <TextBlock Classes="subtle"
-                             Foreground="{Binding SecondaryTextBrush}"
-                             Text="{Binding AuthStatusText}"
-                             TextWrapping="Wrap" />
-                </StackPanel>
+            <Border Classes="panel accountCornerPanel">
+              <Grid RowDefinitions="Auto,Auto,Auto" RowSpacing="10">
+                <Grid ColumnDefinitions="Auto,*"
+                      ColumnSpacing="14">
+                  <Border Classes="accountAvatar">
+                    <TextBlock Text="&#xE77B;"
+                               FontFamily="Segoe MDL2 Assets"
+                               FontSize="24"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center" />
+                  </Border>
+                  <StackPanel Grid.Column="1"
+                              VerticalAlignment="Center">
+                    <TextBlock FontSize="22"
+                               FontWeight="SemiBold"
+                               Foreground="{Binding PrimaryTextBrush}"
+                               Text="{Binding AccountPanelTitle}" />
+                    <TextBlock Classes="subtle"
+                               Foreground="{Binding SecondaryTextBrush}"
+                               Text="{Binding AccountPanelSubtitle}"
+                               TextWrapping="Wrap" />
+                  </StackPanel>
+                </Grid>
 
                 <ComboBox Grid.Row="1"
-                          Background="{Binding InputBackgroundBrush}"
-                          BorderBrush="{Binding InputBorderBrush}"
-                          Foreground="{Binding InputForegroundBrush}"
+                          Classes="accountSelect"
                           ItemsSource="{Binding StoredPlayerAccounts}"
                           SelectedItem="{Binding SelectedStoredAccount}"
-                          IsVisible="{Binding HasStoredAccounts}">
+                          IsVisible="{Binding HasMultipleStoredAccounts}">
                   <ComboBox.ItemTemplate>
                     <DataTemplate>
                       <TextBlock Text="{Binding Username}" />
@@ -305,88 +308,81 @@
 
                 <Grid Grid.Row="2"
                       ColumnDefinitions="*,*"
-                      ColumnSpacing="8">
-                  <Button Classes="ghostButton compactAccountButton"
+                      RowDefinitions="Auto,Auto"
+                      ColumnSpacing="8"
+                      RowSpacing="8">
+                  <Button Classes="accountActionButton"
                           Content="{Binding AddAccountButtonText}"
-                          Background="{Binding PrimaryButtonBackgroundBrush}"
-                          BorderBrush="{Binding PrimaryButtonBorderBrush}"
-                          Foreground="{Binding PrimaryButtonForegroundBrush}"
                           Command="{Binding AddAccountCommand}" />
                   <Button Grid.Column="1"
-                          Classes="ghostButton compactAccountButton"
+                          Classes="accountActionButton"
                           Content="{Binding DeleteAccountButtonText}"
-                          Background="{Binding PrimaryButtonBackgroundBrush}"
-                          BorderBrush="{Binding PrimaryButtonBorderBrush}"
-                          Foreground="{Binding PrimaryButtonForegroundBrush}"
                           Command="{Binding DeleteAccountCommand}"
                           IsVisible="{Binding HasStoredAccounts}" />
+                  <Button Grid.Row="1"
+                          Grid.ColumnSpan="2"
+                          Classes="secondaryActionButton"
+                          Content="{Binding LogoutButtonText}"
+                          Command="{Binding LogoutCommand}" />
                 </Grid>
-
-                <Button Grid.Row="3"
-                        Classes="ghostButton compactAccountButton"
-                        Content="{Binding LogoutButtonText}"
-                        Background="{Binding PrimaryButtonBackgroundBrush}"
-                        BorderBrush="{Binding PrimaryButtonBorderBrush}"
-                        Foreground="{Binding PrimaryButtonForegroundBrush}"
-                        Command="{Binding LogoutCommand}" />
               </Grid>
             </Border>
 
             <Border Grid.Row="1"
-                    Classes="panel"
-                    Background="{Binding PanelBackgroundBrush}"
-                    BorderBrush="{Binding PanelBorderBrush}">
+                    Classes="panel serverShelfPanel">
               <Grid RowDefinitions="Auto,*" RowSpacing="10">
                 <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
                   <TextBlock Classes="sectionTitle"
                              Foreground="{Binding PrimaryTextBrush}"
                              Text="{Binding ServersHeaderText}" />
-                  <TextBlock Grid.Column="1"
-                             Classes="subtle"
-                             Foreground="{Binding SecondaryTextBrush}"
-                             VerticalAlignment="Center"
-                             Text="{Binding ServerMonitoringText}" />
+                  <Border Grid.Column="1"
+                          Classes="infoChip">
+                    <TextBlock Classes="heroMeta"
+                               Text="{Binding ServerMonitoringText}" />
+                  </Border>
                 </Grid>
                 <ListBox Grid.Row="1"
-                         Background="{Binding ListBackgroundBrush}"
-                         BorderBrush="{Binding ListBorderBrush}"
-                         Foreground="{Binding InputForegroundBrush}"
+                         Classes="serverShelfList"
                          ItemsSource="{Binding ManagedServers}"
                          SelectedItem="{Binding SelectedServer}">
                   <ListBox.ItemTemplate>
                     <DataTemplate>
-                      <Grid Margin="2,4"
-                            ColumnDefinitions="64,*"
-                            ColumnSpacing="12">
-                        <Border Width="56"
-                                Height="56"
-                                CornerRadius="16"
-                                BorderBrush="#496A97"
-                                BorderThickness="1"
-                                VerticalAlignment="Top"
-                                Background="#143152">
-                          <Image Source="{Binding Icon}" Stretch="UniformToFill" />
-                        </Border>
-                        <Grid Grid.Column="1" RowDefinitions="Auto,Auto,Auto" RowSpacing="4">
-                          <TextBlock Text="{Binding DisplayName}"
-                                     FontSize="16"
-                                     FontWeight="SemiBold"
-                                     TextWrapping="Wrap" />
-                          <TextBlock Grid.Row="1"
-                                     Classes="subtle"
-                                     Opacity="0.86"
-                                     Text="{Binding RuntimeDisplay}" />
-                          <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="6">
-                            <Ellipse Width="8"
-                                     Height="8"
-                                     VerticalAlignment="Center"
-                                     Fill="{Binding OnlineStatusBrush}" />
-                            <TextBlock Opacity="0.88"
-                                       Text="{Binding OnlineStatusText}"
-                                       TextWrapping="Wrap" />
-                          </StackPanel>
+                      <Border Classes="serverListCard">
+                        <Grid ColumnDefinitions="72,*" ColumnSpacing="14">
+                          <Border Classes="serverIconWrap">
+                            <Image Source="{Binding Icon}" Stretch="UniformToFill" />
+                          </Border>
+                          <Grid Grid.Column="1" RowDefinitions="Auto,Auto,Auto" RowSpacing="5">
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                              <TextBlock Text="{Binding DisplayName}"
+                                         FontSize="17"
+                                         FontWeight="SemiBold"
+                                         TextWrapping="Wrap" />
+                              <Border Grid.Column="1"
+                                      Classes="serverStatusBadge">
+                                <StackPanel Orientation="Horizontal"
+                                            Spacing="6">
+                                  <Ellipse Width="8"
+                                           Height="8"
+                                           VerticalAlignment="Center"
+                                           Fill="{Binding OnlineStatusBrush}" />
+                                  <TextBlock Text="{Binding OnlineStatusText}"
+                                             Foreground="#FFF8F3"
+                                             FontSize="12"
+                                             FontWeight="SemiBold" />
+                                </StackPanel>
+                              </Border>
+                            </Grid>
+                            <TextBlock Grid.Row="1"
+                                       Classes="subtle"
+                                       Opacity="0.9"
+                                       Text="{Binding RuntimeDisplay}" />
+                            <TextBlock Grid.Row="2"
+                                       Classes="heroMeta"
+                                       Text="{Binding Address}" />
+                          </Grid>
                         </Grid>
-                      </Grid>
+                      </Border>
                     </DataTemplate>
                   </ListBox.ItemTemplate>
                 </ListBox>
@@ -406,9 +402,7 @@
                     MaxHeight="700"
                     Padding="18"
                     CornerRadius="18"
-                    BorderThickness="1"
-                    Background="{Binding PanelBackgroundBrush}"
-                    BorderBrush="{Binding PanelBorderBrush}">
+                    BorderThickness="1">
               <Grid RowDefinitions="Auto,*" RowSpacing="10">
                 <Grid ColumnDefinitions="*,Auto">
                   <TextBlock Classes="sectionTitle"
@@ -416,9 +410,6 @@
                              Text="{Binding SettingsHeaderText}" />
                   <Button Grid.Column="1"
                           Classes="iconButton"
-                          Background="{Binding PrimaryButtonBackgroundBrush}"
-                          BorderBrush="{Binding PrimaryButtonBorderBrush}"
-                          Foreground="{Binding PrimaryButtonForegroundBrush}"
                           Command="{Binding CloseSettingsCommand}">
                     <TextBlock Text="&#xE711;" FontFamily="Segoe MDL2 Assets" />
                   </Button>
@@ -428,9 +419,7 @@
                               VerticalScrollBarVisibility="Auto"
                               HorizontalScrollBarVisibility="Disabled">
                   <StackPanel Spacing="12" Margin="0,0,4,0">
-                    <Border Classes="panel"
-                            Background="{Binding PanelBackgroundBrush}"
-                            BorderBrush="{Binding PanelBorderBrush}">
+                    <Border Classes="panel">
                       <StackPanel Spacing="10">
                         <TextBlock Classes="sectionTitle"
                                    Foreground="{Binding PrimaryTextBrush}"
@@ -471,16 +460,11 @@
                                      Text="{Binding RamMaxText}" />
                         </Grid>
                         <Button Content="{Binding SaveSettingsButtonText}"
-                                Background="{Binding PrimaryButtonBackgroundBrush}"
-                                BorderBrush="{Binding PrimaryButtonBorderBrush}"
-                                Foreground="{Binding PrimaryButtonForegroundBrush}"
                                 Command="{Binding SaveSettingsCommand}" />
                       </StackPanel>
                     </Border>
 
-                    <Border Classes="panel"
-                            Background="{Binding PanelBackgroundBrush}"
-                            BorderBrush="{Binding PanelBorderBrush}">
+                    <Border Classes="panel">
                       <StackPanel Spacing="8">
                         <TextBlock Classes="sectionTitle"
                                    Foreground="{Binding PrimaryTextBrush}"
@@ -496,22 +480,14 @@
                                    Text="{Binding UpdateAvailabilityText}" />
                         <StackPanel Orientation="Horizontal" Spacing="8">
                           <Button Content="{Binding DownloadUpdateButtonText}"
-                                  Background="{Binding PrimaryButtonBackgroundBrush}"
-                                  BorderBrush="{Binding PrimaryButtonBorderBrush}"
-                                  Foreground="{Binding PrimaryButtonForegroundBrush}"
                                   Command="{Binding DownloadUpdateCommand}"
                                   IsVisible="{Binding IsUpdateAvailable}" />
-                          <Button Content="{Binding InstallUpdateButtonText}"
-                                  Background="{Binding PlayButtonBackgroundBrush}"
-                                  BorderBrush="{Binding PlayButtonBorderBrush}"
-                                  Foreground="{Binding PlayButtonForegroundBrush}"
+                          <Button Classes="playButton"
+                                  Content="{Binding InstallUpdateButtonText}"
                                   Command="{Binding InstallUpdateCommand}"
                                   IsVisible="{Binding IsUpdateAvailable}" />
                         </StackPanel>
                         <Button Content="{Binding OpenUpdateButtonText}"
-                                Background="{Binding PrimaryButtonBackgroundBrush}"
-                                BorderBrush="{Binding PrimaryButtonBorderBrush}"
-                                Foreground="{Binding PrimaryButtonForegroundBrush}"
                                 Command="{Binding OpenUpdateUrlCommand}"
                                 IsVisible="{Binding IsUpdateAvailable}" />
                         <TextBlock Classes="subtle"
@@ -529,9 +505,6 @@
                                  IsVisible="{Binding HasUpdateReleaseNotes}"
                                  Height="90" />
                         <Button Content="{Binding OpenLogsFolderButtonText}"
-                                Background="{Binding PrimaryButtonBackgroundBrush}"
-                                BorderBrush="{Binding PrimaryButtonBorderBrush}"
-                                Foreground="{Binding PrimaryButtonForegroundBrush}"
                                 Command="{Binding OpenLogsFolderCommand}" />
                       </StackPanel>
                     </Border>
@@ -582,9 +555,6 @@
 
                   <Button Classes="banNoticeButton"
                           Content="{Binding BanNoticeDismissButtonText}"
-                          Background="{Binding PrimaryButtonBackgroundBrush}"
-                          BorderBrush="{Binding PrimaryButtonBorderBrush}"
-                          Foreground="{Binding PrimaryButtonForegroundBrush}"
                           Command="{Binding DismissBanNoticeCommand}" />
                 </StackPanel>
               </Grid>

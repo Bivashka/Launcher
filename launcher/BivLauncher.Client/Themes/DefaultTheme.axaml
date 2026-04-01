@@ -4,13 +4,13 @@
     <Setter Property="Background">
       <Setter.Value>
         <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-          <GradientStop Offset="0" Color="#0A1425" />
-          <GradientStop Offset="0.48" Color="#0D1B31" />
-          <GradientStop Offset="1" Color="#10213A" />
+          <GradientStop Offset="0" Color="#090B11" />
+          <GradientStop Offset="0.52" Color="#130F14" />
+          <GradientStop Offset="1" Color="#181116" />
         </LinearGradientBrush>
       </Setter.Value>
     </Setter>
-    <Setter Property="Foreground" Value="#F1F7FF" />
+    <Setter Property="Foreground" Value="#F7F2EC" />
     <Setter Property="FontFamily" Value="Sora, Manrope, Segoe UI Variable, Segoe UI" />
   </Style>
 
@@ -20,82 +20,174 @@
   </Style>
 
   <Style Selector="TextBlock.heroTitle">
-    <Setter Property="FontSize" Value="32" />
+    <Setter Property="FontSize" Value="30" />
     <Setter Property="FontWeight" Value="Bold" />
-    <Setter Property="Foreground" Value="#F3F8FF" />
+    <Setter Property="Foreground" Value="#FFF7F1" />
   </Style>
 
   <Style Selector="TextBlock.heroMeta">
-    <Setter Property="Foreground" Value="#BED6F5" />
-    <Setter Property="FontSize" Value="13" />
+    <Setter Property="Foreground" Value="#E0B992" />
+    <Setter Property="FontSize" Value="12" />
   </Style>
 
   <Style Selector="TextBlock.sectionTitle">
     <Setter Property="FontSize" Value="18" />
     <Setter Property="FontWeight" Value="SemiBold" />
-    <Setter Property="Foreground" Value="#EEF5FF" />
+    <Setter Property="Foreground" Value="#FFF8F3" />
   </Style>
 
   <Style Selector="TextBlock.subtle">
-    <Setter Property="Foreground" Value="#A7BEDC" />
+    <Setter Property="Foreground" Value="#C8B3A3" />
+    <Setter Property="FontSize" Value="13" />
   </Style>
 
   <Style Selector="Border.panel">
-    <Setter Property="Background" Value="#1A2944CC" />
-    <Setter Property="BorderBrush" Value="#3F6BA4" />
+    <Setter Property="Background" Value="#171117D9" />
+    <Setter Property="BorderBrush" Value="#5E4135" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="16" />
-    <Setter Property="Padding" Value="14" />
-    <Setter Property="BoxShadow" Value="0 12 28 0 #040E1A88" />
+    <Setter Property="CornerRadius" Value="20" />
+    <Setter Property="Padding" Value="16" />
+    <Setter Property="BoxShadow" Value="0 18 42 0 #0000007A" />
+  </Style>
+
+  <Style Selector="Border.featurePanel">
+    <Setter Property="Padding" Value="22" />
+    <Setter Property="CornerRadius" Value="24" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="BorderBrush" Value="#7A5241" />
+    <Setter Property="Background">
+      <Setter.Value>
+        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+          <GradientStop Offset="0" Color="#1A1218E8" />
+          <GradientStop Offset="0.52" Color="#140E14E8" />
+          <GradientStop Offset="1" Color="#0F0B10E8" />
+        </LinearGradientBrush>
+      </Setter.Value>
+    </Setter>
+    <Setter Property="BoxShadow" Value="0 24 54 0 #0000008B" />
+  </Style>
+
+  <Style Selector="Border.heroPanel">
+    <Setter Property="Padding" Value="22" />
+    <Setter Property="CornerRadius" Value="22" />
+    <Setter Property="BorderBrush" Value="#845949" />
+    <Setter Property="Background">
+      <Setter.Value>
+        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+          <GradientStop Offset="0" Color="#1E151AEB" />
+          <GradientStop Offset="0.55" Color="#171116EB" />
+          <GradientStop Offset="1" Color="#120D11EB" />
+        </LinearGradientBrush>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style Selector="Border.loginCard">
+    <Setter Property="Padding" Value="22" />
+    <Setter Property="CornerRadius" Value="22" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="BorderBrush" Value="#7B5941" />
+    <Setter Property="Background" Value="#171117E6" />
+    <Setter Property="BoxShadow" Value="0 24 50 0 #00000084" />
   </Style>
 
   <Style Selector="Border.accountCornerPanel">
     <Setter Property="Padding" Value="18" />
-    <Setter Property="CornerRadius" Value="18" />
-    <Setter Property="BoxShadow" Value="0 14 28 0 #030C1B8A" />
+    <Setter Property="CornerRadius" Value="22" />
+    <Setter Property="Background" Value="#171015E6" />
   </Style>
 
-  <Style Selector="Border.heroPanel">
-    <Setter Property="Padding" Value="20" />
-    <Setter Property="CornerRadius" Value="20" />
-    <Setter Property="BorderBrush" Value="#4E81C7" />
+  <Style Selector="Border.serverShelfPanel">
+    <Setter Property="Padding" Value="16" />
+  </Style>
+
+  <Style Selector="Border.newsRailPanel">
+    <Setter Property="Padding" Value="12" />
+    <Setter Property="Background" Value="#130E13D4" />
+  </Style>
+
+  <Style Selector="Border.infoChip">
+    <Setter Property="Padding" Value="10,5" />
+    <Setter Property="CornerRadius" Value="999" />
     <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="BorderBrush" Value="#664638" />
+    <Setter Property="Background" Value="#20161BCD" />
+  </Style>
+
+  <Style Selector="Border.syncCard">
+    <Setter Property="CornerRadius" Value="16" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="BorderBrush" Value="#63463A" />
+    <Setter Property="Background" Value="#181116D4" />
+    <Setter Property="Padding" Value="12" />
+  </Style>
+
+  <Style Selector="Border.accountAvatar">
+    <Setter Property="Width" Value="56" />
+    <Setter Property="Height" Value="56" />
+    <Setter Property="CornerRadius" Value="18" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="BorderBrush" Value="#7A5747" />
     <Setter Property="Background">
       <Setter.Value>
         <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-          <GradientStop Offset="0" Color="#1A3A66CC" />
-          <GradientStop Offset="0.58" Color="#16335BCC" />
-          <GradientStop Offset="1" Color="#102641CC" />
+          <GradientStop Offset="0" Color="#2A1C1A" />
+          <GradientStop Offset="1" Color="#1A1318" />
         </LinearGradientBrush>
       </Setter.Value>
     </Setter>
-    <Setter Property="BoxShadow" Value="0 16 34 0 #07122790" />
   </Style>
 
-  <Style Selector="Border.loginCard">
-    <Setter Property="Padding" Value="20" />
-    <Setter Property="CornerRadius" Value="18" />
+  <Style Selector="Border.newsPlaceholderArt">
+    <Setter Property="Width" Value="124" />
+    <Setter Property="Height" Value="124" />
+    <Setter Property="CornerRadius" Value="28" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="BorderBrush" Value="#5E87BE" />
-    <Setter Property="Background" Value="#0F1E33D9" />
-    <Setter Property="BoxShadow" Value="0 22 44 0 #04102499" />
+    <Setter Property="BorderBrush" Value="#715043" />
+    <Setter Property="Background" Value="#181116D6" />
+    <Setter Property="Padding" Value="14" />
+    <Setter Property="BoxShadow" Value="0 16 32 0 #00000072" />
   </Style>
 
-  <Style Selector="Border.featurePanel">
-    <Setter Property="Padding" Value="24" />
+  <Style Selector="Border.serverIconWrap">
+    <Setter Property="Width" Value="80" />
+    <Setter Property="Height" Value="80" />
     <Setter Property="CornerRadius" Value="22" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="BorderBrush" Value="#4B79B3" />
+    <Setter Property="BorderBrush" Value="#715142" />
+    <Setter Property="Background" Value="#181116D8" />
+    <Setter Property="ClipToBounds" Value="True" />
+  </Style>
+
+  <Style Selector="Border.serverStatusBadge">
+    <Setter Property="Padding" Value="10,6" />
+    <Setter Property="CornerRadius" Value="999" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="BorderBrush" Value="#62463B" />
+    <Setter Property="Background" Value="#20161BCC" />
+  </Style>
+
+  <Style Selector="Border.newsMiniCard">
+    <Setter Property="Padding" Value="12" />
+    <Setter Property="CornerRadius" Value="16" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="BorderBrush" Value="#553C32" />
+    <Setter Property="Background" Value="#191116D9" />
+  </Style>
+
+  <Style Selector="Border.serverListCard">
+    <Setter Property="Padding" Value="14" />
+    <Setter Property="CornerRadius" Value="18" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="BorderBrush" Value="#65483D" />
     <Setter Property="Background">
       <Setter.Value>
         <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-          <GradientStop Offset="0" Color="#183A61D9" />
-          <GradientStop Offset="0.48" Color="#112C48D9" />
-          <GradientStop Offset="1" Color="#0C2237D9" />
+          <GradientStop Offset="0" Color="#1B141ADB" />
+          <GradientStop Offset="1" Color="#151015DB" />
         </LinearGradientBrush>
       </Setter.Value>
     </Setter>
-    <Setter Property="BoxShadow" Value="0 18 40 0 #030E1F8C" />
   </Style>
 
   <Style Selector="Border.banNoticeCard">
@@ -147,57 +239,43 @@
     <Setter Property="Foreground" Value="#FCEEE8" />
   </Style>
 
-  <Style Selector="Button.banNoticeButton">
-    <Setter Property="HorizontalAlignment" Value="Left" />
-    <Setter Property="Padding" Value="16,10" />
-    <Setter Property="MinWidth" Value="170" />
-  </Style>
-
-  <Style Selector="Border.settingsDrawer">
-    <Setter Property="Margin" Value="0" />
-    <Setter Property="Padding" Value="18" />
-    <Setter Property="CornerRadius" Value="16,0,0,16" />
-    <Setter Property="BorderBrush" Value="#5E89C0" />
-    <Setter Property="BorderThickness" Value="1,0,0,0" />
-    <Setter Property="Background" Value="#0E1A2DD9" />
-  </Style>
-
   <Style Selector="Button">
-    <Setter Property="CornerRadius" Value="11" />
-    <Setter Property="Padding" Value="12,8" />
-    <Setter Property="Background" Value="#2C76F0" />
-    <Setter Property="BorderBrush" Value="#5FA0FF" />
+    <Setter Property="CornerRadius" Value="12" />
+    <Setter Property="Padding" Value="14,9" />
+    <Setter Property="Background" Value="#2D1E22" />
+    <Setter Property="BorderBrush" Value="#7E5A49" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="Foreground" Value="#F7FBFF" />
+    <Setter Property="Foreground" Value="#FFF6EF" />
     <Setter Property="FontWeight" Value="SemiBold" />
   </Style>
 
   <Style Selector="Button:pointerover">
-    <Setter Property="Background" Value="#3A85FF" />
-    <Setter Property="BorderBrush" Value="#86BAFF" />
+    <Setter Property="Background" Value="#372328" />
+    <Setter Property="BorderBrush" Value="#A36F58" />
   </Style>
 
   <Style Selector="Button:pressed">
-    <Setter Property="Background" Value="#2366D8" />
+    <Setter Property="Background" Value="#23161A" />
   </Style>
 
   <Style Selector="Button:disabled">
     <Setter Property="Opacity" Value="0.55" />
   </Style>
 
-  <Style Selector="Button.ghostButton">
-    <Setter Property="Background" Value="#1B3358" />
-    <Setter Property="BorderBrush" Value="#4B77AE" />
+  <Style Selector="Button.secondaryActionButton">
+    <Setter Property="Background" Value="#21171B" />
+    <Setter Property="BorderBrush" Value="#67493C" />
+    <Setter Property="Padding" Value="13,9" />
   </Style>
 
-  <Style Selector="Button.ghostButton:pointerover">
-    <Setter Property="Background" Value="#22406D" />
+  <Style Selector="Button.secondaryActionButton:pointerover">
+    <Setter Property="Background" Value="#2A1D22" />
   </Style>
 
-  <Style Selector="Button.compactAccountButton">
+  <Style Selector="Button.accountActionButton">
     <Setter Property="HorizontalAlignment" Value="Stretch" />
-    <Setter Property="HorizontalContentAlignment" Value="Center" />
-    <Setter Property="Padding" Value="12,9" />
+    <Setter Property="Padding" Value="12,8" />
+    <Setter Property="FontSize" Value="13" />
   </Style>
 
   <Style Selector="Button.iconButton">
@@ -208,68 +286,113 @@
     <Setter Property="VerticalContentAlignment" Value="Center" />
     <Setter Property="FontSize" Value="16" />
     <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
-    <Setter Property="Background" Value="#173155" />
-    <Setter Property="BorderBrush" Value="#4C78AE" />
   </Style>
 
-  <Style Selector="Button.iconButton:pointerover">
-    <Setter Property="Background" Value="#21426D" />
+  <Style Selector="Button.toolbarIconButton">
+    <Setter Property="Width" Value="40" />
+    <Setter Property="Height" Value="40" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="CornerRadius" Value="14" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="Background" Value="#20161B" />
+    <Setter Property="BorderBrush" Value="#714E41" />
+  </Style>
+
+  <Style Selector="Button.toolbarIconButton:pointerover">
+    <Setter Property="Background" Value="#2B1C20" />
   </Style>
 
   <Style Selector="Button.playButton">
-    <Setter Property="FontSize" Value="17" />
+    <Setter Property="FontSize" Value="16" />
     <Setter Property="FontWeight" Value="Bold" />
-    <Setter Property="Background" Value="#10A879" />
-    <Setter Property="BorderBrush" Value="#67D9B1" />
-    <Setter Property="Padding" Value="18,11" />
+    <Setter Property="Background" Value="#149768" />
+    <Setter Property="BorderBrush" Value="#59D1A2" />
+    <Setter Property="Padding" Value="17,10" />
   </Style>
 
   <Style Selector="Button.playButton:pointerover">
-    <Setter Property="Background" Value="#14B884" />
+    <Setter Property="Background" Value="#18AC77" />
   </Style>
 
-  <Style Selector="TextBox, ComboBox, NumericUpDown">
-    <Setter Property="Background" Value="#0B182BD9" />
-    <Setter Property="BorderBrush" Value="#436A9F" />
+  <Style Selector="Button.banNoticeButton">
+    <Setter Property="HorizontalAlignment" Value="Left" />
+    <Setter Property="MinWidth" Value="170" />
+  </Style>
+
+  <Style Selector="TextBox">
+    <Setter Property="Background" Value="#120D11E6" />
+    <Setter Property="BorderBrush" Value="#64473B" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="10" />
-    <Setter Property="Foreground" Value="#EFF6FF" />
+    <Setter Property="CornerRadius" Value="12" />
+    <Setter Property="Foreground" Value="#FFF7F0" />
+    <Setter Property="Padding" Value="10,8" />
+  </Style>
+
+  <Style Selector="ComboBox">
+    <Setter Property="Background" Value="#120D11E6" />
+    <Setter Property="BorderBrush" Value="#64473B" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="12" />
+    <Setter Property="Foreground" Value="#FFF7F0" />
+    <Setter Property="Padding" Value="10,8" />
+  </Style>
+
+  <Style Selector="NumericUpDown">
+    <Setter Property="Background" Value="#120D11E6" />
+    <Setter Property="BorderBrush" Value="#64473B" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="12" />
+    <Setter Property="Foreground" Value="#FFF7F0" />
     <Setter Property="Padding" Value="10,8" />
   </Style>
 
   <Style Selector="TextBox:focus">
-    <Setter Property="BorderBrush" Value="#7DB8FF" />
+    <Setter Property="BorderBrush" Value="#C38358" />
   </Style>
 
   <Style Selector="ComboBox:focus">
-    <Setter Property="BorderBrush" Value="#7DB8FF" />
+    <Setter Property="BorderBrush" Value="#C38358" />
   </Style>
 
   <Style Selector="NumericUpDown:focus">
-    <Setter Property="BorderBrush" Value="#7DB8FF" />
+    <Setter Property="BorderBrush" Value="#C38358" />
+  </Style>
+
+  <Style Selector="ComboBox.accountSelect">
+    <Setter Property="Padding" Value="10,8" />
   </Style>
 
   <Style Selector="ListBox">
-    <Setter Property="Background" Value="#0D1B2FD9" />
-    <Setter Property="BorderBrush" Value="#3E669A" />
+    <Setter Property="Background" Value="#120D11C4" />
+    <Setter Property="BorderBrush" Value="#553B31" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="14" />
+    <Setter Property="CornerRadius" Value="18" />
     <Setter Property="Padding" Value="10" />
+  </Style>
+
+  <Style Selector="ListBox.newsRailList">
+    <Setter Property="Background" Value="#100C10A8" />
+    <Setter Property="MaxHeight" Value="184" />
+  </Style>
+
+  <Style Selector="ListBox.serverShelfList">
+    <Setter Property="Background" Value="#120D11B2" />
   </Style>
 
   <Style Selector="ListBoxItem">
-    <Setter Property="Padding" Value="10" />
+    <Setter Property="Padding" Value="8" />
     <Setter Property="Margin" Value="0,4,0,4" />
-    <Setter Property="CornerRadius" Value="14" />
+    <Setter Property="CornerRadius" Value="16" />
   </Style>
 
   <Style Selector="ListBoxItem:pointerover /template/ ContentPresenter">
-    <Setter Property="Background" Value="#1C365C" />
+    <Setter Property="Background" Value="#271A1F" />
   </Style>
 
   <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
-    <Setter Property="Background" Value="#244C79" />
-    <Setter Property="BorderBrush" Value="#79B0F2" />
+    <Setter Property="Background" Value="#312026" />
+    <Setter Property="BorderBrush" Value="#B57B60" />
     <Setter Property="BorderThickness" Value="1" />
   </Style>
 </Styles>

@@ -123,6 +123,8 @@ public partial class MainWindowViewModel : ViewModelBase
         StoredPlayerAccounts.CollectionChanged += (_, _) =>
         {
             OnPropertyChanged(nameof(HasStoredAccounts));
+            OnPropertyChanged(nameof(HasMultipleStoredAccounts));
+            OnPropertyChanged(nameof(AccountPanelSubtitle));
             OnPropertyChanged(nameof(ServerMonitoringText));
             SwitchAccountCommand.NotifyCanExecuteChanged();
             DeleteAccountCommand.NotifyCanExecuteChanged();
@@ -203,49 +205,49 @@ public partial class MainWindowViewModel : ViewModelBase
     private IBrush _loginCardBorderBrush = new SolidColorBrush(Color.Parse("#7C583D"));
 
     [ObservableProperty]
-    private IBrush _playButtonBackgroundBrush = new SolidColorBrush(Color.Parse("#33A874"));
+    private IBrush _playButtonBackgroundBrush = new SolidColorBrush(Color.Parse("#149768"));
 
     [ObservableProperty]
-    private IBrush _playButtonBorderBrush = new SolidColorBrush(Color.Parse("#7CE1B5"));
+    private IBrush _playButtonBorderBrush = new SolidColorBrush(Color.Parse("#59D1A2"));
 
     [ObservableProperty]
     private IBrush _playButtonForegroundBrush = new SolidColorBrush(Color.Parse("#F7FBFF"));
 
     [ObservableProperty]
-    private IBrush _primaryButtonBackgroundBrush = new SolidColorBrush(Color.Parse("#2C76F0"));
+    private IBrush _primaryButtonBackgroundBrush = new SolidColorBrush(Color.Parse("#2D1E22"));
 
     [ObservableProperty]
-    private IBrush _primaryButtonBorderBrush = new SolidColorBrush(Color.Parse("#5FA0FF"));
+    private IBrush _primaryButtonBorderBrush = new SolidColorBrush(Color.Parse("#7E5A49"));
 
     [ObservableProperty]
     private IBrush _primaryButtonForegroundBrush = new SolidColorBrush(Color.Parse("#F7FBFF"));
 
     [ObservableProperty]
-    private IBrush _panelBackgroundBrush = new SolidColorBrush(Color.Parse("#1A2944CC"));
+    private IBrush _panelBackgroundBrush = new SolidColorBrush(Color.Parse("#171117D9"));
 
     [ObservableProperty]
-    private IBrush _panelBorderBrush = new SolidColorBrush(Color.Parse("#3F6BA4"));
+    private IBrush _panelBorderBrush = new SolidColorBrush(Color.Parse("#5E4135"));
 
     [ObservableProperty]
-    private IBrush _inputBackgroundBrush = new SolidColorBrush(Color.Parse("#0B182BD9"));
+    private IBrush _inputBackgroundBrush = new SolidColorBrush(Color.Parse("#120D11E6"));
 
     [ObservableProperty]
-    private IBrush _inputBorderBrush = new SolidColorBrush(Color.Parse("#436A9F"));
+    private IBrush _inputBorderBrush = new SolidColorBrush(Color.Parse("#64473B"));
 
     [ObservableProperty]
-    private IBrush _inputForegroundBrush = new SolidColorBrush(Color.Parse("#EFF6FF"));
+    private IBrush _inputForegroundBrush = new SolidColorBrush(Color.Parse("#FFF7F0"));
 
     [ObservableProperty]
-    private IBrush _listBackgroundBrush = new SolidColorBrush(Color.Parse("#0D1B2FD9"));
+    private IBrush _listBackgroundBrush = new SolidColorBrush(Color.Parse("#120D11C4"));
 
     [ObservableProperty]
-    private IBrush _listBorderBrush = new SolidColorBrush(Color.Parse("#3E669A"));
+    private IBrush _listBorderBrush = new SolidColorBrush(Color.Parse("#553B31"));
 
     [ObservableProperty]
-    private IBrush _primaryTextBrush = new SolidColorBrush(Color.Parse("#EEF5FF"));
+    private IBrush _primaryTextBrush = new SolidColorBrush(Color.Parse("#FFF8F3"));
 
     [ObservableProperty]
-    private IBrush _secondaryTextBrush = new SolidColorBrush(Color.Parse("#A7BEDC"));
+    private IBrush _secondaryTextBrush = new SolidColorBrush(Color.Parse("#C8B3A3"));
 
     [ObservableProperty]
     private IImage? _brandingBackgroundImage;
@@ -449,15 +451,19 @@ public partial class MainWindowViewModel : ViewModelBase
     public string SelectedNewsTitle => SelectedNewsItem?.Title ?? string.Empty;
     public string SelectedNewsMeta => SelectedNewsItem?.Meta ?? string.Empty;
     public string SelectedNewsBody => SelectedNewsItem?.Body ?? string.Empty;
-    public string SelectedNewsHeadlineText => SelectedNewsItem?.Title ?? EmptyNewsText;
-    public string SelectedNewsBodyText => SelectedNewsItem?.Body ?? (_languageCode == "en"
-        ? "Create a global, profile, or server news item in the admin panel and it will appear here."
-        : "Создайте глобальную, профильную или серверную новость в админке, и она появится здесь.");
-    public string SelectedNewsMetaText => SelectedNewsItem?.Meta ?? (_languageCode == "en" ? "Branch feed" : "Лента ветки");
+    public string SelectedNewsHeadlineText => SelectedNewsItem?.Title ?? string.Empty;
+    public string SelectedNewsBodyText => SelectedNewsItem?.Body ?? string.Empty;
+    public string SelectedNewsMetaText => SelectedNewsItem?.Meta ?? string.Empty;
     public bool HasSelectedNews => SelectedNewsItem is not null;
+    public bool HasSelectedNewsPlaceholder => !HasSelectedNews;
     public string EmptyNewsText => _languageCode == "en"
         ? "News for this branch will appear here."
         : "Новости для этой ветки появятся здесь.";
+    public bool HasMultipleStoredAccounts => StoredPlayerAccounts.Count > 1;
+    public string AccountPanelTitle => !string.IsNullOrWhiteSpace(PlayerLoggedInAs)
+        ? PlayerLoggedInAs
+        : (SelectedStoredAccount?.Username?.Trim() ?? ProductName);
+    public string AccountPanelSubtitle => BuildAccountPanelSubtitle();
     public string UpdateHeaderText => "Launcher update";
     public string CurrentVersionText => $"Current version: {_currentLauncherVersion}";
     public string LatestVersionText => string.IsNullOrWhiteSpace(LatestLauncherVersion)
@@ -623,6 +629,18 @@ public partial class MainWindowViewModel : ViewModelBase
         OnPropertyChanged(nameof(SelectedNewsBodyText));
         OnPropertyChanged(nameof(SelectedNewsMetaText));
         OnPropertyChanged(nameof(HasSelectedNews));
+        OnPropertyChanged(nameof(HasSelectedNewsPlaceholder));
+    }
+
+    partial void OnPlayerLoggedInAsChanged(string value)
+    {
+        OnPropertyChanged(nameof(AccountPanelTitle));
+        OnPropertyChanged(nameof(AccountPanelSubtitle));
+    }
+
+    partial void OnAuthStatusTextChanged(string value)
+    {
+        OnPropertyChanged(nameof(AccountPanelSubtitle));
     }
 
     partial void OnIsTwoFactorStepActiveChanged(bool value)
@@ -785,6 +803,8 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         SwitchAccountCommand.NotifyCanExecuteChanged();
         DeleteAccountCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(AccountPanelTitle));
+        OnPropertyChanged(nameof(AccountPanelSubtitle));
         if (!IsPlayerLoggedIn && value is not null && !string.IsNullOrWhiteSpace(value.Username))
         {
             PlayerUsername = value.Username.Trim();
@@ -920,18 +940,31 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         if (!IsPlayerLoggedIn)
         {
-            return _languageCode == "en" ? "Monitoring: login required" : "Мониторинг: нужен вход";
+            return _languageCode == "en" ? "offline" : "оффлайн";
         }
 
         if (_lastServerOnlineRefreshUtc == default)
         {
-            return _languageCode == "en" ? "Monitoring: waiting..." : "Мониторинг: ожидание...";
+            return "...";
         }
 
-        var local = _lastServerOnlineRefreshUtc.ToLocalTime().ToString("HH:mm:ss");
-        return _languageCode == "en"
-            ? $"Monitoring: updated {local}"
-            : $"Мониторинг: обновлено {local}";
+        return _lastServerOnlineRefreshUtc.ToLocalTime().ToString("HH:mm");
+    }
+
+    private string BuildAccountPanelSubtitle()
+    {
+        if (!IsPlayerLoggedIn)
+        {
+            return AuthStatusText;
+        }
+
+        var rolesText = _playerAuthRoles.Count > 0
+            ? string.Join(" · ", _playerAuthRoles)
+            : (_languageCode == "en" ? "player" : "игрок");
+        var accountsText = _languageCode == "en"
+            ? $"{StoredPlayerAccounts.Count} saved"
+            : $"{StoredPlayerAccounts.Count} сохранено";
+        return $"{rolesText} · {accountsText}";
     }
 
     private async Task RefreshServerOnlineStatusesAsync(bool force = false)
@@ -2914,6 +2947,8 @@ public partial class MainWindowViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsLoginRequired));
         OnPropertyChanged(nameof(IsLauncherReady));
         OnPropertyChanged(nameof(ServerMonitoringText));
+        OnPropertyChanged(nameof(AccountPanelTitle));
+        OnPropertyChanged(nameof(AccountPanelSubtitle));
 
         if (!value)
         {
@@ -4356,7 +4391,11 @@ public partial class MainWindowViewModel : ViewModelBase
         OnPropertyChanged(nameof(SelectedNewsBodyText));
         OnPropertyChanged(nameof(SelectedNewsMetaText));
         OnPropertyChanged(nameof(HasSelectedNews));
+        OnPropertyChanged(nameof(HasSelectedNewsPlaceholder));
         OnPropertyChanged(nameof(EmptyNewsText));
+        OnPropertyChanged(nameof(HasMultipleStoredAccounts));
+        OnPropertyChanged(nameof(AccountPanelTitle));
+        OnPropertyChanged(nameof(AccountPanelSubtitle));
         OnPropertyChanged(nameof(ServerMonitoringText));
     }
 
