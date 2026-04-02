@@ -108,7 +108,7 @@ public sealed class PublicController(
                     Slug: profile.Slug,
                     Description: profile.Description,
                     IconKey: profile.IconKey,
-                    IconUrl: BuildRequestScopedAssetUrl(profile.IconKey),
+                    IconUrl: BuildPublicAssetPath(profile.IconKey),
                     Priority: profile.Priority,
                     RecommendedRamMb: profile.RecommendedRamMb,
                     BundledRuntimeKey: profile.BundledRuntimeKey,
@@ -125,7 +125,7 @@ public sealed class PublicController(
                             RuProxyPort: server.RuProxyPort,
                             RuJarPath: server.RuJarPath,
                             IconKey: server.IconKey,
-                            IconUrl: BuildRequestScopedAssetUrl(server.IconKey),
+                            IconUrl: BuildPublicAssetPath(server.IconKey),
                             LoaderType: server.LoaderType,
                             McVersion: server.McVersion,
                             BuildId: server.BuildId,
@@ -251,7 +251,7 @@ public sealed class PublicController(
             return NotFound(new { error = "Manifest file not found in object storage." });
         }
 
-        var manifestAssetUrl = BuildRequestScopedAssetUrl(manifestKey);
+        var manifestAssetUrl = BuildPublicAssetPath(manifestKey);
         if (string.IsNullOrWhiteSpace(manifestAssetUrl))
         {
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Manifest asset URL could not be resolved." });
@@ -264,7 +264,7 @@ public sealed class PublicController(
         var versionedManifestUrl = string.IsNullOrWhiteSpace(profile.LatestBuildId)
             ? manifestAssetUrl
             : QueryHelpers.AddQueryString(manifestAssetUrl, "build", profile.LatestBuildId.Trim());
-        return Redirect(versionedManifestUrl);
+        return LocalRedirect(versionedManifestUrl);
     }
 
     private async Task<string> ResolvePublishedManifestKeyAsync(
@@ -534,8 +534,8 @@ public sealed class PublicController(
         var iconKey = (branding.LauncherIconKey ?? string.Empty).Trim();
         var iconUrl = string.IsNullOrWhiteSpace(iconKey)
             ? string.Empty
-            : BuildRequestScopedAssetUrl(iconKey);
-        var backgroundImageUrl = RewritePublicAssetUrlToCurrentRequestHost(branding.BackgroundImageUrl);
+            : BuildPublicAssetPath(iconKey);
+        var backgroundImageUrl = RewritePublicAssetUrlToRelativePublicAssetPath(branding.BackgroundImageUrl);
 
         return branding with
         {
@@ -553,17 +553,34 @@ public sealed class PublicController(
             return string.Empty;
         }
 
+        var relativeAssetPath = BuildPublicAssetPath(normalizedKey);
+        if (string.IsNullOrWhiteSpace(relativeAssetPath))
+        {
+            return string.Empty;
+        }
+
         var requestBaseUrl = ResolveRequestPublicBaseUrl();
         if (string.IsNullOrWhiteSpace(requestBaseUrl))
         {
             return assetUrlService.BuildPublicUrl(normalizedKey);
         }
 
+        return $"{requestBaseUrl}{relativeAssetPath}";
+    }
+
+    private static string BuildPublicAssetPath(string? key)
+    {
+        var normalizedKey = (key ?? string.Empty).Trim().TrimStart('/');
+        if (string.IsNullOrWhiteSpace(normalizedKey))
+        {
+            return string.Empty;
+        }
+
         var escapedKey = string.Join('/',
             normalizedKey
                 .Split('/', StringSplitOptions.RemoveEmptyEntries)
                 .Select(Uri.EscapeDataString));
-        return $"{requestBaseUrl}/api/public/assets/{escapedKey}";
+        return $"/api/public/assets/{escapedKey}";
     }
 
     private string RewritePublicAssetUrlToCurrentRequestHost(string? rawUrl)
@@ -587,6 +604,26 @@ public sealed class PublicController(
         }
 
         return $"{requestBaseUrl}{absoluteUri.PathAndQuery}";
+    }
+
+    private string RewritePublicAssetUrlToRelativePublicAssetPath(string? rawUrl)
+    {
+        var normalizedUrl = (rawUrl ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(normalizedUrl))
+        {
+            return string.Empty;
+        }
+
+        if (Uri.TryCreate(normalizedUrl, UriKind.Absolute, out var absoluteUri))
+        {
+            return absoluteUri.AbsolutePath.StartsWith("/api/public/assets/", StringComparison.OrdinalIgnoreCase)
+                ? absoluteUri.PathAndQuery
+                : normalizedUrl;
+        }
+
+        return normalizedUrl.StartsWith("/api/public/assets/", StringComparison.OrdinalIgnoreCase)
+            ? normalizedUrl
+            : normalizedUrl;
     }
 
     private string ResolveRequestPublicBaseUrl()
