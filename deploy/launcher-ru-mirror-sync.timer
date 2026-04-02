@@ -1,0 +1,11 @@
+[Unit]
+Description=Run BivLauncher RU mirror sync every 2 minutes
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=2min
+Persistent=true
+Unit=launcher-ru-mirror-sync.service
+
+[Install]
+WantedBy=timers.target

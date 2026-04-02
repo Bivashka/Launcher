@@ -1,0 +1,10 @@
+[Unit]
+Description=BivLauncher RU mirror sync
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/Launcher
+EnvironmentFile=-/etc/bivlauncher/ru-mirror-sync.env
+ExecStart=/usr/bin/env bash /opt/Launcher/deploy/ru-mirror-sync.sh
