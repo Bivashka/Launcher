@@ -30,6 +30,7 @@ public sealed class PublicController(
     ILogger<PublicController> logger) : ControllerBase
 {
     private static readonly ConcurrentDictionary<Guid, SemaphoreSlim> ManifestBuildLocks = new();
+    private static readonly JsonSerializerOptions PublicJsonOptions = new(JsonSerializerDefaults.Web);
 
     [HttpGet("bootstrap")]
     [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
@@ -253,9 +254,14 @@ public sealed class PublicController(
             PropertyNameCaseInsensitive = true
         });
 
-        return manifest is null
-            ? StatusCode(StatusCodes.Status500InternalServerError, new { error = "Manifest content is invalid." })
-            : Ok(EnrichManifest(manifest));
+        if (manifest is null)
+        {
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Manifest content is invalid." });
+        }
+
+        var enrichedManifest = EnrichManifest(manifest);
+        var manifestBytes = JsonSerializer.SerializeToUtf8Bytes(enrichedManifest, PublicJsonOptions);
+        return File(manifestBytes, "application/json; charset=utf-8");
     }
 
     private LauncherManifest EnrichManifest(LauncherManifest manifest)

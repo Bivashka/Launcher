@@ -125,8 +125,7 @@ public sealed class PublicControllerTests
 
         var response = await controller.Manifest("private", CancellationToken.None);
 
-        var ok = Assert.IsType<OkObjectResult>(response);
-        var payload = Assert.IsType<LauncherManifest>(ok.Value);
+        var payload = ReadManifestAsync(response);
         Assert.Equal("private", payload.ProfileSlug);
         Assert.Equal("build-private", payload.BuildId);
     }
@@ -151,8 +150,7 @@ public sealed class PublicControllerTests
         var controller = fixture.CreateController();
         var response = await controller.Manifest("public", CancellationToken.None);
 
-        var ok = Assert.IsType<OkObjectResult>(response);
-        var payload = Assert.IsType<LauncherManifest>(ok.Value);
+        var payload = ReadManifestAsync(response);
         Assert.Equal("https://cdn.local/runtime/public-runtime.zip", payload.JavaRuntimeArtifactUrl);
         var file = Assert.Single(payload.Files);
         Assert.Equal("https://cdn.local/clients/public/build-public/mods/example.jar", file.DownloadUrl);
@@ -320,6 +318,17 @@ public sealed class PublicControllerTests
             await DbContext.DisposeAsync();
             await Connection.DisposeAsync();
         }
+    }
+
+    private static LauncherManifest ReadManifestAsync(IActionResult response)
+    {
+        var file = Assert.IsType<FileContentResult>(response);
+        Assert.Equal("application/json; charset=utf-8", file.ContentType);
+        var payload = JsonSerializer.Deserialize<LauncherManifest>(file.FileContents, new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true
+        });
+        return Assert.IsType<LauncherManifest>(payload);
     }
 
     private sealed class StubBrandingProvider(BrandingConfig? branding = null) : IBrandingProvider
