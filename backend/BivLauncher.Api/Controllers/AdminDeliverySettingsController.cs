@@ -29,7 +29,9 @@ public sealed class AdminDeliverySettingsController(
                 PublicBaseUrl: request.PublicBaseUrl,
                 AssetBaseUrl: request.AssetBaseUrl,
                 FallbackApiBaseUrls: request.FallbackApiBaseUrls,
-                UpdatedAtUtc: DateTime.UtcNow),
+                UpdatedAtUtc: DateTime.UtcNow,
+                LauncherApiBaseUrlRu: request.LauncherApiBaseUrlRu,
+                LauncherApiBaseUrlEu: request.LauncherApiBaseUrlEu),
             cancellationToken);
 
         var actor = User.Identity?.Name ?? "admin";
@@ -42,7 +44,9 @@ public sealed class AdminDeliverySettingsController(
             {
                 saved.PublicBaseUrl,
                 saved.AssetBaseUrl,
-                fallbackApiBaseUrls = saved.FallbackApiBaseUrls
+                fallbackApiBaseUrls = saved.FallbackApiBaseUrls,
+                saved.LauncherApiBaseUrlRu,
+                saved.LauncherApiBaseUrlEu
             },
             cancellationToken: cancellationToken);
 
@@ -55,6 +59,8 @@ public sealed class AdminDeliverySettingsController(
             config.PublicBaseUrl,
             config.AssetBaseUrl,
             config.FallbackApiBaseUrls,
+            config.LauncherApiBaseUrlRu,
+            config.LauncherApiBaseUrlEu,
             config.UpdatedAtUtc);
     }
 }

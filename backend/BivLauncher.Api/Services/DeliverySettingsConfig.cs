@@ -4,4 +4,6 @@ public sealed record DeliverySettingsConfig(
     string PublicBaseUrl,
     string AssetBaseUrl,
     IReadOnlyList<string> FallbackApiBaseUrls,
-    DateTime? UpdatedAtUtc);
+    DateTime? UpdatedAtUtc,
+    string LauncherApiBaseUrlRu = "",
+    string LauncherApiBaseUrlEu = "");

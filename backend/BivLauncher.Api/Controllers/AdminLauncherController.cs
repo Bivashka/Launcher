@@ -998,29 +998,53 @@ public sealed class AdminLauncherController(
     private string ResolveLauncherRegionalApiBaseUrl(string regionCode)
     {
         var normalizedRegionCode = (regionCode ?? string.Empty).Trim().ToLowerInvariant();
+        var deliverySettings = deliverySettingsProvider.GetCachedSettings();
         return normalizedRegionCode switch
         {
-            "ru" => (configuration["LAUNCHER_API_BASE_URL_RU"] ?? ResolveLauncherDefaultApiBaseUrl()).Trim().TrimEnd('/'),
-            "eu" => ResolveLauncherEuApiBaseUrl(),
+            "ru" => ResolvePreferredLauncherApiBaseUrl(
+                deliverySettings.LauncherApiBaseUrlRu,
+                configuration["LAUNCHER_API_BASE_URL_RU"],
+                ResolveLauncherDefaultApiBaseUrl()),
+            "eu" => ResolveLauncherEuApiBaseUrl(deliverySettings),
             _ => string.Empty
         };
     }
 
-    private string ResolveLauncherEuApiBaseUrl()
+    private string ResolveLauncherEuApiBaseUrl(DeliverySettingsConfig? deliverySettings = null)
     {
+        deliverySettings ??= deliverySettingsProvider.GetCachedSettings();
+        var configuredEuUrl = (deliverySettings.LauncherApiBaseUrlEu ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(configuredEuUrl))
+        {
+            return configuredEuUrl.TrimEnd('/');
+        }
+
         var explicitEuUrl = (configuration["LAUNCHER_API_BASE_URL_EU"] ?? string.Empty).Trim();
         if (!string.IsNullOrWhiteSpace(explicitEuUrl))
         {
             return explicitEuUrl.TrimEnd('/');
         }
 
-        var deliverySettings = deliverySettingsProvider.GetCachedSettings();
         var fallbackEuUrl = deliverySettings.FallbackApiBaseUrls
             .Select(x => (x ?? string.Empty).Trim())
             .FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
         return string.IsNullOrWhiteSpace(fallbackEuUrl)
             ? string.Empty
             : fallbackEuUrl.TrimEnd('/');
+    }
+
+    private static string ResolvePreferredLauncherApiBaseUrl(params string?[] candidates)
+    {
+        foreach (var candidate in candidates)
+        {
+            var normalized = (candidate ?? string.Empty).Trim();
+            if (!string.IsNullOrWhiteSpace(normalized))
+            {
+                return normalized.TrimEnd('/');
+            }
+        }
+
+        return string.Empty;
     }
 
     private string ResolveLauncherFallbackApiBaseUrls()

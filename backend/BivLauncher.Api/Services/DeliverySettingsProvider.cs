@@ -141,17 +141,27 @@ public sealed class DeliverySettingsProvider(
             configuredPublicBaseUrl = "http://195.43.142.97";
         }
 
+        var defaultFallbackApiBaseUrls = new List<string> { "http://95.217.99.17:8080" };
+        var defaultEuLauncherApiBaseUrl = defaultFallbackApiBaseUrls
+            .Select(NormalizeAbsoluteUrl)
+            .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))
+            ?? string.Empty;
+
         return new DeliverySettingsConfig(
             PublicBaseUrl: configuredPublicBaseUrl,
             AssetBaseUrl: configuredPublicBaseUrl,
-            FallbackApiBaseUrls: ["http://95.217.99.17:8080"],
-            UpdatedAtUtc: null);
+            FallbackApiBaseUrls: defaultFallbackApiBaseUrls,
+            UpdatedAtUtc: null,
+            LauncherApiBaseUrlRu: configuredPublicBaseUrl,
+            LauncherApiBaseUrlEu: defaultEuLauncherApiBaseUrl);
     }
 
     private static DeliverySettingsConfig NormalizeSettings(DeliverySettingsConfig settings)
     {
         var normalizedPublicBaseUrl = NormalizeAbsoluteUrl(settings.PublicBaseUrl);
         var normalizedAssetBaseUrl = NormalizeAbsoluteUrl(settings.AssetBaseUrl);
+        var normalizedLauncherApiBaseUrlRu = NormalizeAbsoluteUrl(settings.LauncherApiBaseUrlRu);
+        var normalizedLauncherApiBaseUrlEu = NormalizeAbsoluteUrl(settings.LauncherApiBaseUrlEu);
         var normalizedFallbacks = (settings.FallbackApiBaseUrls ?? [])
             .Select(NormalizeAbsoluteUrl)
             .Where(value => !string.IsNullOrWhiteSpace(value))
@@ -165,7 +175,9 @@ public sealed class DeliverySettingsProvider(
             PublicBaseUrl: normalizedPublicBaseUrl,
             AssetBaseUrl: normalizedAssetBaseUrl,
             FallbackApiBaseUrls: normalizedFallbacks,
-            UpdatedAtUtc: DateTime.UtcNow);
+            UpdatedAtUtc: DateTime.UtcNow,
+            LauncherApiBaseUrlRu: normalizedLauncherApiBaseUrlRu,
+            LauncherApiBaseUrlEu: normalizedLauncherApiBaseUrlEu);
     }
 
     private static string NormalizeAbsoluteUrl(string? rawValue)
