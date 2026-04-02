@@ -50,6 +50,7 @@ sync_directory_if_exists() {
   fi
 
   log "Syncing ${source_directory#$STORAGE_ROOT/} -> ${target_directory#$RU_MIRROR_PATH/}"
+  "${SSH_COMMAND[@]}" "mkdir -p \"$target_directory\""
   rsync -az --delete \
     --chown=www-data:www-data \
     --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r \
