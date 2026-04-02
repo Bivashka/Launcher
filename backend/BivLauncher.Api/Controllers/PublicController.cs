@@ -108,7 +108,7 @@ public sealed class PublicController(
                     Slug: profile.Slug,
                     Description: profile.Description,
                     IconKey: profile.IconKey,
-                    IconUrl: assetUrlService.BuildPublicUrl(profile.IconKey),
+                    IconUrl: BuildRequestScopedAssetUrl(profile.IconKey),
                     Priority: profile.Priority,
                     RecommendedRamMb: profile.RecommendedRamMb,
                     BundledRuntimeKey: profile.BundledRuntimeKey,
@@ -125,7 +125,7 @@ public sealed class PublicController(
                             RuProxyPort: server.RuProxyPort,
                             RuJarPath: server.RuJarPath,
                             IconKey: server.IconKey,
-                            IconUrl: assetUrlService.BuildPublicUrl(server.IconKey),
+                            IconUrl: BuildRequestScopedAssetUrl(server.IconKey),
                             LoaderType: server.LoaderType,
                             McVersion: server.McVersion,
                             BuildId: server.BuildId,
@@ -251,7 +251,7 @@ public sealed class PublicController(
             return NotFound(new { error = "Manifest file not found in object storage." });
         }
 
-        var manifestAssetUrl = assetUrlService.BuildPublicUrl(manifestKey);
+        var manifestAssetUrl = BuildRequestScopedAssetUrl(manifestKey);
         if (string.IsNullOrWhiteSpace(manifestAssetUrl))
         {
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Manifest asset URL could not be resolved." });
@@ -380,6 +380,12 @@ public sealed class PublicController(
 
     private string ResolvePublicBaseUrl(DeliverySettingsConfig settings)
     {
+        var requestBaseUrl = ResolveRequestPublicBaseUrl();
+        if (!string.IsNullOrWhiteSpace(requestBaseUrl))
+        {
+            return requestBaseUrl;
+        }
+
         if (!string.IsNullOrWhiteSpace(settings.PublicBaseUrl))
         {
             return settings.PublicBaseUrl;
@@ -519,7 +525,7 @@ public sealed class PublicController(
 
         return new LauncherUpdateInfo(
             LatestVersion: updateConfig.LatestVersion,
-            DownloadUrl: updateConfig.DownloadUrl,
+            DownloadUrl: RewritePublicAssetUrlToCurrentRequestHost(updateConfig.DownloadUrl),
             ReleaseNotes: updateConfig.ReleaseNotes);
     }
 
@@ -528,12 +534,103 @@ public sealed class PublicController(
         var iconKey = (branding.LauncherIconKey ?? string.Empty).Trim();
         var iconUrl = string.IsNullOrWhiteSpace(iconKey)
             ? string.Empty
-            : assetUrlService.BuildPublicUrl(iconKey);
+            : BuildRequestScopedAssetUrl(iconKey);
+        var backgroundImageUrl = RewritePublicAssetUrlToCurrentRequestHost(branding.BackgroundImageUrl);
 
         return branding with
         {
             LauncherIconKey = iconKey,
-            LauncherIconUrl = iconUrl
+            LauncherIconUrl = iconUrl,
+            BackgroundImageUrl = backgroundImageUrl
         };
+    }
+
+    private string BuildRequestScopedAssetUrl(string? key)
+    {
+        var normalizedKey = (key ?? string.Empty).Trim().TrimStart('/');
+        if (string.IsNullOrWhiteSpace(normalizedKey))
+        {
+            return string.Empty;
+        }
+
+        var requestBaseUrl = ResolveRequestPublicBaseUrl();
+        if (string.IsNullOrWhiteSpace(requestBaseUrl))
+        {
+            return assetUrlService.BuildPublicUrl(normalizedKey);
+        }
+
+        var escapedKey = string.Join('/',
+            normalizedKey
+                .Split('/', StringSplitOptions.RemoveEmptyEntries)
+                .Select(Uri.EscapeDataString));
+        return $"{requestBaseUrl}/api/public/assets/{escapedKey}";
+    }
+
+    private string RewritePublicAssetUrlToCurrentRequestHost(string? rawUrl)
+    {
+        var normalizedUrl = (rawUrl ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(normalizedUrl) ||
+            !Uri.TryCreate(normalizedUrl, UriKind.Absolute, out var absoluteUri))
+        {
+            return normalizedUrl;
+        }
+
+        if (!absoluteUri.AbsolutePath.StartsWith("/api/public/assets/", StringComparison.OrdinalIgnoreCase))
+        {
+            return normalizedUrl;
+        }
+
+        var requestBaseUrl = ResolveRequestPublicBaseUrl();
+        if (string.IsNullOrWhiteSpace(requestBaseUrl))
+        {
+            return normalizedUrl;
+        }
+
+        return $"{requestBaseUrl}{absoluteUri.PathAndQuery}";
+    }
+
+    private string ResolveRequestPublicBaseUrl()
+    {
+        var forwardedProto = TryGetForwardedHeaderValue("X-Forwarded-Proto");
+        var forwardedHost = TryGetForwardedHeaderValue("X-Forwarded-Host");
+        var forwardedPrefix = TryGetForwardedHeaderValue("X-Forwarded-Prefix");
+
+        var scheme = !string.IsNullOrWhiteSpace(forwardedProto)
+            ? forwardedProto
+            : Request.Scheme;
+        var host = !string.IsNullOrWhiteSpace(forwardedHost)
+            ? forwardedHost
+            : Request.Host.Value;
+        var pathBase = !string.IsNullOrWhiteSpace(forwardedPrefix)
+            ? forwardedPrefix
+            : Request.PathBase.Value;
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            return string.Empty;
+        }
+
+        var normalizedPathBase = string.IsNullOrWhiteSpace(pathBase)
+            ? string.Empty
+            : "/" + pathBase.Trim().Trim('/');
+        return $"{scheme}://{host}{normalizedPathBase}".TrimEnd('/');
+    }
+
+    private string TryGetForwardedHeaderValue(string headerName)
+    {
+        if (!Request.Headers.TryGetValue(headerName, out var values))
+        {
+            return string.Empty;
+        }
+
+        var rawValue = values.ToString();
+        if (string.IsNullOrWhiteSpace(rawValue))
+        {
+            return string.Empty;
+        }
+
+        var firstValue = rawValue
+            .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault();
+        return (firstValue ?? string.Empty).Trim();
     }
 }
