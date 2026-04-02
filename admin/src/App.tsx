@@ -784,6 +784,8 @@ const defaultSecuritySettings: SecuritySettings = {
 
 const currentProxyPublicBaseUrl = 'http://195.43.142.97'
 const currentProxyFallbackApiBaseUrls = ['http://95.217.99.17:8080']
+const currentDirectPublicBaseUrl = 'http://95.217.99.17:8080'
+const currentDirectFallbackApiBaseUrls: string[] = []
 
 const defaultDeliverySettings: DeliverySettings = {
   publicBaseUrl: currentProxyPublicBaseUrl,
@@ -3920,6 +3922,17 @@ function App() {
     }))
     setDeliveryFallbackApiBaseUrlsText(toMultilineList(currentProxyFallbackApiBaseUrls))
     setNotice('Current RU proxy preset applied to the form.')
+    setError('')
+  }
+
+  function onDisableProxyPreset() {
+    setDeliverySettings((prev) => ({
+      ...prev,
+      publicBaseUrl: currentDirectPublicBaseUrl,
+      assetBaseUrl: currentDirectPublicBaseUrl,
+    }))
+    setDeliveryFallbackApiBaseUrlsText(toMultilineList(currentDirectFallbackApiBaseUrls))
+    setNotice('Proxy disabled in the form. Direct Finland preset applied.')
     setError('')
   }
 
@@ -7808,6 +7821,9 @@ function App() {
                   <small className="muted">
                     Built-in example for this branch: proxy/panel `http://195.43.142.97`, fallback direct API `http://95.217.99.17:8080`.
                   </small>
+                  <small className="muted">
+                    Quick toggle: `Apply current RU proxy preset` switches launcher traffic to RU proxy, `Disable proxy / use direct FI` switches the form back to direct Finland API without fallbacks.
+                  </small>
                   <input
                     placeholder="Public base URL (for launcher/bootstrap)"
                     value={deliverySettings.publicBaseUrl}
@@ -7829,6 +7845,9 @@ function App() {
                   </label>
                   <button type="button" onClick={onApplyCurrentProxyPreset} disabled={busy || !token}>
                     Apply current RU proxy preset
+                  </button>
+                  <button type="button" onClick={onDisableProxyPreset} disabled={busy || !token}>
+                    Disable proxy / use direct FI
                   </button>
                   <button type="button" onClick={onSaveDeliverySettings} disabled={busy || !token}>
                     Save delivery settings
