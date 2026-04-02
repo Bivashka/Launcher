@@ -31,7 +31,7 @@
                 Background="{Binding LoginCardBackgroundBrush}"
                 BorderBrush="{Binding LoginCardBorderBrush}"
                 IsVisible="{Binding IsLoginRequired}">
-          <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="10">
+          <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="10">
             <TextBlock Classes="sectionTitle"
                        Foreground="{Binding PrimaryTextBrush}"
                        Text="{Binding AccountHeaderText}" />
@@ -43,9 +43,41 @@
 
             <TextBlock Grid.Row="2"
                        Foreground="{Binding PrimaryTextBrush}"
+                       Text="{Binding ApiRegionHeaderText}"
+                       IsVisible="{Binding HasApiRegionChoice}" />
+            <Border Grid.Row="3"
+                    Padding="12"
+                    CornerRadius="12"
+                    Background="{Binding ListBackgroundBrush}"
+                    BorderBrush="{Binding InputBorderBrush}"
+                    BorderThickness="1"
+                    IsVisible="{Binding HasApiRegionChoice}">
+              <StackPanel Spacing="8">
+                <TextBlock Classes="subtle"
+                           Foreground="{Binding SecondaryTextBrush}"
+                           Text="{Binding ApiRegionHintText}"
+                           TextWrapping="Wrap" />
+                <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                  <Button Background="{Binding ApiRegionRuBackgroundBrush}"
+                          BorderBrush="{Binding ApiRegionRuBorderBrush}"
+                          Foreground="{Binding ApiRegionRuForegroundBrush}"
+                          Content="{Binding ApiRegionRfButtonText}"
+                          Command="{Binding SelectRuApiRegionCommand}" />
+                  <Button Grid.Column="1"
+                          Background="{Binding ApiRegionEuBackgroundBrush}"
+                          BorderBrush="{Binding ApiRegionEuBorderBrush}"
+                          Foreground="{Binding ApiRegionEuForegroundBrush}"
+                          Content="{Binding ApiRegionEuButtonText}"
+                          Command="{Binding SelectEuApiRegionCommand}" />
+                </Grid>
+              </StackPanel>
+            </Border>
+
+            <TextBlock Grid.Row="4"
+                       Foreground="{Binding PrimaryTextBrush}"
                        Text="{Binding SavedAccountsLabelText}"
                        IsVisible="{Binding HasStoredAccounts}" />
-            <ComboBox Grid.Row="3"
+            <ComboBox Grid.Row="5"
                       Background="{Binding InputBackgroundBrush}"
                       BorderBrush="{Binding InputBorderBrush}"
                       Foreground="{Binding InputForegroundBrush}"
@@ -58,40 +90,40 @@
                 </DataTemplate>
               </ComboBox.ItemTemplate>
             </ComboBox>
-            <Button Grid.Row="4"
+            <Button Grid.Row="6"
                     Content="{Binding DeleteAccountButtonText}"
                     Command="{Binding DeleteAccountCommand}"
                     IsVisible="{Binding HasStoredAccounts}" />
 
-            <TextBlock Grid.Row="5"
+            <TextBlock Grid.Row="7"
                        Foreground="{Binding PrimaryTextBrush}"
                        Text="{Binding UsernameLabelText}" />
-            <TextBox Grid.Row="6"
+            <TextBox Grid.Row="8"
                      Watermark="Player"
                      Background="{Binding InputBackgroundBrush}"
                      BorderBrush="{Binding InputBorderBrush}"
                      Foreground="{Binding InputForegroundBrush}"
                      Text="{Binding PlayerUsername}" />
 
-            <TextBlock Grid.Row="7"
+            <TextBlock Grid.Row="9"
                        Foreground="{Binding PrimaryTextBrush}"
                        Text="{Binding PasswordLabelText}" />
-            <TextBox Grid.Row="8"
+            <TextBox Grid.Row="10"
                      Background="{Binding InputBackgroundBrush}"
                      BorderBrush="{Binding InputBorderBrush}"
                      Foreground="{Binding InputForegroundBrush}"
                      Text="{Binding PlayerPassword}"
                      PasswordChar="*" />
-            <Button Grid.Row="9"
+            <Button Grid.Row="11"
                     Classes="playButton"
                     Content="{Binding LoginButtonText}"
                     Command="{Binding LoginCommand}" />
 
-            <TextBlock Grid.Row="10"
+            <TextBlock Grid.Row="12"
                        Foreground="{Binding PrimaryTextBrush}"
                        Text="{Binding TwoFactorCodeLabelText}"
                        IsVisible="{Binding IsTwoFactorStepActive}" />
-            <TextBox Grid.Row="11"
+            <TextBox Grid.Row="13"
                      Watermark="123456"
                      MaxLength="6"
                      Background="{Binding InputBackgroundBrush}"
@@ -99,7 +131,7 @@
                      Foreground="{Binding InputForegroundBrush}"
                      Text="{Binding PlayerTwoFactorCode}"
                      IsVisible="{Binding IsTwoFactorStepActive}" />
-            <TextBlock Grid.Row="12"
+            <TextBlock Grid.Row="14"
                        Classes="subtle"
                        Foreground="{Binding SecondaryTextBrush}"
                        Text="{Binding TwoFactorHintText}"

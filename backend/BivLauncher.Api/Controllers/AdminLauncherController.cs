@@ -760,6 +760,18 @@ public sealed class AdminLauncherController(
             startInfo.ArgumentList.Add($"/p:BivLauncherApiBaseUrl={launcherApiBaseUrl}");
         }
 
+        var launcherApiBaseUrlRu = ResolveLauncherRegionalApiBaseUrl("ru");
+        if (!string.IsNullOrWhiteSpace(launcherApiBaseUrlRu))
+        {
+            startInfo.ArgumentList.Add($"/p:BivLauncherApiBaseUrlRu={launcherApiBaseUrlRu}");
+        }
+
+        var launcherApiBaseUrlEu = ResolveLauncherRegionalApiBaseUrl("eu");
+        if (!string.IsNullOrWhiteSpace(launcherApiBaseUrlEu))
+        {
+            startInfo.ArgumentList.Add($"/p:BivLauncherApiBaseUrlEu={launcherApiBaseUrlEu}");
+        }
+
         var launcherFallbackApiBaseUrls = ResolveLauncherFallbackApiBaseUrls();
         if (!string.IsNullOrWhiteSpace(launcherFallbackApiBaseUrls))
         {
@@ -981,6 +993,34 @@ public sealed class AdminLauncherController(
         return string.IsNullOrWhiteSpace(configuredUrl)
             ? string.Empty
             : configuredUrl.Trim().TrimEnd('/');
+    }
+
+    private string ResolveLauncherRegionalApiBaseUrl(string regionCode)
+    {
+        var normalizedRegionCode = (regionCode ?? string.Empty).Trim().ToLowerInvariant();
+        return normalizedRegionCode switch
+        {
+            "ru" => (configuration["LAUNCHER_API_BASE_URL_RU"] ?? ResolveLauncherDefaultApiBaseUrl()).Trim().TrimEnd('/'),
+            "eu" => ResolveLauncherEuApiBaseUrl(),
+            _ => string.Empty
+        };
+    }
+
+    private string ResolveLauncherEuApiBaseUrl()
+    {
+        var explicitEuUrl = (configuration["LAUNCHER_API_BASE_URL_EU"] ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(explicitEuUrl))
+        {
+            return explicitEuUrl.TrimEnd('/');
+        }
+
+        var deliverySettings = deliverySettingsProvider.GetCachedSettings();
+        var fallbackEuUrl = deliverySettings.FallbackApiBaseUrls
+            .Select(x => (x ?? string.Empty).Trim())
+            .FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
+        return string.IsNullOrWhiteSpace(fallbackEuUrl)
+            ? string.Empty
+            : fallbackEuUrl.TrimEnd('/');
     }
 
     private string ResolveLauncherFallbackApiBaseUrls()

@@ -7,6 +7,8 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <BivLauncherApiBaseUrl Condition="'$(BivLauncherApiBaseUrl)' == ''"></BivLauncherApiBaseUrl>
+    <BivLauncherApiBaseUrlRu Condition="'$(BivLauncherApiBaseUrlRu)' == ''"></BivLauncherApiBaseUrlRu>
+    <BivLauncherApiBaseUrlEu Condition="'$(BivLauncherApiBaseUrlEu)' == ''"></BivLauncherApiBaseUrlEu>
     <BivLauncherFallbackApiBaseUrls Condition="'$(BivLauncherFallbackApiBaseUrls)' == ''"></BivLauncherFallbackApiBaseUrls>
     <BivLauncherClientProof Condition="'$(BivLauncherClientProof)' == ''"></BivLauncherClientProof>
     <ApplicationIcon Condition="'$(ApplicationIcon)' == ''">Assets\avalonia-logo.ico</ApplicationIcon>
@@ -21,6 +23,20 @@
     <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
       <_Parameter1>BivLauncher.ApiBaseUrl</_Parameter1>
       <_Parameter2>$(BivLauncherApiBaseUrl)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(BivLauncherApiBaseUrlRu)' != ''">
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>BivLauncher.ApiBaseUrlRu</_Parameter1>
+      <_Parameter2>$(BivLauncherApiBaseUrlRu)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(BivLauncherApiBaseUrlEu)' != ''">
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>BivLauncher.ApiBaseUrlEu</_Parameter1>
+      <_Parameter2>$(BivLauncherApiBaseUrlEu)</_Parameter2>
     </AssemblyAttribute>
   </ItemGroup>
 

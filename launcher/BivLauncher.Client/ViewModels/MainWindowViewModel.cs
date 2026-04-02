@@ -48,7 +48,11 @@ public partial class MainWindowViewModel : ViewModelBase
     private static readonly TimeSpan ServerOnlineRefreshInterval = TimeSpan.FromSeconds(25);
     private const string LocalFallbackApiBaseUrl = "http://localhost:8080";
     private const string LauncherApiBaseUrlEnvVar = "BIVLAUNCHER_API_BASE_URL";
+    private const string LauncherApiBaseUrlRuEnvVar = "BIVLAUNCHER_API_BASE_URL_RU";
+    private const string LauncherApiBaseUrlEuEnvVar = "BIVLAUNCHER_API_BASE_URL_EU";
     private const string LauncherApiBaseUrlAssemblyMetadataKey = "BivLauncher.ApiBaseUrl";
+    private const string LauncherApiBaseUrlRuAssemblyMetadataKey = "BivLauncher.ApiBaseUrlRu";
+    private const string LauncherApiBaseUrlEuAssemblyMetadataKey = "BivLauncher.ApiBaseUrlEu";
     private const string LauncherFallbackApiBaseUrlsAssemblyMetadataKey = "BivLauncher.FallbackApiBaseUrls";
     private readonly string _currentLauncherVersion = GetCurrentLauncherVersion();
     private string _languageCode = "ru";
@@ -72,6 +76,7 @@ public partial class MainWindowViewModel : ViewModelBase
     private readonly Dictionary<string, string> _profileBundledRuntimeKeys = new(StringComparer.OrdinalIgnoreCase);
     private DateTime _lastServerOnlineRefreshUtc;
     private Avalonia.Controls.WindowIcon? _defaultWindowIcon;
+    private int _busyOperationCount;
 
     private LauncherSettings _settings = new();
 
@@ -120,6 +125,8 @@ public partial class MainWindowViewModel : ViewModelBase
         OpenUpdateUrlCommand = new RelayCommand(OpenUpdateUrl, CanOpenUpdateUrl);
         DownloadUpdateCommand = new AsyncRelayCommand(DownloadUpdateAsync, CanDownloadUpdate);
         InstallUpdateCommand = new AsyncRelayCommand(InstallUpdateAsync, CanInstallUpdate);
+        SelectRuApiRegionCommand = new AsyncRelayCommand(() => SelectApiRegionAsync("ru"), CanSelectRuApiRegion);
+        SelectEuApiRegionCommand = new AsyncRelayCommand(() => SelectApiRegionAsync("eu"), CanSelectEuApiRegion);
 
         StoredPlayerAccounts.CollectionChanged += (_, _) =>
         {
@@ -164,6 +171,8 @@ public partial class MainWindowViewModel : ViewModelBase
     public IRelayCommand OpenUpdateUrlCommand { get; }
     public IAsyncRelayCommand DownloadUpdateCommand { get; }
     public IAsyncRelayCommand InstallUpdateCommand { get; }
+    public IAsyncRelayCommand SelectRuApiRegionCommand { get; }
+    public IAsyncRelayCommand SelectEuApiRegionCommand { get; }
 
     [ObservableProperty]
     private string _productName = "BivLauncher";
@@ -269,7 +278,13 @@ public partial class MainWindowViewModel : ViewModelBase
     private bool _isBusy;
 
     [ObservableProperty]
+    private bool _isGameSessionActive;
+
+    [ObservableProperty]
     private string _apiBaseUrl = string.Empty;
+
+    [ObservableProperty]
+    private string _preferredApiRegion = string.Empty;
 
     [ObservableProperty]
     private string _installDirectory = string.Empty;
@@ -436,6 +451,22 @@ public partial class MainWindowViewModel : ViewModelBase
     public string SkinStatusText => F("status.skin", BoolWord(HasSkin));
     public string CapeStatusText => F("status.cape", BoolWord(HasCape));
     public string RuntimeHeaderText => T("header.runtime");
+    public bool HasApiRegionChoice => !string.IsNullOrWhiteSpace(ResolveConfiguredApiBaseUrlForRegion("ru")) &&
+                                      !string.IsNullOrWhiteSpace(ResolveConfiguredApiBaseUrlForRegion("eu"));
+    public string ApiRegionHeaderText => _languageCode == "en" ? "Connection region" : "Регион подключения";
+    public string ApiRegionHintText => _languageCode == "en"
+        ? "Choose which API endpoint the launcher should try first."
+        : "Выберите, к какому endpoint лаунчер должен подключаться в первую очередь.";
+    public string ApiRegionRfButtonText => "RF";
+    public string ApiRegionEuButtonText => "EU";
+    public bool IsRuApiRegionSelected => string.Equals(PreferredApiRegion, "ru", StringComparison.OrdinalIgnoreCase);
+    public bool IsEuApiRegionSelected => string.Equals(PreferredApiRegion, "eu", StringComparison.OrdinalIgnoreCase);
+    public IBrush ApiRegionRuBackgroundBrush => IsRuApiRegionSelected ? PrimaryButtonBackgroundBrush : InputBackgroundBrush;
+    public IBrush ApiRegionRuBorderBrush => IsRuApiRegionSelected ? PrimaryButtonBorderBrush : InputBorderBrush;
+    public IBrush ApiRegionRuForegroundBrush => IsRuApiRegionSelected ? PrimaryButtonForegroundBrush : PrimaryTextBrush;
+    public IBrush ApiRegionEuBackgroundBrush => IsEuApiRegionSelected ? PrimaryButtonBackgroundBrush : InputBackgroundBrush;
+    public IBrush ApiRegionEuBorderBrush => IsEuApiRegionSelected ? PrimaryButtonBorderBrush : InputBorderBrush;
+    public IBrush ApiRegionEuForegroundBrush => IsEuApiRegionSelected ? PrimaryButtonForegroundBrush : PrimaryTextBrush;
     public string RouteLabelText => T("label.route");
     public string JavaModeLabelText => T("label.javaMode");
     public string RamLabelText => T("label.ram");
@@ -497,6 +528,13 @@ public partial class MainWindowViewModel : ViewModelBase
     public async Task InitializeAsync()
     {
         _settings = await _settingsService.LoadAsync();
+        PreferredApiRegion = ResolveInitialApiRegion(_settings.PreferredApiRegion);
+        var configuredApiBaseUrl = TryResolveConfiguredApiBaseUrl();
+        if (TrimConfiguredApiBaseUrlReferences(_settings, configuredApiBaseUrl))
+        {
+            await _settingsService.SaveAsync(_settings);
+        }
+
         _languageCode = LauncherLocalization.NormalizeLanguage(_settings.Language);
         SyncSelectedLanguageOption();
         RebuildJavaModeOptions();
@@ -505,15 +543,14 @@ public partial class MainWindowViewModel : ViewModelBase
         LoadRouteSelections(_settings.ProfileRouteSelections ?? []);
         MergeKnownApiBaseUrls(_settings.KnownApiBaseUrls);
         MergeKnownApiBaseUrls(ResolveBundledFallbackApiBaseUrls());
-
-        var configuredApiBaseUrl = TryResolveConfiguredApiBaseUrl();
-        if (!string.IsNullOrWhiteSpace(configuredApiBaseUrl))
+        var preferredRegionalApiBaseUrl = ResolvePreferredApiRegionApiBaseUrl();
+        if (!string.IsNullOrWhiteSpace(preferredRegionalApiBaseUrl))
+        {
+            ApiBaseUrl = preferredRegionalApiBaseUrl;
+        }
+        else if (!string.IsNullOrWhiteSpace(configuredApiBaseUrl))
         {
             ApiBaseUrl = configuredApiBaseUrl;
-            if (TrimConfiguredApiBaseUrlReferences(_settings, configuredApiBaseUrl))
-            {
-                await _settingsService.SaveAsync(_settings);
-            }
         }
         else
         {
@@ -551,6 +588,8 @@ public partial class MainWindowViewModel : ViewModelBase
         DownloadUpdateCommand.NotifyCanExecuteChanged();
         InstallUpdateCommand.NotifyCanExecuteChanged();
         ToggleSettingsCommand.NotifyCanExecuteChanged();
+        SelectRuApiRegionCommand.NotifyCanExecuteChanged();
+        SelectEuApiRegionCommand.NotifyCanExecuteChanged();
     }
 
     partial void OnSelectedServerChanged(ManagedServerItem? value)
@@ -765,6 +804,18 @@ public partial class MainWindowViewModel : ViewModelBase
         SyncSelectedJavaModeOption();
     }
 
+    partial void OnPreferredApiRegionChanged(string value)
+    {
+        PreferredApiRegion = NormalizeApiRegionCode(value);
+        NotifyApiRegionSelectionPresentationChanged();
+    }
+
+    partial void OnIsGameSessionActiveChanged(bool value)
+    {
+        VerifyFilesCommand.NotifyCanExecuteChanged();
+        LaunchCommand.NotifyCanExecuteChanged();
+    }
+
     partial void OnSelectedLanguageOptionChanged(LocalizedOption? value)
     {
         if (_isSyncingLanguageOption || value is null)
@@ -852,7 +903,23 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private bool CanOperate() => !IsBusy;
 
-    private bool CanVerifyOrLaunch() => !IsBusy && IsPlayerLoggedIn && SelectedServer is not null;
+    private bool CanVerifyOrLaunch() => !IsBusy && !IsGameSessionActive && IsPlayerLoggedIn && SelectedServer is not null;
+
+    private bool CanSelectRuApiRegion()
+    {
+        return !IsBusy &&
+               HasApiRegionChoice &&
+               !string.IsNullOrWhiteSpace(ResolveConfiguredApiBaseUrlForRegion("ru")) &&
+               !IsRuApiRegionSelected;
+    }
+
+    private bool CanSelectEuApiRegion()
+    {
+        return !IsBusy &&
+               HasApiRegionChoice &&
+               !string.IsNullOrWhiteSpace(ResolveConfiguredApiBaseUrlForRegion("eu")) &&
+               !IsEuApiRegionSelected;
+    }
 
     private bool CanSwitchAccount()
     {
@@ -1457,8 +1524,11 @@ public partial class MainWindowViewModel : ViewModelBase
         var bootstrapApiBaseUrl = NormalizeBaseUrlOrEmpty(bootstrap.PublicBaseUrl);
         if (!string.IsNullOrWhiteSpace(bootstrapApiBaseUrl))
         {
-            ApiBaseUrl = bootstrapApiBaseUrl;
             MergeKnownApiBaseUrls([bootstrapApiBaseUrl]);
+            if (string.IsNullOrWhiteSpace(ResolvePreferredApiRegionApiBaseUrl()))
+            {
+                ApiBaseUrl = bootstrapApiBaseUrl;
+            }
         }
         MergeKnownApiBaseUrls(bootstrap.FallbackApiBaseUrls);
         var assetRefreshVersion = Interlocked.Increment(ref _assetRefreshVersion);
@@ -1655,168 +1725,180 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private async Task LaunchAsync()
     {
-        if (SelectedServer is null)
+        if (SelectedServer is null || IsBusy || IsGameSessionActive)
         {
             return;
         }
 
-        await RunBusyAsync(async () =>
+        HasCrash = false;
+        CrashSummary = string.Empty;
+
+        ManagedServerItem? selectedServer = null;
+        LauncherManifest? manifest = null;
+        GameLaunchRoute? launchRoute = null;
+        LaunchResult? launchResult = null;
+        Exception? launchException = null;
+        var occurredAtUtc = DateTime.UtcNow;
+        var busyReleasedForGameSession = false;
+
+        EnterBusyOperation();
+        try
         {
-            HasCrash = false;
-            CrashSummary = string.Empty;
-
-            ManagedServerItem? selectedServer = null;
-            LauncherManifest? manifest = null;
-            GameLaunchRoute? launchRoute = null;
-            LaunchResult? launchResult = null;
-            Exception? launchException = null;
-            var occurredAtUtc = DateTime.UtcNow;
-
-            try
+            var preLaunchAccountSwitchError = await EnsureSelectedStoredAccountReadyForLaunchAsync();
+            if (!string.IsNullOrWhiteSpace(preLaunchAccountSwitchError))
             {
-                var preLaunchAccountSwitchError = await EnsureSelectedStoredAccountReadyForLaunchAsync();
-                if (!string.IsNullOrWhiteSpace(preLaunchAccountSwitchError))
-                {
-                    StatusText = preLaunchAccountSwitchError;
-                    _logService.LogInfo(preLaunchAccountSwitchError);
-                    return;
-                }
-
-                var preLaunchSessionValidationError = await ValidatePlayerSessionBeforeLaunchAsync();
-                if (!string.IsNullOrWhiteSpace(preLaunchSessionValidationError))
-                {
-                    StatusText = preLaunchSessionValidationError;
-                    _logService.LogInfo(preLaunchSessionValidationError);
-                    return;
-                }
-
-                selectedServer = SelectedServer;
-                if (selectedServer is null)
-                {
-                    StatusText = T("status.noServers");
-                    return;
-                }
-
-                await SaveSettingsAsync();
-
-                StatusText = T("status.fetchingManifest");
-                manifest = await ExecuteAgainstApiFailoverAsync(
-                    candidate => _launcherApiService.GetManifestAsync(
-                        candidate,
-                        selectedServer.ProfileSlug,
-                        _playerAuthToken,
-                        _playerAuthTokenType));
-                ApplyProfileRuntimeFallback(manifest, selectedServer.ProfileSlug);
-                StatusText = _languageCode == "en" ? "Preparing files..." : "Подготовка файлов...";
-
-                StartFileSyncProgress();
-                var progress = new Progress<InstallProgressInfo>(info =>
-                {
-                    UpdateFileSyncProgress(info);
-                    var currentPath = string.IsNullOrWhiteSpace(info.CurrentFilePath) ? info.Message : info.CurrentFilePath;
-                    StatusText = F("status.verifyingProgress", info.ProcessedFiles, info.TotalFiles, currentPath);
-                });
-
-                var installResult = await Task.Run(() =>
-                        _manifestInstallerService.VerifyAndInstallAsync(
-                            ApiBaseUrl,
-                            manifest,
-                            InstallDirectory,
-                            progress),
-                    CancellationToken.None);
-                CompleteFileSyncProgress(installResult);
-                StopFileSyncProgress();
-                if (installResult.RemovedFiles > 0)
-                {
-                    _logService.LogInfo($"Removed orphan files: {installResult.RemovedFiles}");
-                }
-
-                StatusText = T("status.launchingJava");
-                launchRoute = ResolveLaunchRoute(selectedServer);
-                var gameSession = await TryStartGameSessionAsync(selectedServer);
-                if (gameSession is null)
-                {
-                    return;
-                }
-
-                using var gameSessionHeartbeatCts = new CancellationTokenSource();
-                var heartbeatTask = RunGameSessionHeartbeatLoopAsync(gameSession, gameSessionHeartbeatCts.Token);
-                _discordRpcService.SetLaunchingPresence(selectedServer);
-
-                try
-                {
-                    _discordRpcService.SetInGamePresence(selectedServer);
-                    launchResult = await Task.Run(() =>
-                            _gameLaunchService.LaunchAsync(
-                                manifest,
-                                BuildSettingsSnapshot(includeRuntimeAuthSnapshot: true),
-                                launchRoute,
-                                installResult.InstanceDirectory,
-                                line => _logService.LogInfo(line)),
-                        CancellationToken.None);
-                }
-                finally
-                {
-                    gameSessionHeartbeatCts.Cancel();
-                    try
-                    {
-                        await heartbeatTask;
-                    }
-                    catch (OperationCanceledException)
-                    {
-                    }
-                    catch (Exception ex)
-                    {
-                        _logService.LogInfo($"Game session heartbeat stopped with warning: {ex.Message}");
-                    }
-
-                    await TryStopGameSessionAsync(gameSession.SessionId);
-                    _discordRpcService.UpdateIdlePresence(selectedServer);
-                }
-
-                if (launchResult.Success)
-                {
-                    StatusText = T("status.gameExitedNormally");
-                    return;
-                }
-            }
-            catch (Exception ex)
-            {
-                launchException = ex;
-                StopFileSyncProgress();
-                _logService.LogError(ex.ToString());
+                StatusText = preLaunchAccountSwitchError;
+                _logService.LogInfo(preLaunchAccountSwitchError);
+                return;
             }
 
-            HasCrash = true;
-            var fullLogExcerpt = string.Join(Environment.NewLine, _logService.GetRecentLines(120));
-            var crashLines = _logService.GetRecentLines(60);
-            CrashSummary = string.Join(Environment.NewLine, crashLines);
+            var preLaunchSessionValidationError = await ValidatePlayerSessionBeforeLaunchAsync();
+            if (!string.IsNullOrWhiteSpace(preLaunchSessionValidationError))
+            {
+                StatusText = preLaunchSessionValidationError;
+                _logService.LogInfo(preLaunchSessionValidationError);
+                return;
+            }
 
-            var reason = BuildCrashReason(launchResult?.ExitCode, launchException);
-            StatusText = launchResult is not null
-                ? F("status.gameExitedCode", launchResult.ExitCode)
-                : F("status.error", reason);
+            selectedServer = SelectedServer;
+            if (selectedServer is null)
+            {
+                StatusText = T("status.noServers");
+                return;
+            }
 
-            var crashServer = selectedServer ?? SelectedServer;
-            if (crashServer is null)
+            await SaveSettingsAsync();
+
+            StatusText = T("status.fetchingManifest");
+            manifest = await ExecuteAgainstApiFailoverAsync(
+                candidate => _launcherApiService.GetManifestAsync(
+                    candidate,
+                    selectedServer.ProfileSlug,
+                    _playerAuthToken,
+                    _playerAuthTokenType));
+            ApplyProfileRuntimeFallback(manifest, selectedServer.ProfileSlug);
+            StatusText = _languageCode == "en" ? "Preparing files..." : "Подготовка файлов...";
+
+            StartFileSyncProgress();
+            var progress = new Progress<InstallProgressInfo>(info =>
+            {
+                UpdateFileSyncProgress(info);
+                var currentPath = string.IsNullOrWhiteSpace(info.CurrentFilePath) ? info.Message : info.CurrentFilePath;
+                StatusText = F("status.verifyingProgress", info.ProcessedFiles, info.TotalFiles, currentPath);
+            });
+
+            var installResult = await Task.Run(() =>
+                    _manifestInstallerService.VerifyAndInstallAsync(
+                        ApiBaseUrl,
+                        manifest,
+                        InstallDirectory,
+                        progress),
+                CancellationToken.None);
+            CompleteFileSyncProgress(installResult);
+            StopFileSyncProgress();
+            if (installResult.RemovedFiles > 0)
+            {
+                _logService.LogInfo($"Removed orphan files: {installResult.RemovedFiles}");
+            }
+
+            StatusText = T("status.launchingJava");
+            launchRoute = ResolveLaunchRoute(selectedServer);
+            var gameSession = await TryStartGameSessionAsync(selectedServer);
+            if (gameSession is null)
             {
                 return;
             }
 
-            var crashId = await TrySubmitCrashReportAsync(
-                crashServer,
-                manifest,
-                launchRoute,
-                launchResult,
-                launchException,
-                fullLogExcerpt,
-                occurredAtUtc);
+            using var gameSessionHeartbeatCts = new CancellationTokenSource();
+            var heartbeatTask = RunGameSessionHeartbeatLoopAsync(gameSession, gameSessionHeartbeatCts.Token);
+            _discordRpcService.SetLaunchingPresence(selectedServer);
 
-            if (!string.IsNullOrWhiteSpace(crashId))
+            IsGameSessionActive = true;
+            ExitBusyOperation();
+            busyReleasedForGameSession = true;
+
+            try
             {
-                StatusText = $"{StatusText} Crash ID: {crashId}";
+                _discordRpcService.SetInGamePresence(selectedServer);
+                launchResult = await Task.Run(() =>
+                        _gameLaunchService.LaunchAsync(
+                            manifest,
+                            BuildSettingsSnapshot(includeRuntimeAuthSnapshot: true),
+                            launchRoute,
+                            installResult.InstanceDirectory,
+                            line => _logService.LogInfo(line)),
+                    CancellationToken.None);
             }
-        });
+            finally
+            {
+                IsGameSessionActive = false;
+                gameSessionHeartbeatCts.Cancel();
+                try
+                {
+                    await heartbeatTask;
+                }
+                catch (OperationCanceledException)
+                {
+                }
+                catch (Exception ex)
+                {
+                    _logService.LogInfo($"Game session heartbeat stopped with warning: {ex.Message}");
+                }
+
+                await TryStopGameSessionAsync(gameSession.SessionId);
+                _discordRpcService.UpdateIdlePresence(selectedServer);
+            }
+
+            if (launchResult.Success)
+            {
+                StatusText = T("status.gameExitedNormally");
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            launchException = ex;
+            StopFileSyncProgress();
+            IsGameSessionActive = false;
+            _logService.LogError(ex.ToString());
+        }
+        finally
+        {
+            if (!busyReleasedForGameSession)
+            {
+                ExitBusyOperation();
+            }
+        }
+
+        HasCrash = true;
+        var fullLogExcerpt = string.Join(Environment.NewLine, _logService.GetRecentLines(120));
+        var crashLines = _logService.GetRecentLines(60);
+        CrashSummary = string.Join(Environment.NewLine, crashLines);
+
+        var reason = BuildCrashReason(launchResult?.ExitCode, launchException);
+        StatusText = launchResult is not null
+            ? F("status.gameExitedCode", launchResult.ExitCode)
+            : F("status.error", reason);
+
+        var crashServer = selectedServer ?? SelectedServer;
+        if (crashServer is null)
+        {
+            return;
+        }
+
+        var crashId = await TrySubmitCrashReportAsync(
+            crashServer,
+            manifest,
+            launchRoute,
+            launchResult,
+            launchException,
+            fullLogExcerpt,
+            occurredAtUtc);
+
+        if (!string.IsNullOrWhiteSpace(crashId))
+        {
+            StatusText = $"{StatusText} Crash ID: {crashId}";
+        }
     }
 
     private async Task<string> TrySubmitCrashReportAsync(
@@ -2096,6 +2178,114 @@ public partial class MainWindowViewModel : ViewModelBase
         return match.Groups[1].Value.Trim();
     }
 
+    private async Task SelectApiRegionAsync(string regionCode)
+    {
+        var normalizedRegionCode = NormalizeApiRegionCode(regionCode);
+        if (string.IsNullOrWhiteSpace(normalizedRegionCode))
+        {
+            return;
+        }
+
+        var preferredApiBaseUrl = ResolveConfiguredApiBaseUrlForRegion(normalizedRegionCode);
+        if (string.IsNullOrWhiteSpace(preferredApiBaseUrl))
+        {
+            return;
+        }
+
+        PreferredApiRegion = normalizedRegionCode;
+        ApiBaseUrl = preferredApiBaseUrl;
+        MergeKnownApiBaseUrls([preferredApiBaseUrl]);
+        await PersistSettingsSnapshotAsync();
+    }
+
+    private string ResolveInitialApiRegion(string? storedRegionCode)
+    {
+        var normalizedStoredRegionCode = NormalizeApiRegionCode(storedRegionCode);
+        if (!string.IsNullOrWhiteSpace(normalizedStoredRegionCode) &&
+            !string.IsNullOrWhiteSpace(ResolveConfiguredApiBaseUrlForRegion(normalizedStoredRegionCode)))
+        {
+            return normalizedStoredRegionCode;
+        }
+
+        var hasRuRegion = !string.IsNullOrWhiteSpace(ResolveConfiguredApiBaseUrlForRegion("ru"));
+        var hasEuRegion = !string.IsNullOrWhiteSpace(ResolveConfiguredApiBaseUrlForRegion("eu"));
+        if (hasRuRegion)
+        {
+            return "ru";
+        }
+
+        return hasEuRegion ? "eu" : string.Empty;
+    }
+
+    private string ResolvePreferredApiRegionApiBaseUrl()
+    {
+        var resolvedRegionCode = ResolveInitialApiRegion(PreferredApiRegion);
+        return string.IsNullOrWhiteSpace(resolvedRegionCode)
+            ? string.Empty
+            : ResolveConfiguredApiBaseUrlForRegion(resolvedRegionCode);
+    }
+
+    private static string NormalizeApiRegionCode(string? regionCode)
+    {
+        return (regionCode ?? string.Empty).Trim().ToLowerInvariant() switch
+        {
+            "ru" => "ru",
+            "eu" => "eu",
+            _ => string.Empty
+        };
+    }
+
+    private static string ResolveConfiguredApiBaseUrlForRegion(string regionCode)
+    {
+        var normalizedRegionCode = NormalizeApiRegionCode(regionCode);
+        if (string.IsNullOrWhiteSpace(normalizedRegionCode))
+        {
+            return string.Empty;
+        }
+
+        var environmentVariableName = normalizedRegionCode == "ru"
+            ? LauncherApiBaseUrlRuEnvVar
+            : LauncherApiBaseUrlEuEnvVar;
+        var assemblyMetadataKey = normalizedRegionCode == "ru"
+            ? LauncherApiBaseUrlRuAssemblyMetadataKey
+            : LauncherApiBaseUrlEuAssemblyMetadataKey;
+        var environmentBaseUrl = NormalizeBaseUrlOrEmpty(Environment.GetEnvironmentVariable(environmentVariableName));
+        if (!string.IsNullOrWhiteSpace(environmentBaseUrl))
+        {
+            return environmentBaseUrl;
+        }
+
+        return NormalizeBaseUrlOrEmpty(ResolveAssemblyMetadataValue(assemblyMetadataKey));
+    }
+
+    private static string? ResolveAssemblyMetadataValue(string key)
+    {
+        var assembly = Assembly.GetEntryAssembly() ?? typeof(MainWindowViewModel).Assembly;
+        return assembly
+            .GetCustomAttributes<AssemblyMetadataAttribute>()
+            .FirstOrDefault(attribute => string.Equals(attribute.Key, key, StringComparison.OrdinalIgnoreCase))?
+            .Value;
+    }
+
+    private void NotifyApiRegionSelectionPresentationChanged()
+    {
+        OnPropertyChanged(nameof(HasApiRegionChoice));
+        OnPropertyChanged(nameof(ApiRegionHeaderText));
+        OnPropertyChanged(nameof(ApiRegionHintText));
+        OnPropertyChanged(nameof(ApiRegionRfButtonText));
+        OnPropertyChanged(nameof(ApiRegionEuButtonText));
+        OnPropertyChanged(nameof(IsRuApiRegionSelected));
+        OnPropertyChanged(nameof(IsEuApiRegionSelected));
+        OnPropertyChanged(nameof(ApiRegionRuBackgroundBrush));
+        OnPropertyChanged(nameof(ApiRegionRuBorderBrush));
+        OnPropertyChanged(nameof(ApiRegionRuForegroundBrush));
+        OnPropertyChanged(nameof(ApiRegionEuBackgroundBrush));
+        OnPropertyChanged(nameof(ApiRegionEuBorderBrush));
+        OnPropertyChanged(nameof(ApiRegionEuForegroundBrush));
+        SelectRuApiRegionCommand.NotifyCanExecuteChanged();
+        SelectEuApiRegionCommand.NotifyCanExecuteChanged();
+    }
+
     private async Task SaveSettingsAsync()
     {
         await PersistSettingsSnapshotAsync(updateStatusText: true);
@@ -2179,6 +2369,7 @@ public partial class MainWindowViewModel : ViewModelBase
         return new LauncherSettings
         {
             ApiBaseUrl = persistedApiBaseUrl,
+            PreferredApiRegion = NormalizeApiRegionCode(PreferredApiRegion),
             InstallDirectory = InstallDirectory.Trim(),
             DebugMode = DebugMode,
             RamMb = RamMb,
@@ -3087,7 +3278,7 @@ public partial class MainWindowViewModel : ViewModelBase
 
         try
         {
-            IsBusy = true;
+            EnterBusyOperation();
             await action();
         }
         catch (Exception ex)
@@ -3099,6 +3290,28 @@ public partial class MainWindowViewModel : ViewModelBase
             _logService.LogError(ex.ToString());
         }
         finally
+        {
+            ExitBusyOperation();
+        }
+    }
+
+    private void EnterBusyOperation()
+    {
+        _busyOperationCount++;
+        if (!IsBusy)
+        {
+            IsBusy = true;
+        }
+    }
+
+    private void ExitBusyOperation()
+    {
+        if (_busyOperationCount > 0)
+        {
+            _busyOperationCount--;
+        }
+
+        if (_busyOperationCount == 0 && IsBusy)
         {
             IsBusy = false;
         }
@@ -3467,6 +3680,7 @@ public partial class MainWindowViewModel : ViewModelBase
         InputForegroundBrush = new SolidColorBrush(inputText);
         ListBackgroundBrush = new SolidColorBrush(listBackground);
         ListBorderBrush = new SolidColorBrush(listBorder);
+        NotifyApiRegionSelectionPresentationChanged();
 
         BrandingBackgroundOverlayOpacity = Math.Clamp(branding.BackgroundOverlayOpacity, 0, 0.95);
         LoginCardHorizontalAlignment = ParseLoginCardAlignment(branding.LoginCardPosition);
@@ -3643,13 +3857,7 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private static string ResolveDefaultApiBaseUrl()
     {
-        var configuredApiBaseUrl = TryResolveConfiguredApiBaseUrl();
-        if (!string.IsNullOrWhiteSpace(configuredApiBaseUrl))
-        {
-            return configuredApiBaseUrl;
-        }
-
-        return LocalFallbackApiBaseUrl;
+        return NormalizeBaseUrlOrEmpty(TryResolveConfiguredApiBaseUrl());
     }
 
     private static string? TryResolveConfiguredApiBaseUrl()
@@ -3696,6 +3904,11 @@ public partial class MainWindowViewModel : ViewModelBase
         }
 
         var normalizedConfiguredApiBaseUrl = NormalizeBaseUrlOrEmpty(configuredApiBaseUrl);
+        if (IsImplicitLocalFallbackApiBaseUrl(normalizedValue, normalizedConfiguredApiBaseUrl))
+        {
+            return string.Empty;
+        }
+
         if (!string.IsNullOrWhiteSpace(normalizedConfiguredApiBaseUrl) &&
             string.Equals(normalizedValue, normalizedConfiguredApiBaseUrl, StringComparison.OrdinalIgnoreCase))
         {
@@ -3705,13 +3918,33 @@ public partial class MainWindowViewModel : ViewModelBase
         return normalizedValue;
     }
 
-    private static bool TrimConfiguredApiBaseUrlReferences(LauncherSettings settings, string configuredApiBaseUrl)
+    private static bool IsImplicitLocalFallbackApiBaseUrl(string? value, string? configuredApiBaseUrl = null)
+    {
+        var normalizedValue = NormalizeBaseUrlOrEmpty(value);
+        if (!string.Equals(normalizedValue, LocalFallbackApiBaseUrl, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var normalizedConfiguredApiBaseUrl = NormalizeBaseUrlOrEmpty(configuredApiBaseUrl);
+        return string.IsNullOrWhiteSpace(normalizedConfiguredApiBaseUrl) ||
+               !string.Equals(normalizedConfiguredApiBaseUrl, LocalFallbackApiBaseUrl, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TrimConfiguredApiBaseUrlReferences(LauncherSettings settings, string? configuredApiBaseUrl)
     {
         var changed = false;
 
-        if (!string.IsNullOrWhiteSpace(settings.ApiBaseUrl))
+        var normalizedSettingsApiBaseUrl = NormalizePersistedApiBaseUrl(settings.ApiBaseUrl, configuredApiBaseUrl);
+        var expectedSettingsApiBaseUrl = string.IsNullOrWhiteSpace(NormalizeBaseUrlOrEmpty(configuredApiBaseUrl))
+            ? normalizedSettingsApiBaseUrl
+            : string.Empty;
+        if (!string.Equals(
+                expectedSettingsApiBaseUrl,
+                NormalizeBaseUrlOrEmpty(settings.ApiBaseUrl),
+                StringComparison.Ordinal))
         {
-            settings.ApiBaseUrl = string.Empty;
+            settings.ApiBaseUrl = expectedSettingsApiBaseUrl;
             changed = true;
         }
 
@@ -3740,6 +3973,22 @@ public partial class MainWindowViewModel : ViewModelBase
             changed = true;
         }
 
+        var normalizedKnownApiBaseUrls = (settings.KnownApiBaseUrls ?? [])
+            .Select(candidate => NormalizePersistedApiBaseUrl(candidate, configuredApiBaseUrl))
+            .Where(candidate => !string.IsNullOrWhiteSpace(candidate))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var currentKnownApiBaseUrls = (settings.KnownApiBaseUrls ?? [])
+            .Select(NormalizeBaseUrlOrEmpty)
+            .Where(candidate => !string.IsNullOrWhiteSpace(candidate))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (!normalizedKnownApiBaseUrls.SequenceEqual(currentKnownApiBaseUrls, StringComparer.OrdinalIgnoreCase))
+        {
+            settings.KnownApiBaseUrls = normalizedKnownApiBaseUrls;
+            changed = true;
+        }
+
         return changed;
     }
 
@@ -3756,6 +4005,33 @@ public partial class MainWindowViewModel : ViewModelBase
 
             _knownApiBaseUrls.Add(normalized);
         }
+    }
+
+    private IEnumerable<string> GetRegionalApiBaseUrlCandidates()
+    {
+        var candidates = new List<string>();
+
+        void AddRegion(string regionCode)
+        {
+            var configuredApiBaseUrl = ResolveConfiguredApiBaseUrlForRegion(regionCode);
+            if (string.IsNullOrWhiteSpace(configuredApiBaseUrl) ||
+                candidates.Contains(configuredApiBaseUrl, StringComparer.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            candidates.Add(configuredApiBaseUrl);
+        }
+
+        var preferredRegionCode = NormalizeApiRegionCode(PreferredApiRegion);
+        if (!string.IsNullOrWhiteSpace(preferredRegionCode))
+        {
+            AddRegion(preferredRegionCode);
+        }
+
+        AddRegion("ru");
+        AddRegion("eu");
+        return candidates;
     }
 
     private IEnumerable<string> GetApiBaseUrlCandidates(string? preferredApiBaseUrl = null)
@@ -3775,6 +4051,10 @@ public partial class MainWindowViewModel : ViewModelBase
         }
 
         Add(preferredApiBaseUrl);
+        foreach (var regionalApiBaseUrl in GetRegionalApiBaseUrlCandidates())
+        {
+            Add(regionalApiBaseUrl);
+        }
         Add(ApiBaseUrl);
         Add(_playerAuthApiBaseUrl);
         Add(TryResolveConfiguredApiBaseUrl());
@@ -3789,7 +4069,6 @@ public partial class MainWindowViewModel : ViewModelBase
             Add(bundledFallback);
         }
 
-        Add(LocalFallbackApiBaseUrl);
         return candidates;
     }
 
@@ -4824,6 +5103,7 @@ public partial class MainWindowViewModel : ViewModelBase
         OnPropertyChanged(nameof(SkinStatusText));
         OnPropertyChanged(nameof(CapeStatusText));
         OnPropertyChanged(nameof(RuntimeHeaderText));
+        NotifyApiRegionSelectionPresentationChanged();
         OnPropertyChanged(nameof(RouteLabelText));
         OnPropertyChanged(nameof(JavaModeLabelText));
         OnPropertyChanged(nameof(RamLabelText));
