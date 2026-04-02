@@ -4098,6 +4098,11 @@ public partial class MainWindowViewModel : ViewModelBase
             return true;
         }
 
+        if (string.Equals(normalizedCandidate, preferredApiBaseUrl, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
         foreach (var regionCode in new[] { "ru", "eu" })
         {
             if (string.Equals(regionCode, preferredRegionCode, StringComparison.OrdinalIgnoreCase))
