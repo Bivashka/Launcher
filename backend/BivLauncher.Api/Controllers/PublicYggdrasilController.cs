@@ -43,6 +43,7 @@ public sealed class PublicYggdrasilController(
 
     private readonly JwtSecurityTokenHandler _jwtTokenHandler = new() { MapInboundClaims = false };
     private readonly TokenValidationParameters _tokenValidationParameters = BuildTokenValidationParameters(jwtOptionsAccessor.Value);
+    private readonly IDeliverySettingsProvider _deliverySettingsProvider = deliverySettingsProvider;
 
     [HttpGet("/api/public/yggdrasil")]
     [HttpGet("/api/yggdrasil")]
@@ -785,18 +786,28 @@ public sealed class PublicYggdrasilController(
 
     private string ResolvePublicBaseUrl(HttpRequest request)
     {
-        var deliverySettings = deliverySettingsProvider.GetCachedSettings();
-        var configuredUrl = !string.IsNullOrWhiteSpace(deliverySettings.PublicBaseUrl)
-            ? deliverySettings.PublicBaseUrl
-            : (configuration["PUBLIC_BASE_URL"] ?? configuration["PublicBaseUrl"] ?? string.Empty).Trim();
-        if (!string.IsNullOrWhiteSpace(configuredUrl))
+        var forwardedProto = TryGetForwardedHeaderValue(request, "X-Forwarded-Proto");
+        var forwardedHost = TryGetForwardedHeaderValue(request, "X-Forwarded-Host");
+        var forwardedPrefix = TryGetForwardedHeaderValue(request, "X-Forwarded-Prefix");
+
+        var scheme = !string.IsNullOrWhiteSpace(forwardedProto)
+            ? forwardedProto
+            : (string.IsNullOrWhiteSpace(request.Scheme) ? "http" : request.Scheme);
+        var host = !string.IsNullOrWhiteSpace(forwardedHost)
+            ? forwardedHost
+            : (request.Host.HasValue ? request.Host.Value : "localhost:8080");
+        var pathBase = !string.IsNullOrWhiteSpace(forwardedPrefix)
+            ? forwardedPrefix
+            : request.PathBase.Value;
+        if (string.IsNullOrWhiteSpace(host))
         {
-            return configuredUrl.TrimEnd('/');
+            host = "localhost:8080";
         }
 
-        var scheme = string.IsNullOrWhiteSpace(request.Scheme) ? "http" : request.Scheme;
-        var host = request.Host.HasValue ? request.Host.Value : "localhost:8080";
-        return $"{scheme}://{host}";
+        var normalizedPathBase = string.IsNullOrWhiteSpace(pathBase)
+            ? string.Empty
+            : "/" + pathBase.Trim().Trim('/');
+        return $"{scheme}://{host}{normalizedPathBase}".TrimEnd('/');
     }
 
     private static string ResolveHostName(string publicBaseUrl, string requestHost)
@@ -820,6 +831,25 @@ public sealed class PublicYggdrasilController(
         }
 
         return $"{publicBaseUrl.TrimEnd('/')}/api/public/yggdrasil/";
+    }
+
+    private static string TryGetForwardedHeaderValue(HttpRequest request, string headerName)
+    {
+        if (!request.Headers.TryGetValue(headerName, out var values))
+        {
+            return string.Empty;
+        }
+
+        var rawValue = values.ToString();
+        if (string.IsNullOrWhiteSpace(rawValue))
+        {
+            return string.Empty;
+        }
+
+        var firstValue = rawValue
+            .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault();
+        return (firstValue ?? string.Empty).Trim();
     }
 
     private static string NormalizeClientToken(string? clientToken)
