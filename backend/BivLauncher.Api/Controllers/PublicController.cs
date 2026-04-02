@@ -6,6 +6,7 @@ using BivLauncher.Api.Infrastructure;
 using BivLauncher.Api.Options;
 using BivLauncher.Api.Services;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using System.Collections.Concurrent;
@@ -203,6 +204,7 @@ public sealed class PublicController(
             {
                 x.Id,
                 x.Slug,
+                x.LatestBuildId,
                 x.LatestManifestKey,
                 x.IsPrivate,
                 x.AllowedPlayerUsernames
@@ -249,57 +251,20 @@ public sealed class PublicController(
             return NotFound(new { error = "Manifest file not found in object storage." });
         }
 
-        var manifest = JsonSerializer.Deserialize<LauncherManifest>(storedObject.Data, new JsonSerializerOptions
+        var manifestAssetUrl = assetUrlService.BuildPublicUrl(manifestKey);
+        if (string.IsNullOrWhiteSpace(manifestAssetUrl))
         {
-            PropertyNameCaseInsensitive = true
-        });
-
-        if (manifest is null)
-        {
-            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Manifest content is invalid." });
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Manifest asset URL could not be resolved." });
         }
 
-        var enrichedManifest = EnrichManifest(manifest);
-        var manifestBytes = JsonSerializer.SerializeToUtf8Bytes(enrichedManifest, PublicJsonOptions);
-        return File(manifestBytes, "application/json; charset=utf-8");
-    }
+        Response.Headers.CacheControl = "no-store, no-cache, must-revalidate";
+        Response.Headers.Pragma = "no-cache";
+        Response.Headers.Expires = "0";
 
-    private LauncherManifest EnrichManifest(LauncherManifest manifest)
-    {
-        var runtimeArtifactUrl = string.IsNullOrWhiteSpace(manifest.JavaRuntimeArtifactKey)
-            ? manifest.JavaRuntimeArtifactUrl
-            : assetUrlService.BuildPublicUrl(manifest.JavaRuntimeArtifactKey);
-
-        var files = manifest.Files
-            .Select(file => new LauncherManifestFile(
-                Path: file.Path,
-                Sha256: file.Sha256,
-                Size: file.Size,
-                S3Key: file.S3Key,
-                DownloadUrl: string.IsNullOrWhiteSpace(file.S3Key)
-                    ? file.DownloadUrl
-                    : assetUrlService.BuildPublicUrl(file.S3Key)))
-            .ToList();
-
-        return new LauncherManifest(
-            ProfileSlug: manifest.ProfileSlug,
-            BuildId: manifest.BuildId,
-            LoaderType: manifest.LoaderType,
-            McVersion: manifest.McVersion,
-            ClientVersion: manifest.ClientVersion,
-            CreatedAtUtc: manifest.CreatedAtUtc,
-            JvmArgsDefault: manifest.JvmArgsDefault,
-            GameArgsDefault: manifest.GameArgsDefault,
-            JavaRuntime: manifest.JavaRuntime,
-            JavaRuntimeArtifactKey: manifest.JavaRuntimeArtifactKey,
-            JavaRuntimeArtifactSha256: manifest.JavaRuntimeArtifactSha256,
-            JavaRuntimeArtifactSizeBytes: manifest.JavaRuntimeArtifactSizeBytes,
-            JavaRuntimeArtifactContentType: manifest.JavaRuntimeArtifactContentType,
-            JavaRuntimeArtifactUrl: runtimeArtifactUrl,
-            Files: files,
-            LaunchMode: manifest.LaunchMode,
-            LaunchMainClass: manifest.LaunchMainClass,
-            LaunchClasspath: manifest.LaunchClasspath);
+        var versionedManifestUrl = string.IsNullOrWhiteSpace(profile.LatestBuildId)
+            ? manifestAssetUrl
+            : QueryHelpers.AddQueryString(manifestAssetUrl, "build", profile.LatestBuildId.Trim());
+        return Redirect(versionedManifestUrl);
     }
 
     private async Task<string> ResolvePublishedManifestKeyAsync(

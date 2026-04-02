@@ -116,7 +116,7 @@ public sealed class PublicControllerTests
     }
 
     [Fact]
-    public async Task Manifest_WhenProfileIsPrivateAndUserIsAllowlisted_ReturnsManifest()
+    public async Task Manifest_WhenProfileIsPrivateAndUserIsAllowlisted_ReturnsRedirectToManifestAsset()
     {
         await using var fixture = await TestFixture.CreateAsync();
         await fixture.SeedManifestAsync("private", isPrivate: true, allowedPlayerUsernames: "tester");
@@ -125,13 +125,12 @@ public sealed class PublicControllerTests
 
         var response = await controller.Manifest("private", CancellationToken.None);
 
-        var payload = ReadManifestAsync(response);
-        Assert.Equal("private", payload.ProfileSlug);
-        Assert.Equal("build-private", payload.BuildId);
+        var redirect = Assert.IsType<RedirectResult>(response);
+        Assert.Equal("https://cdn.local/manifests/private.json?build=build-private", redirect.Url);
     }
 
     [Fact]
-    public async Task Manifest_ResolvesRuntimeAndFileDownloadUrls_FromDeliverySettings()
+    public async Task Manifest_RedirectsToVersionedManifestAssetUrl()
     {
         await using var fixture = await TestFixture.CreateAsync();
         await fixture.SeedManifestAsync(
@@ -150,10 +149,8 @@ public sealed class PublicControllerTests
         var controller = fixture.CreateController();
         var response = await controller.Manifest("public", CancellationToken.None);
 
-        var payload = ReadManifestAsync(response);
-        Assert.Equal("https://cdn.local/runtime/public-runtime.zip", payload.JavaRuntimeArtifactUrl);
-        var file = Assert.Single(payload.Files);
-        Assert.Equal("https://cdn.local/clients/public/build-public/mods/example.jar", file.DownloadUrl);
+        var redirect = Assert.IsType<RedirectResult>(response);
+        Assert.Equal("https://cdn.local/manifests/public.json?build=build-public", redirect.Url);
     }
 
     [Fact]
@@ -247,6 +244,7 @@ public sealed class PublicControllerTests
                 Enabled = true,
                 IsPrivate = isPrivate,
                 AllowedPlayerUsernames = allowedPlayerUsernames,
+                LatestBuildId = $"build-{slug}",
                 LatestManifestKey = $"manifests/{slug}.json",
                 Priority = 100,
                 RecommendedRamMb = 2048
@@ -318,17 +316,6 @@ public sealed class PublicControllerTests
             await DbContext.DisposeAsync();
             await Connection.DisposeAsync();
         }
-    }
-
-    private static LauncherManifest ReadManifestAsync(IActionResult response)
-    {
-        var file = Assert.IsType<FileContentResult>(response);
-        Assert.Equal("application/json; charset=utf-8", file.ContentType);
-        var payload = JsonSerializer.Deserialize<LauncherManifest>(file.FileContents, new JsonSerializerOptions
-        {
-            PropertyNameCaseInsensitive = true
-        });
-        return Assert.IsType<LauncherManifest>(payload);
     }
 
     private sealed class StubBrandingProvider(BrandingConfig? branding = null) : IBrandingProvider
