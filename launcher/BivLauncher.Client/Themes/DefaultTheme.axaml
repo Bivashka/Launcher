@@ -91,6 +91,16 @@
     <Setter Property="BoxShadow" Value="0 24 50 0 #00000084" />
   </Style>
 
+  <Style Selector="Border.apiRegionSelector">
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="Padding" Value="6" />
+    <Setter Property="CornerRadius" Value="999" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="Background" Value="#181116D8" />
+    <Setter Property="BorderBrush" Value="#6E4E42" />
+    <Setter Property="BoxShadow" Value="0 14 28 0 #00000054" />
+  </Style>
+
   <Style Selector="Border.accountCornerPanel">
     <Setter Property="Padding" Value="18" />
     <Setter Property="CornerRadius" Value="22" />
@@ -299,6 +309,25 @@
     <Setter Property="HorizontalAlignment" Value="Stretch" />
     <Setter Property="Padding" Value="12,8" />
     <Setter Property="FontSize" Value="13" />
+  </Style>
+
+  <Style Selector="Button.apiRegionButton">
+    <Setter Property="MinWidth" Value="72" />
+    <Setter Property="Height" Value="54" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="CornerRadius" Value="16" />
+    <Setter Property="FontSize" Value="26" />
+    <Setter Property="FontFamily" Value="Segoe UI Emoji, Segoe UI Symbol, Segoe UI" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="Background" Value="#20161B" />
+    <Setter Property="BorderBrush" Value="#714E41" />
+  </Style>
+
+  <Style Selector="Button.apiRegionButton:pointerover">
+    <Setter Property="Background" Value="#2B1C20" />
+    <Setter Property="BorderBrush" Value="#A36F58" />
   </Style>
 
   <Style Selector="Button.iconButton">

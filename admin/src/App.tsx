@@ -7825,27 +7825,24 @@ function App() {
                 <h3>Delivery / availability</h3>
                 <div className="action-block">
                   <small className="muted">
-                    Use an accessible public URL for the panel/bootstrap, a separate asset/update mirror if needed, and fallback API URLs for launcher failover.
+                    These addresses are embedded into new launcher builds. RF/EU selector uses the two launcher API fields below.
                   </small>
-                  <small className="muted">
-                    If the admin panel is opened behind the same reverse proxy as the API, no VITE_API_BASE_URL or CORS override is required.
-                  </small>
-                  <small className="muted">
-                    Built-in example for this branch: proxy/panel `http://195.43.142.97`, fallback direct API `http://95.217.99.17:8080`.
-                  </small>
-                  <small className="muted">
-                    Quick toggle: `Apply current RU proxy preset` switches launcher traffic to RU proxy, `Disable proxy / use direct FI` switches the form back to direct Finland API without fallbacks.
-                  </small>
-                  <input
-                    placeholder="Public base URL (for launcher/bootstrap)"
-                    value={deliverySettings.publicBaseUrl}
-                    onChange={(event) => setDeliverySettings((prev) => ({ ...prev, publicBaseUrl: event.target.value }))}
-                  />
-                  <input
-                    placeholder="Asset/update base URL (optional mirror/CDN)"
-                    value={deliverySettings.assetBaseUrl}
-                    onChange={(event) => setDeliverySettings((prev) => ({ ...prev, assetBaseUrl: event.target.value }))}
-                  />
+                  <label>
+                    Public base URL
+                    <input
+                      placeholder="http://195.43.142.97"
+                      value={deliverySettings.publicBaseUrl}
+                      onChange={(event) => setDeliverySettings((prev) => ({ ...prev, publicBaseUrl: event.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    Asset / update base URL
+                    <input
+                      placeholder="http://195.43.142.97"
+                      value={deliverySettings.assetBaseUrl}
+                      onChange={(event) => setDeliverySettings((prev) => ({ ...prev, assetBaseUrl: event.target.value }))}
+                    />
+                  </label>
                   <label>
                     Fallback API URLs
                     <textarea
@@ -7855,20 +7852,26 @@ function App() {
                       onChange={(event) => setDeliveryFallbackApiBaseUrlsText(event.target.value)}
                     />
                   </label>
-                  <input
-                    placeholder="Launcher API URL for RF selector"
-                    value={deliverySettings.launcherApiBaseUrlRu}
-                    onChange={(event) =>
-                      setDeliverySettings((prev) => ({ ...prev, launcherApiBaseUrlRu: event.target.value }))
-                    }
-                  />
-                  <input
-                    placeholder="Launcher API URL for EU selector"
-                    value={deliverySettings.launcherApiBaseUrlEu}
-                    onChange={(event) =>
-                      setDeliverySettings((prev) => ({ ...prev, launcherApiBaseUrlEu: event.target.value }))
-                    }
-                  />
+                  <label>
+                    Launcher API URL for RF selector
+                    <input
+                      placeholder="http://195.43.142.97"
+                      value={deliverySettings.launcherApiBaseUrlRu}
+                      onChange={(event) =>
+                        setDeliverySettings((prev) => ({ ...prev, launcherApiBaseUrlRu: event.target.value }))
+                      }
+                    />
+                  </label>
+                  <label>
+                    Launcher API URL for EU selector
+                    <input
+                      placeholder="http://95.217.99.17:8080"
+                      value={deliverySettings.launcherApiBaseUrlEu}
+                      onChange={(event) =>
+                        setDeliverySettings((prev) => ({ ...prev, launcherApiBaseUrlEu: event.target.value }))
+                      }
+                    />
+                  </label>
                   <button type="button" onClick={onApplyCurrentProxyPreset} disabled={busy || !token}>
                     Apply current RU proxy preset
                   </button>

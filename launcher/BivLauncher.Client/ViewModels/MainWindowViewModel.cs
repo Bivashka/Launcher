@@ -457,8 +457,10 @@ public partial class MainWindowViewModel : ViewModelBase
     public string ApiRegionHintText => _languageCode == "en"
         ? "Choose which API endpoint the launcher should try first."
         : "Выберите, к какому endpoint лаунчер должен подключаться в первую очередь.";
-    public string ApiRegionRfButtonText => "RF";
-    public string ApiRegionEuButtonText => "EU";
+    public string ApiRegionRfButtonText => "🇷🇺";
+    public string ApiRegionEuButtonText => "🇪🇺";
+    public string ApiRegionRuToolTipText => _languageCode == "en" ? "RF route" : "Маршрут через РФ";
+    public string ApiRegionEuToolTipText => _languageCode == "en" ? "EU route" : "Маршрут через EU";
     public bool IsRuApiRegionSelected => string.Equals(PreferredApiRegion, "ru", StringComparison.OrdinalIgnoreCase);
     public bool IsEuApiRegionSelected => string.Equals(PreferredApiRegion, "eu", StringComparison.OrdinalIgnoreCase);
     public IBrush ApiRegionRuBackgroundBrush => IsRuApiRegionSelected ? PrimaryButtonBackgroundBrush : InputBackgroundBrush;
@@ -2274,6 +2276,8 @@ public partial class MainWindowViewModel : ViewModelBase
         OnPropertyChanged(nameof(ApiRegionHintText));
         OnPropertyChanged(nameof(ApiRegionRfButtonText));
         OnPropertyChanged(nameof(ApiRegionEuButtonText));
+        OnPropertyChanged(nameof(ApiRegionRuToolTipText));
+        OnPropertyChanged(nameof(ApiRegionEuToolTipText));
         OnPropertyChanged(nameof(IsRuApiRegionSelected));
         OnPropertyChanged(nameof(IsEuApiRegionSelected));
         OnPropertyChanged(nameof(ApiRegionRuBackgroundBrush));
@@ -4027,6 +4031,7 @@ public partial class MainWindowViewModel : ViewModelBase
         if (!string.IsNullOrWhiteSpace(preferredRegionCode))
         {
             AddRegion(preferredRegionCode);
+            return candidates;
         }
 
         AddRegion("ru");
@@ -4042,6 +4047,7 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             var normalized = NormalizeBaseUrlOrEmpty(value);
             if (string.IsNullOrWhiteSpace(normalized) ||
+                !IsApiBaseUrlCandidateAllowedForSelectedRegion(normalized) ||
                 candidates.Contains(normalized, StringComparer.OrdinalIgnoreCase))
             {
                 return;
@@ -4070,6 +4076,44 @@ public partial class MainWindowViewModel : ViewModelBase
         }
 
         return candidates;
+    }
+
+    private bool IsApiBaseUrlCandidateAllowedForSelectedRegion(string candidate)
+    {
+        var normalizedCandidate = NormalizeBaseUrlOrEmpty(candidate);
+        if (string.IsNullOrWhiteSpace(normalizedCandidate))
+        {
+            return false;
+        }
+
+        var preferredRegionCode = NormalizeApiRegionCode(PreferredApiRegion);
+        if (string.IsNullOrWhiteSpace(preferredRegionCode))
+        {
+            return true;
+        }
+
+        var preferredApiBaseUrl = NormalizeBaseUrlOrEmpty(ResolveConfiguredApiBaseUrlForRegion(preferredRegionCode));
+        if (string.IsNullOrWhiteSpace(preferredApiBaseUrl))
+        {
+            return true;
+        }
+
+        foreach (var regionCode in new[] { "ru", "eu" })
+        {
+            if (string.Equals(regionCode, preferredRegionCode, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var blockedApiBaseUrl = NormalizeBaseUrlOrEmpty(ResolveConfiguredApiBaseUrlForRegion(regionCode));
+            if (!string.IsNullOrWhiteSpace(blockedApiBaseUrl) &&
+                string.Equals(normalizedCandidate, blockedApiBaseUrl, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private async Task<T> ExecuteAgainstApiFailoverAsync<T>(
