@@ -1729,9 +1729,16 @@ public sealed class GameLaunchService(
     {
         var targetPath = Path.Combine(instanceDirectory, LocalClientAuthlibRelativePath);
         var targetDirectory = Path.GetDirectoryName(targetPath);
-        if (!string.IsNullOrWhiteSpace(targetDirectory))
+        try
         {
-            Directory.CreateDirectory(targetDirectory);
+            if (!string.IsNullOrWhiteSpace(targetDirectory))
+            {
+                Directory.CreateDirectory(targetDirectory);
+            }
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            throw CreateFileAccessException(targetDirectory ?? targetPath, ex, "create the authlib cache directory");
         }
 
         if (TryValidateAuthlibAgentJar(targetPath, requireLegacySessionDomainCompatibility, out _))
@@ -1745,8 +1752,13 @@ public sealed class GameLaunchService(
                 apiBaseUrl,
                 DefaultClientAuthlibAssetPath,
                 cancellationToken);
+            EnsureWritableFile(targetPath);
             await using var localStream = new FileStream(targetPath, FileMode.Create, FileAccess.Write, FileShare.None);
             await remoteStream.CopyToAsync(localStream, cancellationToken);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            throw CreateFileAccessException(targetPath, ex, "write authlib-injector");
         }
         catch (Exception ex)
         {
@@ -1762,6 +1774,7 @@ public sealed class GameLaunchService(
         {
             try
             {
+                EnsureWritableFile(targetPath);
                 File.Delete(targetPath);
             }
             catch
@@ -1792,6 +1805,29 @@ public sealed class GameLaunchService(
         }
 
         return string.Empty;
+    }
+
+    private static void EnsureWritableFile(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return;
+        }
+
+        var attributes = File.GetAttributes(path);
+        if ((attributes & FileAttributes.ReadOnly) != 0)
+        {
+            File.SetAttributes(path, attributes & ~FileAttributes.ReadOnly);
+        }
+    }
+
+    private static InvalidOperationException CreateFileAccessException(string path, UnauthorizedAccessException ex, string operation)
+    {
+        var normalizedPath = string.IsNullOrWhiteSpace(path) ? "unknown path" : Path.GetFullPath(path);
+        return new InvalidOperationException(
+            $"Access denied while trying to {operation}: '{normalizedPath}'. " +
+            "Close Minecraft/Java, disable file locks from antivirus/archivers, and make sure the install folder is writable.",
+            ex);
     }
 
     private bool TryValidateAuthlibAgentJar(

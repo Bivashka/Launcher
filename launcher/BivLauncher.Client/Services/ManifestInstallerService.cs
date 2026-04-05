@@ -24,7 +24,14 @@ public sealed class ManifestInstallerService(
         var verified = 0;
 
         var instanceDirectory = Path.Combine(installDirectory, manifest.ProfileSlug);
-        Directory.CreateDirectory(instanceDirectory);
+        try
+        {
+            Directory.CreateDirectory(instanceDirectory);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            throw CreateFileAccessException(instanceDirectory, ex, "create the instance directory");
+        }
 
         await EnsureRuntimeAsync(apiBaseUrl, manifest, instanceDirectory, cancellationToken);
 
@@ -35,45 +42,70 @@ public sealed class ManifestInstallerService(
             var relativePath = file.Path.Replace('/', Path.DirectorySeparatorChar);
             var destinationPath = Path.Combine(instanceDirectory, relativePath);
             var destinationDirectory = Path.GetDirectoryName(destinationPath);
-            if (!string.IsNullOrWhiteSpace(destinationDirectory))
+            try
             {
-                Directory.CreateDirectory(destinationDirectory);
+                if (!string.IsNullOrWhiteSpace(destinationDirectory))
+                {
+                    Directory.CreateDirectory(destinationDirectory);
+                }
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                throw CreateFileAccessException(destinationDirectory ?? destinationPath, ex, "create the destination directory");
             }
 
             var fileUpToDate = false;
-            if (File.Exists(destinationPath))
+            try
             {
-                await using var existingStream = File.OpenRead(destinationPath);
-                var existingSha = await ComputeSha256Async(existingStream, cancellationToken);
-                fileUpToDate = existingSha.Equals(file.Sha256, StringComparison.OrdinalIgnoreCase);
+                if (File.Exists(destinationPath))
+                {
+                    await using var existingStream = File.OpenRead(destinationPath);
+                    var existingSha = await ComputeSha256Async(existingStream, cancellationToken);
+                    fileUpToDate = existingSha.Equals(file.Sha256, StringComparison.OrdinalIgnoreCase);
+                }
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                throw CreateFileAccessException(destinationPath, ex, "read the existing file");
             }
 
             if (!fileUpToDate)
             {
                 var tempPath = destinationPath + ".download";
-                if (File.Exists(tempPath))
+                try
                 {
-                    File.Delete(tempPath);
-                }
-
-                var assetReference = string.IsNullOrWhiteSpace(file.DownloadUrl) ? file.S3Key : file.DownloadUrl;
-                await using (var sourceStream = await launcherApiService.OpenAssetReadStreamAsync(apiBaseUrl, assetReference, cancellationToken))
-                await using (var targetStream = File.Create(tempPath))
-                {
-                    await sourceStream.CopyToAsync(targetStream, cancellationToken);
-                }
-
-                await using (var downloadedStream = File.OpenRead(tempPath))
-                {
-                    var downloadedSha = await ComputeSha256Async(downloadedStream, cancellationToken);
-                    if (!downloadedSha.Equals(file.Sha256, StringComparison.OrdinalIgnoreCase))
+                    if (File.Exists(tempPath))
                     {
+                        EnsureWritableFile(tempPath);
                         File.Delete(tempPath);
-                        throw new InvalidOperationException($"Downloaded file hash mismatch for '{file.Path}'.");
                     }
+
+                    var assetReference = string.IsNullOrWhiteSpace(file.DownloadUrl) ? file.S3Key : file.DownloadUrl;
+                    await using (var sourceStream = await launcherApiService.OpenAssetReadStreamAsync(apiBaseUrl, assetReference, cancellationToken))
+                    await using (var targetStream = File.Create(tempPath))
+                    {
+                        await sourceStream.CopyToAsync(targetStream, cancellationToken);
+                    }
+
+                    await using (var downloadedStream = File.OpenRead(tempPath))
+                    {
+                        var downloadedSha = await ComputeSha256Async(downloadedStream, cancellationToken);
+                        if (!downloadedSha.Equals(file.Sha256, StringComparison.OrdinalIgnoreCase))
+                        {
+                            EnsureWritableFile(tempPath);
+                            File.Delete(tempPath);
+                            throw new InvalidOperationException($"Downloaded file hash mismatch for '{file.Path}'.");
+                        }
+                    }
+
+                    EnsureWritableFile(destinationPath);
+                    File.Move(tempPath, destinationPath, overwrite: true);
+                }
+                catch (UnauthorizedAccessException ex)
+                {
+                    throw CreateFileAccessException(destinationPath, ex, "write or replace the game file");
                 }
 
-                File.Move(tempPath, destinationPath, overwrite: true);
                 downloaded++;
                 logService.LogInfo($"Downloaded: {file.Path}");
             }
@@ -261,20 +293,42 @@ public sealed class ManifestInstallerService(
         }
 
         var runtimeCacheDir = Path.Combine(instanceDirectory, ".runtime-cache");
-        Directory.CreateDirectory(runtimeCacheDir);
-        var runtimeArtifactPath = Path.Combine(runtimeCacheDir, artifactName);
-        if (File.Exists(runtimeArtifactPath))
+        try
         {
-            File.Delete(runtimeArtifactPath);
+            Directory.CreateDirectory(runtimeCacheDir);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            throw CreateFileAccessException(runtimeCacheDir, ex, "create the runtime cache directory");
+        }
+        var runtimeArtifactPath = Path.Combine(runtimeCacheDir, artifactName);
+        try
+        {
+            if (File.Exists(runtimeArtifactPath))
+            {
+                EnsureWritableFile(runtimeArtifactPath);
+                File.Delete(runtimeArtifactPath);
+            }
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            throw CreateFileAccessException(runtimeArtifactPath, ex, "replace the cached runtime artifact");
         }
 
         var runtimeArtifactReference = string.IsNullOrWhiteSpace(manifest.JavaRuntimeArtifactUrl)
             ? runtimeArtifactKey
             : manifest.JavaRuntimeArtifactUrl;
-        await using (var sourceStream = await launcherApiService.OpenAssetReadStreamAsync(apiBaseUrl, runtimeArtifactReference, cancellationToken))
-        await using (var targetStream = File.Create(runtimeArtifactPath))
+        try
         {
-            await sourceStream.CopyToAsync(targetStream, cancellationToken);
+            await using (var sourceStream = await launcherApiService.OpenAssetReadStreamAsync(apiBaseUrl, runtimeArtifactReference, cancellationToken))
+            await using (var targetStream = File.Create(runtimeArtifactPath))
+            {
+                await sourceStream.CopyToAsync(targetStream, cancellationToken);
+            }
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            throw CreateFileAccessException(runtimeArtifactPath, ex, "write the runtime artifact");
         }
 
         if (manifest.JavaRuntimeArtifactSizeBytes is > 0 &&
@@ -306,19 +360,35 @@ public sealed class ManifestInstallerService(
             var runtimeAbsolutePath = Path.Combine(instanceDirectory, normalizedRuntimePath.Replace('/', Path.DirectorySeparatorChar));
             if (runtimeArtifactPath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
             {
-                ZipFile.ExtractToDirectory(runtimeArtifactPath, instanceDirectory, overwriteFiles: true);
-                File.Delete(runtimeArtifactPath);
+                try
+                {
+                    ZipFile.ExtractToDirectory(runtimeArtifactPath, instanceDirectory, overwriteFiles: true);
+                    EnsureWritableFile(runtimeArtifactPath);
+                    File.Delete(runtimeArtifactPath);
+                }
+                catch (UnauthorizedAccessException ex)
+                {
+                    throw CreateFileAccessException(instanceDirectory, ex, "extract the runtime archive");
+                }
                 logService.LogInfo($"Runtime archive extracted: {runtimeArtifactKey}");
             }
             else
             {
                 var runtimeDir = Path.GetDirectoryName(runtimeAbsolutePath);
-                if (!string.IsNullOrWhiteSpace(runtimeDir))
+                try
                 {
-                    Directory.CreateDirectory(runtimeDir);
-                }
+                    if (!string.IsNullOrWhiteSpace(runtimeDir))
+                    {
+                        Directory.CreateDirectory(runtimeDir);
+                    }
 
-                File.Move(runtimeArtifactPath, runtimeAbsolutePath, overwrite: true);
+                    EnsureWritableFile(runtimeAbsolutePath);
+                    File.Move(runtimeArtifactPath, runtimeAbsolutePath, overwrite: true);
+                }
+                catch (UnauthorizedAccessException ex)
+                {
+                    throw CreateFileAccessException(runtimeAbsolutePath, ex, "install the runtime file");
+                }
                 logService.LogInfo($"Runtime binary installed: {runtimeArtifactKey}");
             }
 
@@ -334,16 +404,32 @@ public sealed class ManifestInstallerService(
         PrepareAutoRuntimeDirectory(autoRuntimeRootAbsolutePath);
         if (runtimeArtifactPath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
         {
-            ZipFile.ExtractToDirectory(runtimeArtifactPath, autoRuntimeRootAbsolutePath, overwriteFiles: true);
-            File.Delete(runtimeArtifactPath);
+            try
+            {
+                ZipFile.ExtractToDirectory(runtimeArtifactPath, autoRuntimeRootAbsolutePath, overwriteFiles: true);
+                EnsureWritableFile(runtimeArtifactPath);
+                File.Delete(runtimeArtifactPath);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                throw CreateFileAccessException(autoRuntimeRootAbsolutePath, ex, "extract the auto-runtime archive");
+            }
             logService.LogInfo($"Runtime archive extracted to auto-runtime root: {runtimeArtifactKey}");
         }
         else
         {
             var autoRuntimeBinDirectory = Path.Combine(autoRuntimeRootAbsolutePath, "bin");
-            Directory.CreateDirectory(autoRuntimeBinDirectory);
             var runtimeAbsolutePath = Path.Combine(autoRuntimeBinDirectory, artifactName);
-            File.Move(runtimeArtifactPath, runtimeAbsolutePath, overwrite: true);
+            try
+            {
+                Directory.CreateDirectory(autoRuntimeBinDirectory);
+                EnsureWritableFile(runtimeAbsolutePath);
+                File.Move(runtimeArtifactPath, runtimeAbsolutePath, overwrite: true);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                throw CreateFileAccessException(runtimeAbsolutePath, ex, "install the auto-runtime file");
+            }
             logService.LogInfo($"Runtime binary installed to auto-runtime root: {runtimeArtifactKey}");
         }
 
@@ -372,7 +458,14 @@ public sealed class ManifestInstallerService(
             // Best-effort cleanup before runtime refresh.
         }
 
-        Directory.CreateDirectory(autoRuntimeRootAbsolutePath);
+        try
+        {
+            Directory.CreateDirectory(autoRuntimeRootAbsolutePath);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            throw CreateFileAccessException(autoRuntimeRootAbsolutePath, ex, "create the auto-runtime directory");
+        }
     }
 
     private static string BuildAutoRuntimeRootRelativePath(string runtimeArtifactKey)
@@ -421,5 +514,28 @@ public sealed class ManifestInstallerService(
         using var sha256 = SHA256.Create();
         var hash = await sha256.ComputeHashAsync(stream, cancellationToken);
         return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    private static void EnsureWritableFile(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return;
+        }
+
+        var attributes = File.GetAttributes(path);
+        if ((attributes & FileAttributes.ReadOnly) != 0)
+        {
+            File.SetAttributes(path, attributes & ~FileAttributes.ReadOnly);
+        }
+    }
+
+    private static InvalidOperationException CreateFileAccessException(string path, UnauthorizedAccessException ex, string operation)
+    {
+        var normalizedPath = string.IsNullOrWhiteSpace(path) ? "unknown path" : Path.GetFullPath(path);
+        return new InvalidOperationException(
+            $"Access denied while trying to {operation}: '{normalizedPath}'. " +
+            "Close Minecraft/Java, disable file locks from antivirus/archivers, and make sure the install folder is writable.",
+            ex);
     }
 }

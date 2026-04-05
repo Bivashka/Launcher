@@ -4435,6 +4435,13 @@ public partial class MainWindowViewModel : ViewModelBase
             return T("status.rateLimited");
         }
 
+        if (ex is UnauthorizedAccessException || ex.InnerException is UnauthorizedAccessException)
+        {
+            return _languageCode == "en"
+                ? "File access denied. Close Minecraft/Java, check antivirus locks, and make sure the install folder is writable."
+                : "Нет доступа к файлу или папке. Закрой Minecraft/Java, проверь блокировку антивирусом и права на папку установки.";
+        }
+
         return F("status.error", ex.Message);
     }
 
