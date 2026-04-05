@@ -9,9 +9,13 @@ using System.Reflection;
 
 namespace BivLauncher.Client.Services;
 
-public sealed class GameLaunchService(ILogService logService, ISettingsService settingsService) : IGameLaunchService
+public sealed class GameLaunchService(
+    ILogService logService,
+    ISettingsService settingsService,
+    ILauncherApiService launcherApiService) : IGameLaunchService
 {
     private readonly ISettingsService _settingsService = settingsService;
+    private readonly ILauncherApiService _launcherApiService = launcherApiService;
 
     private static readonly string[] ImplicitMainClassCandidates =
     [
@@ -1735,22 +1739,12 @@ public sealed class GameLaunchService(ILogService logService, ISettingsService s
             return Path.GetFullPath(targetPath);
         }
 
-        var downloadUrl = apiBaseUrl.TrimEnd('/') + DefaultClientAuthlibAssetPath;
         try
         {
-            using var httpClient = new HttpClient
-            {
-                Timeout = TimeSpan.FromSeconds(20)
-            };
-
-            using var response = await httpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-            if (!response.IsSuccessStatusCode)
-            {
-                logService.LogInfo($"WARN: Client authlib-injector download failed: HTTP {(int)response.StatusCode} from launcher asset endpoint.");
-                return string.Empty;
-            }
-
-            await using var remoteStream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            await using var remoteStream = await _launcherApiService.OpenAssetReadStreamAsync(
+                apiBaseUrl,
+                DefaultClientAuthlibAssetPath,
+                cancellationToken);
             await using var localStream = new FileStream(targetPath, FileMode.Create, FileAccess.Write, FileShare.None);
             await remoteStream.CopyToAsync(localStream, cancellationToken);
         }

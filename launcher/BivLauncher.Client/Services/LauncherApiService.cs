@@ -13,6 +13,13 @@ public sealed class LauncherApiService : ILauncherApiService
     private const string LauncherClientHeaderName = "X-BivLauncher-Client";
     private const string LauncherProofHeaderName = "X-BivLauncher-Proof";
     private const string LauncherClientProofMetadataKey = "BivLauncher.ClientProof";
+    private const string LauncherApiBaseUrlEnvVar = "BIVLAUNCHER_API_BASE_URL";
+    private const string LauncherApiBaseUrlRuEnvVar = "BIVLAUNCHER_API_BASE_URL_RU";
+    private const string LauncherApiBaseUrlEuEnvVar = "BIVLAUNCHER_API_BASE_URL_EU";
+    private const string LauncherApiBaseUrlAssemblyMetadataKey = "BivLauncher.ApiBaseUrl";
+    private const string LauncherApiBaseUrlRuAssemblyMetadataKey = "BivLauncher.ApiBaseUrlRu";
+    private const string LauncherApiBaseUrlEuAssemblyMetadataKey = "BivLauncher.ApiBaseUrlEu";
+    private const string LauncherFallbackApiBaseUrlsAssemblyMetadataKey = "BivLauncher.FallbackApiBaseUrls";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -260,21 +267,159 @@ public sealed class LauncherApiService : ILauncherApiService
 
     public async Task<Stream> OpenAssetReadStreamAsync(string apiBaseUrl, string s3Key, CancellationToken cancellationToken = default)
     {
-        Uri uri;
-        if (Uri.TryCreate(s3Key?.Trim(), UriKind.Absolute, out var absoluteUri))
+        var candidateUris = BuildAssetCandidateUris(apiBaseUrl, s3Key);
+        Exception? lastError = null;
+
+        foreach (var candidateUri in candidateUris)
         {
-            uri = absoluteUri;
-        }
-        else
-        {
-            var escaped = string.Join('/',
-                (s3Key ?? string.Empty).Split('/', StringSplitOptions.RemoveEmptyEntries).Select(Uri.EscapeDataString));
-            uri = BuildUri(apiBaseUrl, $"/api/public/assets/{escaped}");
+            try
+            {
+                var response = await _httpClient.GetAsync(candidateUri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                if (response.IsSuccessStatusCode)
+                {
+                    var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+                    return new HttpResponseStream(stream, response);
+                }
+
+                if (!ShouldTryNextAssetLocation(response.StatusCode))
+                {
+                    response.EnsureSuccessStatusCode();
+                }
+
+                lastError = new HttpRequestException(
+                    $"Response status code does not indicate success: {(int)response.StatusCode} ({response.ReasonPhrase}).",
+                    null,
+                    response.StatusCode);
+                response.Dispose();
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+            {
+                lastError = ex;
+            }
         }
 
-        var response = await _httpClient.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        response.EnsureSuccessStatusCode();
-        return await response.Content.ReadAsStreamAsync(cancellationToken);
+        throw lastError ?? new InvalidOperationException("No reachable asset endpoints are configured.");
+    }
+
+    private static IReadOnlyList<Uri> BuildAssetCandidateUris(string apiBaseUrl, string? assetReference)
+    {
+        var candidates = new List<Uri>();
+
+        void AddAbsoluteUri(Uri? candidateUri)
+        {
+            if (candidateUri is null || !candidateUri.IsAbsoluteUri)
+            {
+                return;
+            }
+
+            if (candidates.Any(existing => Uri.Compare(existing, candidateUri, UriComponents.HttpRequestUrl, UriFormat.SafeUnescaped, StringComparison.OrdinalIgnoreCase) == 0))
+            {
+                return;
+            }
+
+            candidates.Add(candidateUri);
+        }
+
+        var normalizedReference = (assetReference ?? string.Empty).Trim();
+        if (TryResolvePublicAssetPath(normalizedReference, out var publicAssetPath))
+        {
+            foreach (var apiBaseUrlCandidate in ResolveAssetApiBaseUrlCandidates(apiBaseUrl))
+            {
+                AddAbsoluteUri(BuildUri(apiBaseUrlCandidate, publicAssetPath));
+            }
+
+            return candidates;
+        }
+
+        if (Uri.TryCreate(normalizedReference, UriKind.Absolute, out var absoluteUri))
+        {
+            AddAbsoluteUri(absoluteUri);
+            return candidates;
+        }
+
+        var escaped = string.Join('/',
+            normalizedReference
+                .Split('/', StringSplitOptions.RemoveEmptyEntries)
+                .Select(Uri.EscapeDataString));
+        var builtPath = $"/api/public/assets/{escaped}";
+        foreach (var apiBaseUrlCandidate in ResolveAssetApiBaseUrlCandidates(apiBaseUrl))
+        {
+            AddAbsoluteUri(BuildUri(apiBaseUrlCandidate, builtPath));
+        }
+
+        return candidates;
+    }
+
+    private static IEnumerable<string> ResolveAssetApiBaseUrlCandidates(string apiBaseUrl)
+    {
+        var candidates = new List<string>();
+
+        void Add(string? value)
+        {
+            var normalized = NormalizeBaseUrlOrEmpty(value);
+            if (string.IsNullOrWhiteSpace(normalized) ||
+                candidates.Contains(normalized, StringComparer.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            candidates.Add(normalized);
+        }
+
+        Add(apiBaseUrl);
+        Add(Environment.GetEnvironmentVariable(LauncherApiBaseUrlEnvVar));
+        Add(Environment.GetEnvironmentVariable(LauncherApiBaseUrlRuEnvVar));
+        Add(Environment.GetEnvironmentVariable(LauncherApiBaseUrlEuEnvVar));
+        Add(ResolveAssemblyMetadata(LauncherApiBaseUrlAssemblyMetadataKey));
+        Add(ResolveAssemblyMetadata(LauncherApiBaseUrlRuAssemblyMetadataKey));
+        Add(ResolveAssemblyMetadata(LauncherApiBaseUrlEuAssemblyMetadataKey));
+
+        foreach (var bundledFallback in ResolveBundledFallbackApiBaseUrls())
+        {
+            Add(bundledFallback);
+        }
+
+        return candidates;
+    }
+
+    private static bool TryResolvePublicAssetPath(string assetReference, out string path)
+    {
+        path = string.Empty;
+        if (string.IsNullOrWhiteSpace(assetReference))
+        {
+            return false;
+        }
+
+        if (Uri.TryCreate(assetReference, UriKind.Absolute, out var absoluteUri))
+        {
+            if (!absoluteUri.AbsolutePath.StartsWith("/api/public/assets/", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            path = $"{absoluteUri.AbsolutePath}{absoluteUri.Query}";
+            return true;
+        }
+
+        if (!assetReference.StartsWith("/api/public/assets/", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        path = assetReference;
+        return true;
+    }
+
+    private static bool ShouldTryNextAssetLocation(HttpStatusCode statusCode)
+    {
+        return statusCode is
+            HttpStatusCode.NotFound or
+            HttpStatusCode.RequestTimeout or
+            HttpStatusCode.TooManyRequests or
+            HttpStatusCode.InternalServerError or
+            HttpStatusCode.BadGateway or
+            HttpStatusCode.ServiceUnavailable or
+            HttpStatusCode.GatewayTimeout;
     }
 
     public async Task<PublicCrashReportCreateResponse> SubmitCrashReportAsync(
@@ -612,5 +757,69 @@ public sealed class LauncherApiService : ILauncherApiService
             .GetCustomAttributes<AssemblyMetadataAttribute>()
             .FirstOrDefault(item => string.Equals(item.Key, key, StringComparison.OrdinalIgnoreCase));
         return (attribute?.Value ?? string.Empty).Trim();
+    }
+
+    private static IReadOnlyList<string> ResolveBundledFallbackApiBaseUrls()
+    {
+        var rawValue = ResolveAssemblyMetadata(LauncherFallbackApiBaseUrlsAssemblyMetadataKey);
+        if (string.IsNullOrWhiteSpace(rawValue))
+        {
+            return [];
+        }
+
+        return rawValue
+            .Split(new[] { '\r', '\n', ';', ',' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(NormalizeBaseUrlOrEmpty)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static string NormalizeBaseUrlOrEmpty(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value)
+            ? string.Empty
+            : value.Trim().TrimEnd('/');
+    }
+
+    private sealed class HttpResponseStream(Stream inner, HttpResponseMessage response) : Stream
+    {
+        private readonly Stream _inner = inner;
+        private readonly HttpResponseMessage _response = response;
+
+        public override bool CanRead => _inner.CanRead;
+        public override bool CanSeek => _inner.CanSeek;
+        public override bool CanWrite => _inner.CanWrite;
+        public override long Length => _inner.Length;
+        public override long Position
+        {
+            get => _inner.Position;
+            set => _inner.Position = value;
+        }
+
+        public override void Flush() => _inner.Flush();
+        public override int Read(byte[] buffer, int offset, int count) => _inner.Read(buffer, offset, count);
+        public override long Seek(long offset, SeekOrigin origin) => _inner.Seek(offset, origin);
+        public override void SetLength(long value) => _inner.SetLength(value);
+        public override void Write(byte[] buffer, int offset, int count) => _inner.Write(buffer, offset, count);
+        public override int Read(Span<byte> buffer) => _inner.Read(buffer);
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) => _inner.ReadAsync(buffer, cancellationToken);
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) => _inner.ReadAsync(buffer, offset, count, cancellationToken);
+        public override ValueTask DisposeAsync()
+        {
+            _response.Dispose();
+            return _inner.DisposeAsync();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                _inner.Dispose();
+                _response.Dispose();
+            }
+
+            base.Dispose(disposing);
+        }
     }
 }
