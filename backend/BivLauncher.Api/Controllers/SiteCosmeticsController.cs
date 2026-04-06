@@ -9,10 +9,9 @@ namespace BivLauncher.Api.Controllers;
 [ApiController]
 [Route("api/site")]
 public sealed class SiteCosmeticsController(
-    IConfiguration configuration,
+    ISecuritySettingsProvider securitySettingsProvider,
     IPlayerCosmeticsService playerCosmeticsService) : ControllerBase
 {
-    private const string SiteCosmeticsUploadSecretConfigKey = "SITE_COSMETICS_UPLOAD_SECRET";
     private const string SiteCosmeticsUploadSecretHeaderName = "X-Site-Cosmetics-Upload-Secret";
 
     [HttpPost("skins/{user}/upload")]
@@ -70,7 +69,7 @@ public sealed class SiteCosmeticsController(
 
     private IActionResult? ValidateSiteUploadSecret()
     {
-        var requiredSecret = (configuration[SiteCosmeticsUploadSecretConfigKey] ?? string.Empty).Trim();
+        var requiredSecret = (securitySettingsProvider.GetCachedSettings().SiteCosmeticsUploadSecret ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(requiredSecret))
         {
             return StatusCode(StatusCodes.Status503ServiceUnavailable, new

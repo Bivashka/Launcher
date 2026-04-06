@@ -158,6 +158,7 @@ public sealed class PublicAuthControllerTests
             securitySettingsProvider: new StubSecuritySettingsProvider(new SecuritySettingsConfig(
                 MaxConcurrentGameAccountsPerDevice: 1,
                 LauncherAdminUsernames: ["player"],
+                SiteCosmeticsUploadSecret: string.Empty,
                 GameSessionHeartbeatIntervalSeconds: 45,
                 GameSessionExpirationSeconds: 150,
                 UpdatedAtUtc: null)));
@@ -234,6 +235,7 @@ public sealed class PublicAuthControllerTests
         var securitySettings = new StubSecuritySettingsProvider(new SecuritySettingsConfig(
             MaxConcurrentGameAccountsPerDevice: 1,
             LauncherAdminUsernames: ["admin-player"],
+            SiteCosmeticsUploadSecret: string.Empty,
             GameSessionHeartbeatIntervalSeconds: 45,
             GameSessionExpirationSeconds: 150,
             UpdatedAtUtc: null));

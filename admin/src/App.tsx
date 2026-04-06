@@ -135,6 +135,7 @@ type TwoFactorSettings = {
 type SecuritySettings = {
   maxConcurrentGameAccountsPerDevice: number
   launcherAdminUsernames: string[]
+  siteCosmeticsUploadSecret: string
   gameSessionHeartbeatIntervalSeconds: number
   gameSessionExpirationSeconds: number
   updatedAtUtc?: string | null
@@ -655,6 +656,12 @@ function parseAllowedPlayerUsernames(rawValue: string): string[] {
     .filter(Boolean)
 }
 
+function generateSiteCosmeticsUploadSecret(): string {
+  const bytes = new Uint8Array(32)
+  crypto.getRandomValues(bytes)
+  return Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('')
+}
+
 const defaultServerForm: ServerForm = {
   profileId: '',
   name: '',
@@ -778,6 +785,7 @@ const defaultTwoFactorSettings: TwoFactorSettings = {
 const defaultSecuritySettings: SecuritySettings = {
   maxConcurrentGameAccountsPerDevice: 1,
   launcherAdminUsernames: [],
+  siteCosmeticsUploadSecret: '',
   gameSessionHeartbeatIntervalSeconds: 45,
   gameSessionExpirationSeconds: 150,
   updatedAtUtc: null,
@@ -3821,6 +3829,7 @@ function App() {
         body: JSON.stringify({
           maxConcurrentGameAccountsPerDevice: Math.max(1, Math.min(10, Number(securitySettings.maxConcurrentGameAccountsPerDevice) || 1)),
           launcherAdminUsernames: parseAllowedPlayerUsernames(launcherAdminUsernamesText),
+          siteCosmeticsUploadSecret: (securitySettings.siteCosmeticsUploadSecret || '').trim(),
         }),
       })
       setSecuritySettings(saved)
@@ -7003,6 +7012,37 @@ function App() {
                   <small className="muted">
                     Saved nicknames: {parseAllowedPlayerUsernames(launcherAdminUsernamesText).length}
                   </small>
+                </div>
+
+                <div className="action-block">
+                  <h4>Site cosmetics upload secret</h4>
+                  <small className="muted">
+                    This secret is used by your website when it uploads player skins and capes into launcher storage.
+                  </small>
+                  <input
+                    type="text"
+                    placeholder="Generate or paste a shared secret"
+                    value={securitySettings.siteCosmeticsUploadSecret}
+                    onChange={(event) =>
+                      setSecuritySettings((prev) => ({
+                        ...prev,
+                        siteCosmeticsUploadSecret: event.target.value,
+                      }))
+                    }
+                  />
+                  <div className="button-row">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setSecuritySettings((prev) => ({
+                          ...prev,
+                          siteCosmeticsUploadSecret: generateSiteCosmeticsUploadSecret(),
+                        }))
+                      }
+                    >
+                      Generate secret
+                    </button>
+                  </div>
                 </div>
 
                 <div className="action-block">

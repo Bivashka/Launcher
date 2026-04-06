@@ -139,6 +139,7 @@ public sealed class SecuritySettingsProvider(
         return new SecuritySettingsConfig(
             MaxConcurrentGameAccountsPerDevice: 0,
             LauncherAdminUsernames: [],
+            SiteCosmeticsUploadSecret: string.Empty,
             GameSessionHeartbeatIntervalSeconds: DefaultHeartbeatIntervalSeconds,
             GameSessionExpirationSeconds: DefaultExpirationSeconds,
             UpdatedAtUtc: null);
@@ -154,10 +155,16 @@ public sealed class SecuritySettingsProvider(
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Take(256)
             .ToArray();
+        var siteCosmeticsUploadSecret = (settings.SiteCosmeticsUploadSecret ?? string.Empty).Trim();
+        if (siteCosmeticsUploadSecret.Length > 256)
+        {
+            siteCosmeticsUploadSecret = siteCosmeticsUploadSecret[..256];
+        }
 
         return new SecuritySettingsConfig(
             MaxConcurrentGameAccountsPerDevice: Math.Clamp(settings.MaxConcurrentGameAccountsPerDevice, 0, 16),
             LauncherAdminUsernames: launcherAdminUsernames,
+            SiteCosmeticsUploadSecret: siteCosmeticsUploadSecret,
             GameSessionHeartbeatIntervalSeconds: heartbeatSeconds,
             GameSessionExpirationSeconds: expirationSeconds,
             UpdatedAtUtc: DateTime.UtcNow);

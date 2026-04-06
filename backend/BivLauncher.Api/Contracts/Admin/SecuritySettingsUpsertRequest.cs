@@ -4,4 +4,5 @@ public sealed class SecuritySettingsUpsertRequest
 {
     public int MaxConcurrentGameAccountsPerDevice { get; set; }
     public List<string> LauncherAdminUsernames { get; set; } = [];
+    public string SiteCosmeticsUploadSecret { get; set; } = string.Empty;
 }

@@ -33,6 +33,7 @@ public sealed class AdminSecuritySettingsController(
             {
                 MaxConcurrentGameAccountsPerDevice = request.MaxConcurrentGameAccountsPerDevice,
                 LauncherAdminUsernames = [.. request.LauncherAdminUsernames],
+                SiteCosmeticsUploadSecret = request.SiteCosmeticsUploadSecret,
                 UpdatedAtUtc = DateTime.UtcNow
             },
             cancellationToken);
@@ -47,6 +48,7 @@ public sealed class AdminSecuritySettingsController(
             {
                 saved.MaxConcurrentGameAccountsPerDevice,
                 saved.LauncherAdminUsernames,
+                hasSiteCosmeticsUploadSecret = !string.IsNullOrWhiteSpace(saved.SiteCosmeticsUploadSecret),
                 saved.GameSessionHeartbeatIntervalSeconds,
                 saved.GameSessionExpirationSeconds
             },
@@ -132,6 +134,7 @@ public sealed class AdminSecuritySettingsController(
         return new SecuritySettingsDto(
             config.MaxConcurrentGameAccountsPerDevice,
             config.LauncherAdminUsernames,
+            config.SiteCosmeticsUploadSecret,
             config.GameSessionHeartbeatIntervalSeconds,
             config.GameSessionExpirationSeconds,
             config.UpdatedAtUtc);
