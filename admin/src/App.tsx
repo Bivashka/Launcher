@@ -87,7 +87,6 @@ type LauncherBuildRequest = {
   releaseNotes: string
   outputName: string
 }
-type CosmeticUploadResponse = { account: string; key: string; url: string }
 type DiscordRpcConfig = {
   id: string
   scopeType: 'profile' | 'server'
@@ -1574,9 +1573,6 @@ function App() {
   const [runtimeCleanupResult, setRuntimeCleanupResult] = useState<RuntimeCleanupResponse | null>(null)
   const [brandingBackgroundFile, setBrandingBackgroundFile] = useState<File | null>(null)
   const [brandingIconFile, setBrandingIconFile] = useState<File | null>(null)
-  const [cosmeticsUser, setCosmeticsUser] = useState('')
-  const [skinFile, setSkinFile] = useState<File | null>(null)
-  const [capeFile, setCapeFile] = useState<File | null>(null)
   const [discordScopeType, setDiscordScopeType] = useState<'profile' | 'server'>('profile')
   const [discordScopeId, setDiscordScopeId] = useState('')
   const [discordRpcSettings, setDiscordRpcSettings] = useState<DiscordRpcSettings>(defaultDiscordRpcSettings)
@@ -4773,75 +4769,6 @@ function App() {
     }
   }
 
-  async function uploadCosmetic(cosmeticType: 'skins' | 'capes', file: File): Promise<CosmeticUploadResponse> {
-    if (!token) {
-      throw new Error('Missing admin token')
-    }
-
-    const user = cosmeticsUser.trim()
-    if (!user) {
-      throw new Error('Enter username or externalId first.')
-    }
-
-    const formData = new FormData()
-    formData.append('file', file)
-
-    const response = await fetch(`${apiBaseUrl}/api/admin/${cosmeticType}/${encodeURIComponent(user)}/upload`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-      body: formData,
-    })
-
-    if (!response.ok) {
-      const payload = (await response.json()) as ApiError
-      throw new Error(payload.error ?? `${cosmeticType} upload failed`)
-    }
-
-    return (await response.json()) as CosmeticUploadResponse
-  }
-
-  async function onUploadSkin() {
-    if (!skinFile) {
-      setError('Choose skin file first.')
-      return
-    }
-
-    setBusy(true)
-    setError('')
-    setNotice('')
-    try {
-      const uploaded = await uploadCosmetic('skins', skinFile)
-      setSkinFile(null)
-      setNotice(`Skin uploaded for ${uploaded.account}: ${uploaded.key}`)
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : 'Skin upload failed')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function onUploadCape() {
-    if (!capeFile) {
-      setError('Choose cape file first.')
-      return
-    }
-
-    setBusy(true)
-    setError('')
-    setNotice('')
-    try {
-      const uploaded = await uploadCosmetic('capes', capeFile)
-      setCapeFile(null)
-      setNotice(`Cape uploaded for ${uploaded.account}: ${uploaded.key}`)
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : 'Cape upload failed')
-    } finally {
-      setBusy(false)
-    }
-  }
-
   async function onSaveDiscordRpcSettings() {
     setBusy(true)
     setError('')
@@ -5220,9 +5147,6 @@ function App() {
     setServerLauncherJarFile(null)
     setServerLauncherJarStatus(defaultServerLauncherJarStatus)
     setServerLauncherJarBuildVersion(defaultServerLauncherJarBuildVersion)
-    setCosmeticsUser('')
-    setSkinFile(null)
-    setCapeFile(null)
     setDiscordScopeType('profile')
     setDiscordScopeId('')
     setDiscordForm(defaultDiscordForm)
@@ -5782,38 +5706,10 @@ function App() {
             </div>
             )}
 
-            {(activePage === 'build' || activePage === 'servers') && (
-            <div className={`grid-2 split-build-servers ${activePage === 'build' ? 'show-build' : 'show-servers'}`}>
+            {activePage === 'build' && (
+            <div className="grid-2 split-build-servers show-build">
               <section className="form form-small form-actions">
-                <h3>Скины / Плащи</h3>
-                <div className="action-block">
-                  <h4>Косметика игрока</h4>
-                  <input
-                    placeholder="Имя пользователя или ExternalId"
-                    value={cosmeticsUser}
-                    onChange={(event) => setCosmeticsUser(event.target.value)}
-                  />
-                <div className="upload-row">
-                  <input
-                    type="file"
-                    accept=".png,.jpg,.jpeg,.webp,.gif,.svg"
-                    onChange={(event) => setSkinFile(event.target.files?.[0] ?? null)}
-                  />
-                  <button type="button" onClick={onUploadSkin} disabled={busy || !token}>
-                    Загрузить скин
-                  </button>
-                </div>
-                <div className="upload-row">
-                  <input
-                    type="file"
-                    accept=".png,.jpg,.jpeg,.webp,.gif,.svg"
-                    onChange={(event) => setCapeFile(event.target.files?.[0] ?? null)}
-                  />
-                  <button type="button" onClick={onUploadCape} disabled={busy || !token}>
-                    Загрузить плащ
-                  </button>
-                </div>
-                </div>
+                <h3>Действия сборки</h3>
                 {activePage === 'build' && (
                 <div className="action-block">
                   <h4>Сборка лаунчера</h4>
@@ -6157,7 +6053,7 @@ function App() {
               </section>
 
               <section>
-                <h3>{activePage === 'servers' ? 'Серверы' : 'Список серверов'}</h3>
+                <h3>Список серверов</h3>
                 <ul className="list list-compact">
                   {servers.map((server) => (
                     <li key={server.id}>

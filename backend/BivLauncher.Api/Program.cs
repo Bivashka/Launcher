@@ -42,6 +42,7 @@ builder.Services.AddScoped<PasswordHasher<AdminUser>>();
 builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 builder.Services.AddScoped<IAdminAuditService, AdminAuditService>();
 builder.Services.AddScoped<IBuildPipelineService, BuildPipelineService>();
+builder.Services.AddScoped<IPlayerCosmeticsService, PlayerCosmeticsService>();
 builder.Services.AddSingleton<IBuildSourcesLayoutService, BuildSourcesLayoutService>();
 builder.Services.AddSingleton<ILauncherUpdateConfigProvider, LauncherUpdateConfigProvider>();
 builder.Services.AddScoped<IExternalAuthService, ExternalAuthService>();

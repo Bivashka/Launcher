@@ -13,12 +13,14 @@ public sealed class PublicCosmeticsController(
     IAssetUrlService assetUrlService) : ControllerBase
 {
     [HttpGet("skins/{user}")]
+    [HttpGet("/skins/{user}.png")]
     public Task<IActionResult> GetSkin(string user, CancellationToken cancellationToken)
     {
         return GetCosmetic(user, "skin", cancellationToken);
     }
 
     [HttpGet("capes/{user}")]
+    [HttpGet("/capes/{user}.png")]
     public Task<IActionResult> GetCape(string user, CancellationToken cancellationToken)
     {
         return GetCosmetic(user, "cape", cancellationToken);

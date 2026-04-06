@@ -87,12 +87,16 @@ Note: API now reads Postgres connection from `DB_CONN` (in `.env`) as the primar
 - `POST /api/public/auth/logout`
 - `GET /api/public/skins/{user}`
 - `GET /api/public/capes/{user}`
+- `GET /skins/{user}.png`
+- `GET /capes/{user}.png`
 - `POST /authserver/validate` (Yggdrasil compatibility alias set)
 - `POST /authserver/refresh` (Yggdrasil compatibility alias set)
 - `POST /session/minecraft/join` (Yggdrasil compatibility alias set)
 - `GET /session/minecraft/hasJoined` (Yggdrasil compatibility alias set)
 - `POST /api/admin/skins/{user}/upload`
 - `POST /api/admin/capes/{user}/upload`
+- `POST /api/site/skins/{user}/upload`
+- `POST /api/site/capes/{user}/upload`
 - `GET/PUT/DELETE /api/admin/discord-rpc/profile/{profileId}`
 - `GET/PUT/DELETE /api/admin/discord-rpc/server/{serverId}`
 - `GET/PUT /api/admin/settings/discord-rpc`
