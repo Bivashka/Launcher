@@ -311,7 +311,7 @@
 
                 <Grid Grid.Row="3"
                       ColumnDefinitions="*,*"
-                      RowDefinitions="Auto,Auto"
+                      RowDefinitions="Auto,Auto,Auto"
                       ColumnSpacing="8"
                       RowSpacing="8">
                   <Button Classes="accountActionButton"
@@ -323,6 +323,12 @@
                           Command="{Binding DeleteAccountCommand}"
                           IsVisible="{Binding HasStoredAccounts}" />
                   <Button Grid.Row="1"
+                          Grid.ColumnSpan="2"
+                          Classes="accountActionButton"
+                          Content="{Binding SwitchAccountButtonText}"
+                          Command="{Binding SwitchAccountCommand}"
+                          IsVisible="{Binding HasMultipleStoredAccounts}" />
+                  <Button Grid.Row="2"
                           Grid.ColumnSpan="2"
                           Classes="secondaryActionButton"
                           Content="{Binding LogoutButtonText}"

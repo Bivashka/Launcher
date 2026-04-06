@@ -177,6 +177,114 @@ public sealed class PublicAuthControllerTests
     }
 
     [Fact]
+    public async Task ReportSecurityViolation_WhenPlayerSessionIsValid_CreatesTimedHardwareBan()
+    {
+        await using var fixture = await TestFixture.CreateAsync();
+        var loginController = CreateController(fixture.DbContext, minClientVersion: "1.0.0");
+        loginController.ControllerContext.HttpContext.Request.Headers["X-BivLauncher-Client"] = "BivLauncher.Client/1.2.3";
+
+        var loginResult = await loginController.Login(
+            new PublicAuthLoginRequest
+            {
+                Username = "tamper-player",
+                Password = "secret",
+                HwidFingerprint = "hwid-42",
+                DeviceUserName = "pc-42"
+            },
+            CancellationToken.None);
+
+        var loginOk = Assert.IsType<OkObjectResult>(loginResult.Result);
+        var loginPayload = Assert.IsType<PublicAuthLoginResponse>(loginOk.Value);
+        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(loginPayload.Token);
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(jwt.Claims, "Bearer"));
+
+        var controller = CreateController(fixture.DbContext, minClientVersion: "1.0.0");
+        controller.ControllerContext.HttpContext.User = principal;
+        controller.ControllerContext.HttpContext.Request.Headers["X-BivLauncher-Client"] = "BivLauncher.Client/1.2.3";
+
+        var response = await controller.ReportSecurityViolation(
+            new PublicSecurityViolationReportRequest
+            {
+                Reason = "Suspicious module detected",
+                Evidence = "javaw:frida-agent.dll",
+                HwidFingerprint = "hwid-42",
+                DeviceUserName = "pc-42"
+            },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(response.Result);
+        var payload = Assert.IsType<PublicSecurityViolationReportResponse>(ok.Value);
+        Assert.True(payload.Banned);
+        Assert.False(payload.Exempt);
+        Assert.NotNull(payload.ExpiresAtUtc);
+
+        var account = await fixture.DbContext.AuthAccounts.SingleAsync(x => x.Username == "tamper-player");
+        Assert.Equal(1, account.SessionVersion);
+
+        var ban = await fixture.DbContext.HardwareBans.SingleAsync(x => x.AccountId == account.Id);
+        Assert.Equal("hwid-42", ban.HwidHash);
+        Assert.Equal("pc-42", ban.DeviceUserName);
+        Assert.Equal(payload.ExpiresAtUtc, ban.ExpiresAtUtc);
+    }
+
+    [Fact]
+    public async Task ReportSecurityViolation_WhenAdminSessionIsValid_ReturnsExemptWithoutBan()
+    {
+        await using var fixture = await TestFixture.CreateAsync();
+        var securitySettings = new StubSecuritySettingsProvider(new SecuritySettingsConfig(
+            MaxConcurrentGameAccountsPerDevice: 1,
+            LauncherAdminUsernames: ["admin-player"],
+            GameSessionHeartbeatIntervalSeconds: 45,
+            GameSessionExpirationSeconds: 150,
+            UpdatedAtUtc: null));
+
+        var loginController = CreateController(
+            fixture.DbContext,
+            minClientVersion: "1.0.0",
+            securitySettingsProvider: securitySettings);
+        loginController.ControllerContext.HttpContext.Request.Headers["X-BivLauncher-Client"] = "BivLauncher.Client/1.2.3";
+
+        var loginResult = await loginController.Login(
+            new PublicAuthLoginRequest
+            {
+                Username = "admin-player",
+                Password = "secret",
+                HwidFingerprint = "admin-hwid",
+                DeviceUserName = "admin-pc"
+            },
+            CancellationToken.None);
+
+        var loginOk = Assert.IsType<OkObjectResult>(loginResult.Result);
+        var loginPayload = Assert.IsType<PublicAuthLoginResponse>(loginOk.Value);
+        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(loginPayload.Token);
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(jwt.Claims, "Bearer"));
+
+        var controller = CreateController(
+            fixture.DbContext,
+            minClientVersion: "1.0.0",
+            securitySettingsProvider: securitySettings);
+        controller.ControllerContext.HttpContext.User = principal;
+        controller.ControllerContext.HttpContext.Request.Headers["X-BivLauncher-Client"] = "BivLauncher.Client/1.2.3";
+
+        var response = await controller.ReportSecurityViolation(
+            new PublicSecurityViolationReportRequest
+            {
+                Reason = "Debugger attached",
+                Evidence = "Debugger.IsAttached",
+                HwidFingerprint = "admin-hwid",
+                DeviceUserName = "admin-pc"
+            },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(response.Result);
+        var payload = Assert.IsType<PublicSecurityViolationReportResponse>(ok.Value);
+        Assert.False(payload.Banned);
+        Assert.True(payload.Exempt);
+        Assert.Null(payload.ExpiresAtUtc);
+        Assert.Equal(0, await fixture.DbContext.HardwareBans.CountAsync());
+    }
+
+    [Fact]
     public async Task Logout_WhenTokenIsValid_RevokesSessionVersion()
     {
         await using var fixture = await TestFixture.CreateAsync();
@@ -275,6 +383,10 @@ public sealed class PublicAuthControllerTests
             new JwtTokenService(Microsoft.Extensions.Options.Options.Create(BuildJwtOptions())),
             new StubTwoFactorService(),
             securitySettingsProvider ?? new StubSecuritySettingsProvider(),
+            new AdminAuditService(
+                dbContext,
+                new HttpContextAccessor(),
+                NullLogger<AdminAuditService>.Instance),
             NullLogger<PublicAuthController>.Instance)
         {
             ControllerContext = new ControllerContext

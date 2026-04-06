@@ -50,6 +50,7 @@ public sealed class GameLaunchService(
         GameLaunchRoute route,
         string instanceDirectory,
         Action<string> onProcessLine,
+        Action<int>? onProcessStarted = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(route.Address))
@@ -221,6 +222,7 @@ public sealed class GameLaunchService(
 
         logService.LogInfo($"Process started: {startInfo.FileName} {BuildArgsPreview(startInfo.ArgumentList)}");
         logService.LogInfo($"Process id: {process.Id}");
+        onProcessStarted?.Invoke(process.Id);
 
         using var cancellationRegistration = cancellationToken.Register(() =>
         {

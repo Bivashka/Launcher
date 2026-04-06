@@ -27,6 +27,7 @@ public partial class MainWindowViewModel : ViewModelBase
 {
     private readonly ISettingsService _settingsService;
     private readonly ILauncherApiService _launcherApiService;
+    private readonly ILauncherTamperMonitor _launcherTamperMonitor;
     private readonly IManifestInstallerService _manifestInstallerService;
     private readonly IGameLaunchService _gameLaunchService;
     private readonly IDiscordRpcService _discordRpcService;
@@ -40,12 +41,16 @@ public partial class MainWindowViewModel : ViewModelBase
     private readonly Queue<string> _liveLogLines = new();
     private readonly SemaphoreSlim _serverOnlineRefreshLock = new(1, 1);
     private readonly object _assetCacheSyncRoot = new();
+    private readonly object _tamperMonitorSyncRoot = new();
     private readonly DispatcherTimer _serverOnlineRefreshTimer;
+    private readonly DispatcherTimer _tamperMonitorTimer;
+    private readonly HashSet<int> _monitoredGameProcessIds = [];
     private const int MaxLiveLogLines = 500;
     private const int ServerOnlineTimeoutMs = 3500;
     private static readonly TimeSpan PendingSubmissionFlushTimeout = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan PendingSubmissionSendTimeout = TimeSpan.FromSeconds(6);
     private static readonly TimeSpan ServerOnlineRefreshInterval = TimeSpan.FromSeconds(25);
+    private static readonly TimeSpan TamperMonitorInterval = TimeSpan.FromSeconds(3);
     private const string LocalFallbackApiBaseUrl = "http://localhost:8080";
     private const string LauncherApiBaseUrlEnvVar = "BIVLAUNCHER_API_BASE_URL";
     private const string LauncherApiBaseUrlRuEnvVar = "BIVLAUNCHER_API_BASE_URL_RU";
@@ -77,12 +82,16 @@ public partial class MainWindowViewModel : ViewModelBase
     private DateTime _lastServerOnlineRefreshUtc;
     private Avalonia.Controls.WindowIcon? _defaultWindowIcon;
     private int _busyOperationCount;
+    private int _storedAccountSelectionVersion;
+    private bool _suppressStoredAccountSelectionHandling;
+    private bool _tamperViolationInProgress;
 
     private LauncherSettings _settings = new();
 
     public MainWindowViewModel(
         ISettingsService settingsService,
         ILauncherApiService launcherApiService,
+        ILauncherTamperMonitor launcherTamperMonitor,
         IManifestInstallerService manifestInstallerService,
         IGameLaunchService gameLaunchService,
         IDiscordRpcService discordRpcService,
@@ -92,6 +101,7 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         _settingsService = settingsService;
         _launcherApiService = launcherApiService;
+        _launcherTamperMonitor = launcherTamperMonitor;
         _manifestInstallerService = manifestInstallerService;
         _gameLaunchService = gameLaunchService;
         _discordRpcService = discordRpcService;
@@ -143,6 +153,12 @@ public partial class MainWindowViewModel : ViewModelBase
             Interval = ServerOnlineRefreshInterval
         };
         _serverOnlineRefreshTimer.Tick += async (_, _) => await RefreshServerOnlineStatusesAsync();
+
+        _tamperMonitorTimer = new DispatcherTimer
+        {
+            Interval = TamperMonitorInterval
+        };
+        _tamperMonitorTimer.Tick += async (_, _) => await MonitorTamperStateAsync();
 
         _logService.LineAdded += OnLogLineAdded;
     }
@@ -870,7 +886,18 @@ public partial class MainWindowViewModel : ViewModelBase
             PlayerUsername = value?.Username?.Trim() ?? string.Empty;
             PlayerPassword = string.Empty;
             ResetTwoFactorState();
+            return;
         }
+
+        if (_suppressStoredAccountSelectionHandling ||
+            value is null ||
+            IsStoredAccountCurrentlyActive(value))
+        {
+            return;
+        }
+
+        var selectionVersion = ++_storedAccountSelectionVersion;
+        _ = TrySwitchSelectedStoredAccountAsync(value, selectionVersion);
     }
 
     private void RelocalizeServerOnlineStatuses()
@@ -1742,6 +1769,7 @@ public partial class MainWindowViewModel : ViewModelBase
         Exception? launchException = null;
         var occurredAtUtc = DateTime.UtcNow;
         var busyReleasedForGameSession = false;
+        var launchedProcessId = 0;
 
         EnterBusyOperation();
         try
@@ -1828,12 +1856,21 @@ public partial class MainWindowViewModel : ViewModelBase
                             BuildSettingsSnapshot(includeRuntimeAuthSnapshot: true),
                             launchRoute,
                             installResult.InstanceDirectory,
-                            line => _logService.LogInfo(line)),
+                            line => _logService.LogInfo(line),
+                            processId =>
+                            {
+                                launchedProcessId = processId;
+                                Dispatcher.UIThread.Post(() => RegisterMonitoredGameProcess(processId));
+                            }),
                     CancellationToken.None);
             }
             finally
             {
                 IsGameSessionActive = false;
+                if (launchedProcessId > 0)
+                {
+                    UnregisterMonitoredGameProcess(launchedProcessId);
+                }
                 gameSessionHeartbeatCts.Cancel();
                 try
                 {
@@ -2506,6 +2543,24 @@ public partial class MainWindowViewModel : ViewModelBase
         });
     }
 
+    private async Task TrySwitchSelectedStoredAccountAsync(StoredPlayerAccount account, int selectionVersion)
+    {
+        await Task.Yield();
+
+        if (_suppressStoredAccountSelectionHandling ||
+            selectionVersion != _storedAccountSelectionVersion ||
+            !IsPlayerLoggedIn ||
+            IsBusy ||
+            SelectedStoredAccount is null ||
+            !string.Equals(SelectedStoredAccount.Username, account.Username, StringComparison.OrdinalIgnoreCase) ||
+            IsStoredAccountCurrentlyActive(SelectedStoredAccount))
+        {
+            return;
+        }
+
+        await SwitchAccountAsync();
+    }
+
     private async Task LogoutAsync()
     {
         await RunBusyAsync(async () =>
@@ -3011,6 +3066,186 @@ public partial class MainWindowViewModel : ViewModelBase
         }
     }
 
+    private async Task MonitorTamperStateAsync()
+    {
+        if (_tamperViolationInProgress ||
+            !IsPlayerLoggedIn ||
+            HasAdministrativeRole(_playerAuthRoles))
+        {
+            return;
+        }
+
+        TamperDetectionResult? detection;
+        try
+        {
+            detection = _launcherTamperMonitor.Inspect(GetTamperMonitoredProcessIds());
+        }
+        catch (Exception ex)
+        {
+            _logService.LogInfo($"Tamper monitor warning: {ex.Message}");
+            return;
+        }
+
+        if (detection is null)
+        {
+            return;
+        }
+
+        await HandleTamperDetectionAsync(detection);
+    }
+
+    private int[] GetTamperMonitoredProcessIds()
+    {
+        lock (_tamperMonitorSyncRoot)
+        {
+            return _monitoredGameProcessIds
+                .Where(x => x > 0)
+                .Distinct()
+                .ToArray();
+        }
+    }
+
+    private void RegisterMonitoredGameProcess(int processId)
+    {
+        if (processId <= 0)
+        {
+            return;
+        }
+
+        lock (_tamperMonitorSyncRoot)
+        {
+            _monitoredGameProcessIds.Add(processId);
+        }
+
+        UpdateTamperMonitorState();
+    }
+
+    private void UnregisterMonitoredGameProcess(int processId)
+    {
+        if (processId <= 0)
+        {
+            return;
+        }
+
+        lock (_tamperMonitorSyncRoot)
+        {
+            _monitoredGameProcessIds.Remove(processId);
+        }
+    }
+
+    private void UpdateTamperMonitorState()
+    {
+        if (IsPlayerLoggedIn && !HasAdministrativeRole(_playerAuthRoles) && !_tamperViolationInProgress)
+        {
+            if (!_tamperMonitorTimer.IsEnabled)
+            {
+                _tamperMonitorTimer.Start();
+            }
+
+            return;
+        }
+
+        if (_tamperMonitorTimer.IsEnabled)
+        {
+            _tamperMonitorTimer.Stop();
+        }
+
+        lock (_tamperMonitorSyncRoot)
+        {
+            _monitoredGameProcessIds.Clear();
+        }
+    }
+
+    private async Task HandleTamperDetectionAsync(TamperDetectionResult detection)
+    {
+        if (_tamperViolationInProgress)
+        {
+            return;
+        }
+
+        _tamperViolationInProgress = true;
+        UpdateTamperMonitorState();
+        ClearBanNotice();
+
+        StatusText = _languageCode == "en"
+            ? "Security violation detected. Launcher is closing."
+            : "Обнаружено вмешательство в лаунчер. Лаунчер будет закрыт.";
+        _logService.LogInfo($"Security violation detected: {detection.Reason} Evidence: {detection.Evidence}");
+
+        try
+        {
+            await ReportSecurityViolationAsync(detection);
+        }
+        catch (Exception ex)
+        {
+            _logService.LogInfo($"Security violation report warning: {ex.Message}");
+        }
+
+        CloseMonitoredGameProcesses();
+        await ShutdownLauncherAsync();
+    }
+
+    private async Task ReportSecurityViolationAsync(TamperDetectionResult detection)
+    {
+        if (string.IsNullOrWhiteSpace(_playerAuthToken))
+        {
+            return;
+        }
+
+        var response = await ExecuteAgainstApiFailoverAsync(
+            candidate => _launcherApiService.ReportSecurityViolationAsync(
+                candidate,
+                _playerAuthToken,
+                _playerAuthTokenType,
+                new PublicSecurityViolationReportRequest
+                {
+                    Reason = detection.Reason,
+                    Evidence = detection.Evidence,
+                    HwidFingerprint = ComputeHwidFingerprint(),
+                    DeviceUserName = ComputeDeviceUserName()
+                }),
+            preferredApiBaseUrl: ResolvePreferredPlayerApiBaseUrl(),
+            persistSuccess: false);
+
+        if (response.Banned)
+        {
+            _logService.LogInfo(
+                $"Security violation report accepted. Ban active until {response.ExpiresAtUtc:O}. Reason: {response.Reason}");
+        }
+    }
+
+    private void CloseMonitoredGameProcesses()
+    {
+        foreach (var processId in GetTamperMonitoredProcessIds())
+        {
+            try
+            {
+                using var process = Process.GetProcessById(processId);
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    private async Task ShutdownLauncherAsync()
+    {
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+            {
+                desktop.Shutdown();
+                return;
+            }
+
+            Environment.Exit(0);
+        });
+    }
+
     private void SetAuthenticatedPlayerSession(
         string token,
         string tokenType,
@@ -3054,6 +3289,7 @@ public partial class MainWindowViewModel : ViewModelBase
         PlayerUsername = normalizedUsername;
         AuthStatusText = F("status.loggedInAs", normalizedUsername, string.Join(", ", _playerAuthRoles));
         NotifyAccountPresentationChanged();
+        UpdateTamperMonitorState();
     }
 
     private async Task RefreshPlayerCosmeticsAsync(string username)
@@ -3092,6 +3328,7 @@ public partial class MainWindowViewModel : ViewModelBase
         _playerAuthApiBaseUrl = string.Empty;
         PlayerLoggedInAs = string.Empty;
         NotifyAccountPresentationChanged();
+        UpdateTamperMonitorState();
     }
 
     private static List<string> NormalizePlayerRoles(IEnumerable<string>? roles)
@@ -3230,7 +3467,15 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private void SetSelectedStoredAccount(StoredPlayerAccount? account)
     {
-        SelectedStoredAccount = account;
+        _suppressStoredAccountSelectionHandling = true;
+        try
+        {
+            SelectedStoredAccount = account;
+        }
+        finally
+        {
+            _suppressStoredAccountSelectionHandling = false;
+        }
     }
 
     private void ResetTwoFactorState()
@@ -3335,6 +3580,7 @@ public partial class MainWindowViewModel : ViewModelBase
         OnPropertyChanged(nameof(ServerMonitoringText));
         NotifyAccountPresentationChanged();
         NotifyLauncherHeaderPresentationChanged();
+        UpdateTamperMonitorState();
 
         if (!value)
         {

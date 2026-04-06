@@ -55,3 +55,19 @@ public sealed class PublicGameSessionStopRequest
 {
     public Guid SessionId { get; set; }
 }
+
+public sealed class PublicSecurityViolationReportRequest
+{
+    public string Reason { get; set; } = string.Empty;
+    public string Evidence { get; set; } = string.Empty;
+    public string HwidFingerprint { get; set; } = string.Empty;
+    public string DeviceUserName { get; set; } = string.Empty;
+}
+
+public sealed class PublicSecurityViolationReportResponse
+{
+    public bool Banned { get; set; }
+    public bool Exempt { get; set; }
+    public DateTime? ExpiresAtUtc { get; set; }
+    public string Reason { get; set; } = string.Empty;
+}

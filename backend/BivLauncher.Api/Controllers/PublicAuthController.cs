@@ -25,6 +25,7 @@ public sealed class PublicAuthController(
     IJwtTokenService jwtTokenService,
     ITwoFactorService twoFactorService,
     ISecuritySettingsProvider securitySettingsProvider,
+    IAdminAuditService auditService,
     ILogger<PublicAuthController> logger) : ControllerBase
 {
     private const string LauncherVerifiedClaimType = "launcher_verified";
@@ -357,6 +358,123 @@ public sealed class PublicAuthController(
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return NoContent();
+    }
+
+    [Authorize]
+    [HttpPost("security-violation")]
+    public async Task<ActionResult<PublicSecurityViolationReportResponse>> ReportSecurityViolation(
+        [FromBody] PublicSecurityViolationReportRequest request,
+        CancellationToken cancellationToken)
+    {
+        var (account, errorResult) = await ResolveAuthorizedAccountForCurrentRequestAsync(cancellationToken);
+        if (errorResult is not null)
+        {
+            return errorResult;
+        }
+
+        if (User.IsInRole("admin") || User.IsInRole("administrator"))
+        {
+            return Ok(new PublicSecurityViolationReportResponse(
+                Banned: false,
+                Exempt: true,
+                ExpiresAtUtc: null,
+                Reason: "Administrative accounts are exempt from launcher anti-tamper auto-ban."));
+        }
+
+        var normalizedReason = NormalizeSecurityViolationReason(request.Reason);
+        var normalizedEvidence = NormalizeSecurityViolationEvidence(request.Evidence);
+        var normalizedDeviceUserName = NormalizeDeviceUserName(
+            string.IsNullOrWhiteSpace(request.DeviceUserName)
+                ? account!.DeviceUserName
+                : request.DeviceUserName);
+        var normalizedHwidHash = NormalizeHwidHash(account!.HwidHash);
+        var hwidFingerprint = hardwareFingerprintService.NormalizeLegacyHash(request.HwidFingerprint);
+        if (!string.IsNullOrWhiteSpace(hwidFingerprint))
+        {
+            if (!hardwareFingerprintService.TryComputeHwidHash(hwidFingerprint, out normalizedHwidHash, out var hwidError))
+            {
+                return StatusCode(StatusCodes.Status500InternalServerError, new { error = hwidError });
+            }
+
+            normalizedHwidHash = NormalizeHwidHash(normalizedHwidHash);
+        }
+
+        if (string.IsNullOrWhiteSpace(normalizedHwidHash) && string.IsNullOrWhiteSpace(normalizedDeviceUserName))
+        {
+            return BadRequest(new { error = "Device identity is required for security violation ban." });
+        }
+
+        var now = DateTime.UtcNow;
+        var activeBan = await dbContext.HardwareBans
+            .AsNoTracking()
+            .Where(x =>
+                (x.AccountId == account.Id ||
+                 (!string.IsNullOrWhiteSpace(normalizedHwidHash) && x.HwidHash == normalizedHwidHash) ||
+                 (!string.IsNullOrWhiteSpace(normalizedDeviceUserName) && x.DeviceUserName == normalizedDeviceUserName)) &&
+                (x.ExpiresAtUtc == null || x.ExpiresAtUtc > now))
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (activeBan is not null)
+        {
+            return Ok(new PublicSecurityViolationReportResponse(
+                Banned: true,
+                Exempt: false,
+                ExpiresAtUtc: activeBan.ExpiresAtUtc,
+                Reason: activeBan.Reason));
+        }
+
+        var banReason = $"Launcher anti-tamper: {normalizedReason}";
+        var expiresAtUtc = now.AddDays(30);
+
+        account.SessionVersion++;
+        account.UpdatedAtUtc = now;
+        if (!string.IsNullOrWhiteSpace(normalizedHwidHash))
+        {
+            account.HwidHash = normalizedHwidHash;
+        }
+
+        if (!string.IsNullOrWhiteSpace(normalizedDeviceUserName))
+        {
+            account.DeviceUserName = normalizedDeviceUserName;
+        }
+
+        var ban = new HardwareBan
+        {
+            AccountId = account.Id,
+            HwidHash = normalizedHwidHash,
+            DeviceUserName = normalizedDeviceUserName,
+            Reason = banReason,
+            CreatedAtUtc = now,
+            ExpiresAtUtc = expiresAtUtc
+        };
+
+        dbContext.HardwareBans.Add(ban);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        await auditService.WriteAsync(
+            action: "security.violation.report",
+            actor: account.Username,
+            entityType: "ban",
+            entityId: ban.Id.ToString(),
+            details: new
+            {
+                accountId = account.Id,
+                account.Username,
+                account.ExternalId,
+                account.SessionVersion,
+                hwidHash = normalizedHwidHash,
+                deviceUserName = normalizedDeviceUserName,
+                normalizedReason,
+                normalizedEvidence,
+                expiresAtUtc
+            },
+            cancellationToken: cancellationToken);
+
+        return Ok(new PublicSecurityViolationReportResponse(
+            Banned: true,
+            Exempt: false,
+            ExpiresAtUtc: expiresAtUtc,
+            Reason: banReason));
     }
 
     [HttpPost("login")]
@@ -1026,6 +1144,28 @@ public sealed class PublicAuthController(
         }
 
         return new string(rawCode.Where(char.IsDigit).ToArray());
+    }
+
+    private static string NormalizeSecurityViolationReason(string? rawReason)
+    {
+        if (string.IsNullOrWhiteSpace(rawReason))
+        {
+            return "unspecified violation";
+        }
+
+        var normalized = rawReason.Trim();
+        return normalized.Length > 256 ? normalized[..256] : normalized;
+    }
+
+    private static string NormalizeSecurityViolationEvidence(string? rawEvidence)
+    {
+        if (string.IsNullOrWhiteSpace(rawEvidence))
+        {
+            return string.Empty;
+        }
+
+        var normalized = rawEvidence.Trim();
+        return normalized.Length > 2048 ? normalized[..2048] : normalized;
     }
 
     private static string NormalizeDeviceUserName(string? rawDeviceUserName)

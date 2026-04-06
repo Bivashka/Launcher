@@ -41,6 +41,12 @@ public interface ILauncherApiService
         string tokenType,
         Guid sessionId,
         CancellationToken cancellationToken = default);
+    Task<PublicSecurityViolationReportResponse> ReportSecurityViolationAsync(
+        string apiBaseUrl,
+        string accessToken,
+        string tokenType,
+        PublicSecurityViolationReportRequest request,
+        CancellationToken cancellationToken = default);
     Task<bool> HasSkinAsync(string apiBaseUrl, string username, CancellationToken cancellationToken = default);
     Task<bool> HasCapeAsync(string apiBaseUrl, string username, CancellationToken cancellationToken = default);
     Task<LauncherManifest> GetManifestAsync(

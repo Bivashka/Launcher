@@ -234,6 +234,34 @@ public sealed class LauncherApiService : ILauncherApiService
         throw CreateApiException("Game session stop", response, body);
     }
 
+    public async Task<PublicSecurityViolationReportResponse> ReportSecurityViolationAsync(
+        string apiBaseUrl,
+        string accessToken,
+        string tokenType,
+        PublicSecurityViolationReportRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var token = accessToken.Trim();
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            throw new InvalidOperationException("Session token is required.");
+        }
+
+        var uri = BuildUri(apiBaseUrl, "/api/public/auth/security-violation");
+        using var response = await SendWithRetryAsync(
+            () => BuildAuthorizedJsonPostRequest(uri, token, tokenType, request),
+            cancellationToken);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw CreateApiException("Security violation report", response, body);
+        }
+
+        var payload = JsonSerializer.Deserialize<PublicSecurityViolationReportResponse>(body, JsonOptions);
+        return payload ?? throw new InvalidOperationException("Security violation response is empty.");
+    }
+
     public Task<bool> HasSkinAsync(string apiBaseUrl, string username, CancellationToken cancellationToken = default)
     {
         return CheckResourceExistsAsync(apiBaseUrl, $"/api/public/skins/{Uri.EscapeDataString(username)}", cancellationToken);

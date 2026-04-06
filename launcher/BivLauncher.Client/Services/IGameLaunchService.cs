@@ -10,5 +10,6 @@ public interface IGameLaunchService
         GameLaunchRoute route,
         string instanceDirectory,
         Action<string> onProcessLine,
+        Action<int>? onProcessStarted = null,
         CancellationToken cancellationToken = default);
 }
