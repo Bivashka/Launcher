@@ -85,7 +85,8 @@ public sealed class LauncherUpdateService(
             throw new FileNotFoundException("Launcher executable path not found.", normalizedExecutablePath);
         }
 
-        var targetDirectory = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var targetDirectory = (Path.GetDirectoryName(normalizedExecutablePath) ?? AppContext.BaseDirectory)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         var updateDirectory = Path.Combine(settingsService.GetUpdatesDirectory(), "runtime");
         Directory.CreateDirectory(updateDirectory);
 
@@ -175,6 +176,13 @@ param(
     [Parameter(Mandatory = $true)][string]$ExePath
 )
 $ErrorActionPreference = 'Stop'
+$logPath = Join-Path ([System.IO.Path]::GetDirectoryName($PackagePath)) "apply-update.log"
+function Write-Log {
+    param([string]$Message)
+    $timestamp = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss.fff")
+    Add-Content -Path $logPath -Value "[$timestamp] $Message"
+}
+Write-Log "Update apply started. TargetDir='$TargetDir' PackagePath='$PackagePath' ExePath='$ExePath' ProcessId=$ProcessId"
 $deadline = (Get-Date).AddMinutes(3)
 while ($true) {
     $running = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
@@ -182,19 +190,45 @@ while ($true) {
     if ((Get-Date) -gt $deadline) { break }
     Start-Sleep -Milliseconds 500
 }
+Write-Log "Wait loop completed."
 $extractRoot = Join-Path ([System.IO.Path]::GetDirectoryName($PackagePath)) "extracted"
 if (Test-Path $extractRoot) {
     Remove-Item -Path $extractRoot -Recurse -Force
+    Write-Log "Previous extracted directory removed: $extractRoot"
 }
 Expand-Archive -Path $PackagePath -DestinationPath $extractRoot -Force
+Write-Log "Archive extracted to '$extractRoot'."
 $sourceRoot = $extractRoot
-$children = Get-ChildItem -Path $extractRoot -Force
-if ($children.Count -eq 1 -and $children[0].PSIsContainer) {
-    $sourceRoot = $children[0].FullName
+$expectedExeName = [System.IO.Path]::GetFileName($ExePath)
+$expectedExe = Get-ChildItem -Path $extractRoot -Filter $expectedExeName -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($expectedExe) {
+    $sourceRoot = $expectedExe.Directory.FullName
+    Write-Log "Detected source root by matching exe: '$sourceRoot'."
+}
+else {
+    $children = Get-ChildItem -Path $extractRoot -Force
+    if ($children.Count -eq 1 -and $children[0].PSIsContainer) {
+        $sourceRoot = $children[0].FullName
+        Write-Log "Detected source root by single child directory: '$sourceRoot'."
+    }
+    else {
+        Write-Log "Using extract root as source root: '$sourceRoot'."
+    }
+}
+if (-not (Test-Path $TargetDir)) {
+    New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
+    Write-Log "Created target directory '$TargetDir'."
 }
 Copy-Item -Path (Join-Path $sourceRoot '*') -Destination $TargetDir -Recurse -Force
+Write-Log "Files copied from '$sourceRoot' to '$TargetDir'."
 Start-Sleep -Milliseconds 300
-Start-Process -FilePath $ExePath -WorkingDirectory $TargetDir
+$targetExePath = Join-Path $TargetDir $expectedExeName
+if (-not (Test-Path $targetExePath)) {
+    throw "Updated launcher executable was not found after copy: $targetExePath"
+}
+Write-Log "Launching updated executable '$targetExePath'."
+Start-Process -FilePath $targetExePath -WorkingDirectory $TargetDir
+Write-Log "Update apply finished successfully."
 """;
     }
 }
