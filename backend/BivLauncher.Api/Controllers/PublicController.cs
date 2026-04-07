@@ -6,7 +6,6 @@ using BivLauncher.Api.Infrastructure;
 using BivLauncher.Api.Options;
 using BivLauncher.Api.Services;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using System.Collections.Concurrent;
@@ -251,20 +250,18 @@ public sealed class PublicController(
             return NotFound(new { error = "Manifest file not found in object storage." });
         }
 
-        var manifestAssetUrl = BuildPublicAssetPath(manifestKey);
-        if (string.IsNullOrWhiteSpace(manifestAssetUrl))
-        {
-            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Manifest asset URL could not be resolved." });
-        }
-
         Response.Headers.CacheControl = "no-store, no-cache, must-revalidate";
         Response.Headers.Pragma = "no-cache";
         Response.Headers.Expires = "0";
+        if (!string.IsNullOrWhiteSpace(profile.LatestBuildId))
+        {
+            Response.Headers["X-Build-Id"] = profile.LatestBuildId.Trim();
+        }
 
-        var versionedManifestUrl = string.IsNullOrWhiteSpace(profile.LatestBuildId)
-            ? manifestAssetUrl
-            : QueryHelpers.AddQueryString(manifestAssetUrl, "build", profile.LatestBuildId.Trim());
-        return LocalRedirect(versionedManifestUrl);
+        var contentType = string.IsNullOrWhiteSpace(storedObject.ContentType)
+            ? "application/json"
+            : storedObject.ContentType;
+        return File(storedObject.Data, contentType);
     }
 
     private async Task<string> ResolvePublishedManifestKeyAsync(

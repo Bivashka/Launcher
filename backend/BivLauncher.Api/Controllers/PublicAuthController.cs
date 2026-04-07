@@ -5,7 +5,6 @@ using BivLauncher.Api.Infrastructure;
 using BivLauncher.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using System.Collections.Concurrent;
 using System.Security.Claims;
@@ -15,7 +14,6 @@ using System.Text;
 namespace BivLauncher.Api.Controllers;
 
 [ApiController]
-[EnableRateLimiting(RateLimitPolicies.PublicLoginPolicy)]
 [Route("api/public/auth")]
 public sealed class PublicAuthController(
     AppDbContext dbContext,

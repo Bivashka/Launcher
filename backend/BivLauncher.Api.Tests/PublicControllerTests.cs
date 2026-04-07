@@ -116,7 +116,7 @@ public sealed class PublicControllerTests
     }
 
     [Fact]
-    public async Task Manifest_WhenProfileIsPrivateAndUserIsAllowlisted_ReturnsRedirectToManifestAsset()
+    public async Task Manifest_WhenProfileIsPrivateAndUserIsAllowlisted_ReturnsManifestPayload()
     {
         await using var fixture = await TestFixture.CreateAsync();
         await fixture.SeedManifestAsync("private", isPrivate: true, allowedPlayerUsernames: "tester");
@@ -125,12 +125,15 @@ public sealed class PublicControllerTests
 
         var response = await controller.Manifest("private", CancellationToken.None);
 
-        var redirect = Assert.IsType<RedirectResult>(response);
-        Assert.Equal("https://cdn.local/manifests/private.json?build=build-private", redirect.Url);
+        var file = Assert.IsType<FileContentResult>(response);
+        Assert.Equal("application/json", file.ContentType);
+        var manifest = JsonSerializer.Deserialize<LauncherManifest>(file.FileContents);
+        Assert.NotNull(manifest);
+        Assert.Equal("private", manifest!.ProfileSlug);
     }
 
     [Fact]
-    public async Task Manifest_RedirectsToVersionedManifestAssetUrl()
+    public async Task Manifest_ReturnsVersionedManifestPayload()
     {
         await using var fixture = await TestFixture.CreateAsync();
         await fixture.SeedManifestAsync(
@@ -149,8 +152,11 @@ public sealed class PublicControllerTests
         var controller = fixture.CreateController();
         var response = await controller.Manifest("public", CancellationToken.None);
 
-        var redirect = Assert.IsType<RedirectResult>(response);
-        Assert.Equal("https://cdn.local/manifests/public.json?build=build-public", redirect.Url);
+        var file = Assert.IsType<FileContentResult>(response);
+        Assert.Equal("application/json", file.ContentType);
+        var manifest = JsonSerializer.Deserialize<LauncherManifest>(file.FileContents);
+        Assert.NotNull(manifest);
+        Assert.Equal("build-public", manifest!.BuildId);
     }
 
     [Fact]
