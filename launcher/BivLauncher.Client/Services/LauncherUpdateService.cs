@@ -1,5 +1,7 @@
 using System.Diagnostics;
+using System.Net;
 using System.Net.Http.Headers;
+using System.Reflection;
 using System.Text;
 
 namespace BivLauncher.Client.Services;
@@ -8,6 +10,14 @@ public sealed class LauncherUpdateService(
     ISettingsService settingsService,
     ILogService logService) : ILauncherUpdateService
 {
+    private const string LauncherApiBaseUrlEnvVar = "BIVLAUNCHER_API_BASE_URL";
+    private const string LauncherApiBaseUrlRuEnvVar = "BIVLAUNCHER_API_BASE_URL_RU";
+    private const string LauncherApiBaseUrlEuEnvVar = "BIVLAUNCHER_API_BASE_URL_EU";
+    private const string LauncherApiBaseUrlAssemblyMetadataKey = "BivLauncher.ApiBaseUrl";
+    private const string LauncherApiBaseUrlRuAssemblyMetadataKey = "BivLauncher.ApiBaseUrlRu";
+    private const string LauncherApiBaseUrlEuAssemblyMetadataKey = "BivLauncher.ApiBaseUrlEu";
+    private const string LauncherFallbackApiBaseUrlsAssemblyMetadataKey = "BivLauncher.FallbackApiBaseUrls";
+
     private readonly HttpClient _httpClient = new()
     {
         Timeout = TimeSpan.FromMinutes(20)
@@ -29,11 +39,7 @@ public sealed class LauncherUpdateService(
         var versionDirectory = Path.Combine(settingsService.GetUpdatesDirectory(), version);
         Directory.CreateDirectory(versionDirectory);
 
-        using var response = await _httpClient.GetAsync(
-            normalizedUrl,
-            HttpCompletionOption.ResponseHeadersRead,
-            cancellationToken);
-        response.EnsureSuccessStatusCode();
+        using var response = await SendDownloadRequestAsync(normalizedUrl, cancellationToken);
 
         var extension = ResolvePackageExtension(normalizedUrl, response.Content.Headers);
         if (!string.Equals(extension, ".zip", StringComparison.OrdinalIgnoreCase))
@@ -64,6 +70,55 @@ public sealed class LauncherUpdateService(
         await fileStream.FlushAsync(cancellationToken);
         logService.LogInfo($"Launcher update package downloaded: {packagePath}");
         return packagePath;
+    }
+
+    private async Task<HttpResponseMessage> SendDownloadRequestAsync(string downloadUrl, CancellationToken cancellationToken)
+    {
+        Exception? lastError = null;
+
+        foreach (var candidateUrl in await ResolveDownloadCandidatesAsync(downloadUrl, cancellationToken))
+        {
+            try
+            {
+                var response = await _httpClient.GetAsync(
+                    candidateUrl,
+                    HttpCompletionOption.ResponseHeadersRead,
+                    cancellationToken);
+                if (response.IsSuccessStatusCode)
+                {
+                    if (!string.Equals(candidateUrl, downloadUrl, StringComparison.OrdinalIgnoreCase))
+                    {
+                        logService.LogInfo($"Launcher update download switched to fallback URL: {candidateUrl}");
+                    }
+
+                    return response;
+                }
+
+                if (!ShouldTryNextDownloadLocation(response.StatusCode))
+                {
+                    response.EnsureSuccessStatusCode();
+                }
+
+                lastError = new HttpRequestException(
+                    $"Response status code does not indicate success: {(int)response.StatusCode} ({response.ReasonPhrase}).",
+                    null,
+                    response.StatusCode);
+                response.Dispose();
+                logService.LogInfo($"Launcher update download candidate failed and will be skipped: {candidateUrl} ({(int)response.StatusCode})");
+            }
+            catch (HttpRequestException ex)
+            {
+                lastError = ex;
+                logService.LogInfo($"Launcher update download candidate failed and will be skipped: {candidateUrl} ({ex.Message})");
+            }
+            catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                lastError = ex;
+                logService.LogInfo($"Launcher update download candidate timed out and will be skipped: {candidateUrl} ({ex.Message})");
+            }
+        }
+
+        throw lastError ?? new InvalidOperationException("No reachable launcher update download URL is available.");
     }
 
     public void ScheduleInstallAndRestart(string packagePath, string executablePath)
@@ -164,6 +219,163 @@ public sealed class LauncherUpdateService(
     private static string Quote(string value)
     {
         return $"\"{value.Replace("\"", "\\\"")}\"";
+    }
+
+    private async Task<IReadOnlyList<string>> ResolveDownloadCandidatesAsync(string downloadUrl, CancellationToken cancellationToken)
+    {
+        var candidates = new List<string>();
+
+        void Add(string? value)
+        {
+            var normalized = NormalizeBaseUrlOrEmpty(value);
+            if (string.IsNullOrWhiteSpace(normalized) ||
+                candidates.Contains(normalized, StringComparer.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            candidates.Add(normalized);
+        }
+
+        if (TryResolvePublicAssetPath(downloadUrl, out var publicAssetPath))
+        {
+            var settings = await settingsService.LoadAsync(cancellationToken);
+            Add(settings.ApiBaseUrl);
+            Add(settings.PlayerAuthApiBaseUrl);
+
+            foreach (var knownApiBaseUrl in settings.KnownApiBaseUrls ?? [])
+            {
+                Add(knownApiBaseUrl);
+            }
+
+            Add(Environment.GetEnvironmentVariable(LauncherApiBaseUrlEnvVar));
+            Add(Environment.GetEnvironmentVariable(LauncherApiBaseUrlRuEnvVar));
+            Add(Environment.GetEnvironmentVariable(LauncherApiBaseUrlEuEnvVar));
+            Add(ResolveAssemblyMetadata(LauncherApiBaseUrlAssemblyMetadataKey));
+            Add(ResolveAssemblyMetadata(LauncherApiBaseUrlRuAssemblyMetadataKey));
+            Add(ResolveAssemblyMetadata(LauncherApiBaseUrlEuAssemblyMetadataKey));
+
+            foreach (var bundledFallback in ResolveBundledFallbackApiBaseUrls())
+            {
+                Add(bundledFallback);
+            }
+
+            var urls = new List<string>();
+            foreach (var candidateBaseUrl in candidates)
+            {
+                urls.Add(BuildUri(candidateBaseUrl, publicAssetPath));
+            }
+
+            if (!urls.Contains(downloadUrl, StringComparer.OrdinalIgnoreCase))
+            {
+                urls.Insert(0, downloadUrl);
+            }
+
+            return urls;
+        }
+
+        return [downloadUrl];
+    }
+
+    private static bool TryResolvePublicAssetPath(string assetReference, out string path)
+    {
+        path = string.Empty;
+        if (string.IsNullOrWhiteSpace(assetReference))
+        {
+            return false;
+        }
+
+        if (Uri.TryCreate(assetReference, UriKind.Absolute, out var absoluteUri))
+        {
+            if (!absoluteUri.AbsolutePath.StartsWith("/api/public/assets/", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            path = $"{absoluteUri.AbsolutePath}{absoluteUri.Query}";
+            return true;
+        }
+
+        if (!assetReference.StartsWith("/api/public/assets/", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        path = assetReference;
+        return true;
+    }
+
+    private static string BuildUri(string apiBaseUrl, string path)
+    {
+        var normalizedBase = NormalizeBaseUrlOrEmpty(apiBaseUrl);
+        var normalizedPath = path.StartsWith('/') ? path : "/" + path;
+        return string.IsNullOrWhiteSpace(normalizedBase)
+            ? normalizedPath
+            : $"{normalizedBase}{normalizedPath}";
+    }
+
+    private static bool ShouldTryNextDownloadLocation(HttpStatusCode statusCode)
+    {
+        return statusCode is
+            HttpStatusCode.NotFound or
+            HttpStatusCode.RequestTimeout or
+            HttpStatusCode.TooManyRequests or
+            HttpStatusCode.InternalServerError or
+            HttpStatusCode.BadGateway or
+            HttpStatusCode.ServiceUnavailable or
+            HttpStatusCode.GatewayTimeout;
+    }
+
+    private static string NormalizeBaseUrlOrEmpty(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var trimmed = value.Trim();
+        if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri))
+        {
+            return string.Empty;
+        }
+
+        var builder = new UriBuilder(uri)
+        {
+            Path = uri.AbsolutePath.TrimEnd('/'),
+            Query = string.Empty,
+            Fragment = string.Empty
+        };
+
+        return builder.Uri.ToString().TrimEnd('/');
+    }
+
+    private static string ResolveAssemblyMetadata(string key)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return string.Empty;
+        }
+
+        var attribute = Assembly.GetExecutingAssembly()
+            .GetCustomAttributes<AssemblyMetadataAttribute>()
+            .FirstOrDefault(item => string.Equals(item.Key, key, StringComparison.OrdinalIgnoreCase));
+        return (attribute?.Value ?? string.Empty).Trim();
+    }
+
+    private static IReadOnlyList<string> ResolveBundledFallbackApiBaseUrls()
+    {
+        var rawValue = ResolveAssemblyMetadata(LauncherFallbackApiBaseUrlsAssemblyMetadataKey);
+        if (string.IsNullOrWhiteSpace(rawValue))
+        {
+            return [];
+        }
+
+        return rawValue
+            .Split(new[] { '\r', '\n', ';', ',' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(NormalizeBaseUrlOrEmpty)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     private static string BuildPowerShellScript()
