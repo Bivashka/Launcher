@@ -1728,11 +1728,12 @@ public partial class MainWindowViewModel : ViewModelBase
             try
             {
                 StatusText = T("status.fetchingManifest");
-                var manifest = await _launcherApiService.GetManifestAsync(
-                    ApiBaseUrl,
-                    SelectedServer.ProfileSlug,
-                    _playerAuthToken,
-                    _playerAuthTokenType);
+                var manifest = await ExecuteAgainstApiFailoverAsync(
+                    candidate => _launcherApiService.GetManifestAsync(
+                        candidate,
+                        SelectedServer.ProfileSlug,
+                        _playerAuthToken,
+                        _playerAuthTokenType));
                 ApplyProfileRuntimeFallback(manifest, SelectedServer.ProfileSlug);
                 StatusText = _languageCode == "en" ? "Preparing files..." : "Подготовка файлов...";
 

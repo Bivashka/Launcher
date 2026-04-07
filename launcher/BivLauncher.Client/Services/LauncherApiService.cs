@@ -59,7 +59,8 @@ public sealed class LauncherApiService : ILauncherApiService
             () => BuildOptionalAuthorizedRequest(HttpMethod.Get, uri, accessToken, tokenType),
             cancellationToken,
             maxAttempts: 1,
-            attemptTimeout: MetadataRequestAttemptTimeout);
+            attemptTimeout: MetadataRequestAttemptTimeout,
+            completionOption: HttpCompletionOption.ResponseContentRead);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
@@ -78,7 +79,8 @@ public sealed class LauncherApiService : ILauncherApiService
         var uri = BuildUri(apiBaseUrl, "/api/public/auth/login");
         using var response = await SendWithRetryAsync(
             () => BuildJsonPostRequest(uri, request),
-            cancellationToken);
+            cancellationToken,
+            completionOption: HttpCompletionOption.ResponseContentRead);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
 
         if (!response.IsSuccessStatusCode)
@@ -105,7 +107,8 @@ public sealed class LauncherApiService : ILauncherApiService
         var uri = BuildUri(apiBaseUrl, "/api/public/auth/session");
         using var response = await SendWithRetryAsync(
             () => BuildAuthorizedRequest(HttpMethod.Get, uri, token, tokenType),
-            cancellationToken);
+            cancellationToken,
+            completionOption: HttpCompletionOption.ResponseContentRead);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
 
         if (!response.IsSuccessStatusCode)
@@ -132,7 +135,8 @@ public sealed class LauncherApiService : ILauncherApiService
         var uri = BuildUri(apiBaseUrl, "/api/public/auth/logout");
         using var response = await SendWithRetryAsync(
             () => BuildAuthorizedRequest(HttpMethod.Post, uri, token, tokenType),
-            cancellationToken);
+            cancellationToken,
+            completionOption: HttpCompletionOption.ResponseContentRead);
         if (response.IsSuccessStatusCode ||
             response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
         {
@@ -159,7 +163,8 @@ public sealed class LauncherApiService : ILauncherApiService
         var uri = BuildUri(apiBaseUrl, "/api/public/auth/game-session/start");
         using var response = await SendWithRetryAsync(
             () => BuildAuthorizedJsonPostRequest(uri, token, tokenType, request),
-            cancellationToken);
+            cancellationToken,
+            completionOption: HttpCompletionOption.ResponseContentRead);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
@@ -195,7 +200,8 @@ public sealed class LauncherApiService : ILauncherApiService
                 token,
                 tokenType,
                 new PublicGameSessionHeartbeatRequest { SessionId = sessionId }),
-            cancellationToken);
+            cancellationToken,
+            completionOption: HttpCompletionOption.ResponseContentRead);
         if (response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.NotFound)
         {
             return;
@@ -230,7 +236,8 @@ public sealed class LauncherApiService : ILauncherApiService
                 token,
                 tokenType,
                 new PublicGameSessionStopRequest { SessionId = sessionId }),
-            cancellationToken);
+            cancellationToken,
+            completionOption: HttpCompletionOption.ResponseContentRead);
         if (response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.NotFound)
         {
             return;
@@ -256,7 +263,8 @@ public sealed class LauncherApiService : ILauncherApiService
         var uri = BuildUri(apiBaseUrl, "/api/public/auth/security-violation");
         using var response = await SendWithRetryAsync(
             () => BuildAuthorizedJsonPostRequest(uri, token, tokenType, request),
-            cancellationToken);
+            cancellationToken,
+            completionOption: HttpCompletionOption.ResponseContentRead);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
 
         if (!response.IsSuccessStatusCode)
@@ -290,7 +298,8 @@ public sealed class LauncherApiService : ILauncherApiService
             () => BuildOptionalAuthorizedRequest(HttpMethod.Get, uri, accessToken, tokenType),
             cancellationToken,
             maxAttempts: 1,
-            attemptTimeout: MetadataRequestAttemptTimeout);
+            attemptTimeout: MetadataRequestAttemptTimeout,
+            completionOption: HttpCompletionOption.ResponseContentRead);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
@@ -507,7 +516,8 @@ public sealed class LauncherApiService : ILauncherApiService
         var uri = BuildUri(apiBaseUrl, "/api/public/crashes");
         using var response = await SendWithRetryAsync(
             () => BuildJsonPostRequest(uri, request),
-            cancellationToken);
+            cancellationToken,
+            completionOption: HttpCompletionOption.ResponseContentRead);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
 
         if (!response.IsSuccessStatusCode)
@@ -527,7 +537,8 @@ public sealed class LauncherApiService : ILauncherApiService
         var uri = BuildUri(apiBaseUrl, "/api/public/install-telemetry");
         using var response = await SendWithRetryAsync(
             () => BuildJsonPostRequest(uri, request),
-            cancellationToken);
+            cancellationToken,
+            completionOption: HttpCompletionOption.ResponseContentRead);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
 
         if (!response.IsSuccessStatusCode)
@@ -550,7 +561,8 @@ public sealed class LauncherApiService : ILauncherApiService
         var uri = BuildUri(apiBaseUrl, path);
         using var response = await SendWithRetryAsync(
             () => new HttpRequestMessage(HttpMethod.Get, uri),
-            cancellationToken);
+            cancellationToken,
+            completionOption: HttpCompletionOption.ResponseContentRead);
         if (response.StatusCode == HttpStatusCode.NotFound)
         {
             return false;
@@ -569,7 +581,8 @@ public sealed class LauncherApiService : ILauncherApiService
         Func<HttpRequestMessage> requestFactory,
         CancellationToken cancellationToken,
         int maxAttempts = MaxRetryAttempts,
-        TimeSpan? attemptTimeout = null)
+        TimeSpan? attemptTimeout = null,
+        HttpCompletionOption completionOption = HttpCompletionOption.ResponseContentRead)
     {
         var effectiveMaxAttempts = Math.Max(1, maxAttempts);
         var effectiveAttemptTimeout = attemptTimeout ?? ApiRequestAttemptTimeout;
@@ -583,7 +596,7 @@ public sealed class LauncherApiService : ILauncherApiService
                 attemptTimeoutCts.CancelAfter(effectiveAttemptTimeout);
                 var response = await _httpClient.SendAsync(
                     request,
-                    HttpCompletionOption.ResponseHeadersRead,
+                    completionOption,
                     attemptTimeoutCts.Token);
 
                 if (attempt >= effectiveMaxAttempts || !ShouldRetry(response.StatusCode))
