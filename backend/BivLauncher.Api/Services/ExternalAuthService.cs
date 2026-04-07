@@ -2,6 +2,7 @@ using BivLauncher.Api.Options;
 using BivLauncher.Api.Data;
 using Microsoft.Extensions.Options;
 using Microsoft.EntityFrameworkCore;
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 
@@ -66,6 +67,17 @@ public sealed class ExternalAuthService(
             if (!response.IsSuccessStatusCode)
             {
                 var reason = TryExtractError(body) ?? $"Auth provider returned {(int)response.StatusCode}";
+                if (settings.AllowDevFallback &&
+                    IsTemporaryFailure(response.StatusCode, reason))
+                {
+                    _logger.LogWarning(
+                        "Auth provider temporary failure detected. Falling back to ANY mode for player {Username}. Status={StatusCode}, Message={Message}",
+                        username,
+                        response.StatusCode,
+                        reason);
+                    return CreateAnyModeSuccess(username);
+                }
+
                 return new ExternalAuthResult
                 {
                     Success = false,
@@ -78,6 +90,14 @@ public sealed class ExternalAuthService(
         }
         catch (TaskCanceledException)
         {
+            if (settings.AllowDevFallback)
+            {
+                _logger.LogWarning(
+                    "Auth provider timed out. Falling back to ANY mode for player {Username}.",
+                    username);
+                return CreateAnyModeSuccess(username);
+            }
+
             return new ExternalAuthResult
             {
                 Success = false,
@@ -86,6 +106,15 @@ public sealed class ExternalAuthService(
         }
         catch (Exception ex)
         {
+            if (settings.AllowDevFallback)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Auth provider call failed. Falling back to ANY mode for player {Username}.",
+                    username);
+                return CreateAnyModeSuccess(username);
+            }
+
             _logger.LogError(ex, "Auth provider call failed.");
             return new ExternalAuthResult
             {
@@ -303,6 +332,35 @@ public sealed class ExternalAuthService(
         return string.Equals(authMode?.Trim(), "any", StringComparison.OrdinalIgnoreCase)
             ? "any"
             : "external";
+    }
+
+    private static bool IsTemporaryFailure(HttpStatusCode statusCode, string? message)
+    {
+        if (statusCode is HttpStatusCode.TooManyRequests)
+        {
+            return true;
+        }
+
+        if ((int)statusCode >= 500)
+        {
+            return true;
+        }
+
+        var normalized = (message ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return false;
+        }
+
+        return
+            normalized.Contains("too many attempts", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("too many requests", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("temporarily unavailable", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("retry later", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("timeout", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("слишком много попыток", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("повторите позже", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("временно недоступ", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string NormalizeFieldKey(string? raw, string fallback)
