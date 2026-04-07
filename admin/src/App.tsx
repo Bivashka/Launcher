@@ -159,6 +159,12 @@ type DeliverySettings = {
   publicBaseUrl: string
   assetBaseUrl: string
   fallbackApiBaseUrls: string[]
+  publicBaseUrlRu: string
+  publicBaseUrlEu: string
+  assetBaseUrlRu: string
+  assetBaseUrlEu: string
+  fallbackApiBaseUrlsRu: string[]
+  fallbackApiBaseUrlsEu: string[]
   launcherApiBaseUrlRu: string
   launcherApiBaseUrlEu: string
   updatedAtUtc?: string | null
@@ -800,6 +806,12 @@ const defaultDeliverySettings: DeliverySettings = {
   publicBaseUrl: currentProxyPublicBaseUrl,
   assetBaseUrl: currentProxyPublicBaseUrl,
   fallbackApiBaseUrls: currentProxyFallbackApiBaseUrls,
+  publicBaseUrlRu: currentProxyPublicBaseUrl,
+  publicBaseUrlEu: currentDirectPublicBaseUrl,
+  assetBaseUrlRu: currentProxyPublicBaseUrl,
+  assetBaseUrlEu: currentDirectPublicBaseUrl,
+  fallbackApiBaseUrlsRu: currentProxyFallbackApiBaseUrls,
+  fallbackApiBaseUrlsEu: currentDirectFallbackApiBaseUrls,
   launcherApiBaseUrlRu: currentProxyPublicBaseUrl,
   launcherApiBaseUrlEu: currentDirectPublicBaseUrl,
   updatedAtUtc: null,
@@ -1555,6 +1567,8 @@ function App() {
   const [adminPasswordForm, setAdminPasswordForm] = useState<AdminPasswordForm>(defaultAdminPasswordForm)
   const [deliverySettings, setDeliverySettings] = useState<DeliverySettings>(defaultDeliverySettings)
   const [deliveryFallbackApiBaseUrlsText, setDeliveryFallbackApiBaseUrlsText] = useState('')
+  const [deliveryFallbackApiBaseUrlsRuText, setDeliveryFallbackApiBaseUrlsRuText] = useState('')
+  const [deliveryFallbackApiBaseUrlsEuText, setDeliveryFallbackApiBaseUrlsEuText] = useState('')
   const [brandingSettings, setBrandingSettings] = useState<BrandingSettings>(defaultBrandingSettings)
   const [developerSupportInfo, setDeveloperSupportInfo] = useState<DeveloperSupportInfo>(defaultDeveloperSupportInfo)
   const [installTelemetrySettings, setInstallTelemetrySettings] = useState<InstallTelemetrySettings>(defaultInstallTelemetrySettings)
@@ -2339,10 +2353,18 @@ function App() {
         ...defaultDeliverySettings,
         ...loadedDeliverySettings,
         fallbackApiBaseUrls: loadedDeliverySettings.fallbackApiBaseUrls ?? [],
+        publicBaseUrlRu: loadedDeliverySettings.publicBaseUrlRu ?? defaultDeliverySettings.publicBaseUrlRu,
+        publicBaseUrlEu: loadedDeliverySettings.publicBaseUrlEu ?? defaultDeliverySettings.publicBaseUrlEu,
+        assetBaseUrlRu: loadedDeliverySettings.assetBaseUrlRu ?? defaultDeliverySettings.assetBaseUrlRu,
+        assetBaseUrlEu: loadedDeliverySettings.assetBaseUrlEu ?? defaultDeliverySettings.assetBaseUrlEu,
+        fallbackApiBaseUrlsRu: loadedDeliverySettings.fallbackApiBaseUrlsRu ?? defaultDeliverySettings.fallbackApiBaseUrlsRu,
+        fallbackApiBaseUrlsEu: loadedDeliverySettings.fallbackApiBaseUrlsEu ?? defaultDeliverySettings.fallbackApiBaseUrlsEu,
         launcherApiBaseUrlRu: loadedDeliverySettings.launcherApiBaseUrlRu ?? defaultDeliverySettings.launcherApiBaseUrlRu,
         launcherApiBaseUrlEu: loadedDeliverySettings.launcherApiBaseUrlEu ?? defaultDeliverySettings.launcherApiBaseUrlEu,
       })
       setDeliveryFallbackApiBaseUrlsText(toMultilineList(loadedDeliverySettings.fallbackApiBaseUrls))
+      setDeliveryFallbackApiBaseUrlsRuText(toMultilineList(loadedDeliverySettings.fallbackApiBaseUrlsRu))
+      setDeliveryFallbackApiBaseUrlsEuText(toMultilineList(loadedDeliverySettings.fallbackApiBaseUrlsEu))
       setBrandingSettings({
         ...defaultBrandingSettings,
         ...loadedBranding,
@@ -3913,12 +3935,20 @@ function App() {
           publicBaseUrl: deliverySettings.publicBaseUrl.trim(),
           assetBaseUrl: deliverySettings.assetBaseUrl.trim(),
           fallbackApiBaseUrls: normalizeMultilineList(deliveryFallbackApiBaseUrlsText),
+          publicBaseUrlRu: deliverySettings.publicBaseUrlRu.trim(),
+          publicBaseUrlEu: deliverySettings.publicBaseUrlEu.trim(),
+          assetBaseUrlRu: deliverySettings.assetBaseUrlRu.trim(),
+          assetBaseUrlEu: deliverySettings.assetBaseUrlEu.trim(),
+          fallbackApiBaseUrlsRu: normalizeMultilineList(deliveryFallbackApiBaseUrlsRuText),
+          fallbackApiBaseUrlsEu: normalizeMultilineList(deliveryFallbackApiBaseUrlsEuText),
           launcherApiBaseUrlRu: deliverySettings.launcherApiBaseUrlRu.trim(),
           launcherApiBaseUrlEu: deliverySettings.launcherApiBaseUrlEu.trim(),
         }),
       })
       setDeliverySettings(saved)
       setDeliveryFallbackApiBaseUrlsText(toMultilineList(saved.fallbackApiBaseUrls))
+      setDeliveryFallbackApiBaseUrlsRuText(toMultilineList(saved.fallbackApiBaseUrlsRu))
+      setDeliveryFallbackApiBaseUrlsEuText(toMultilineList(saved.fallbackApiBaseUrlsEu))
       setNotice('Delivery settings saved.')
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : 'Delivery settings save failed')
@@ -3932,10 +3962,16 @@ function App() {
       ...prev,
       publicBaseUrl: currentProxyPublicBaseUrl,
       assetBaseUrl: currentProxyPublicBaseUrl,
+      publicBaseUrlRu: currentProxyPublicBaseUrl,
+      publicBaseUrlEu: currentDirectPublicBaseUrl,
+      assetBaseUrlRu: currentProxyPublicBaseUrl,
+      assetBaseUrlEu: currentDirectPublicBaseUrl,
       launcherApiBaseUrlRu: currentProxyPublicBaseUrl,
       launcherApiBaseUrlEu: currentDirectPublicBaseUrl,
     }))
     setDeliveryFallbackApiBaseUrlsText(toMultilineList(currentProxyFallbackApiBaseUrls))
+    setDeliveryFallbackApiBaseUrlsRuText(toMultilineList(currentProxyFallbackApiBaseUrls))
+    setDeliveryFallbackApiBaseUrlsEuText(toMultilineList(currentDirectFallbackApiBaseUrls))
     setNotice('Current RU proxy preset applied to the form.')
     setError('')
   }
@@ -3945,10 +3981,16 @@ function App() {
       ...prev,
       publicBaseUrl: currentDirectPublicBaseUrl,
       assetBaseUrl: currentDirectPublicBaseUrl,
+      publicBaseUrlRu: currentDirectPublicBaseUrl,
+      publicBaseUrlEu: currentDirectPublicBaseUrl,
+      assetBaseUrlRu: currentDirectPublicBaseUrl,
+      assetBaseUrlEu: currentDirectPublicBaseUrl,
       launcherApiBaseUrlRu: currentDirectPublicBaseUrl,
       launcherApiBaseUrlEu: currentDirectPublicBaseUrl,
     }))
     setDeliveryFallbackApiBaseUrlsText(toMultilineList(currentDirectFallbackApiBaseUrls))
+    setDeliveryFallbackApiBaseUrlsRuText(toMultilineList(currentDirectFallbackApiBaseUrls))
+    setDeliveryFallbackApiBaseUrlsEuText(toMultilineList(currentDirectFallbackApiBaseUrls))
     setNotice('Proxy disabled in the form. Direct Finland preset applied.')
     setError('')
   }
@@ -5142,6 +5184,8 @@ function App() {
     setAdminPasswordForm(defaultAdminPasswordForm)
     setDeliverySettings(defaultDeliverySettings)
     setDeliveryFallbackApiBaseUrlsText('')
+    setDeliveryFallbackApiBaseUrlsRuText('')
+    setDeliveryFallbackApiBaseUrlsEuText('')
     setBrandingSettings(defaultBrandingSettings)
     setS3Settings(defaultS3Settings)
     setStorageTestResult(null)
@@ -7761,7 +7805,7 @@ function App() {
                 <h3>Delivery / availability</h3>
                 <div className="action-block">
                   <small className="muted">
-                    These addresses are embedded into new launcher builds. RF/EU selector uses the two launcher API fields below.
+                    These addresses are embedded into new launcher builds. RU/EU selector uses the two launcher API fields below.
                   </small>
                   <label>
                     Public base URL
@@ -7789,13 +7833,63 @@ function App() {
                     />
                   </label>
                   <label>
-                    Launcher API URL for RF selector
+                    RU public base URL
+                    <input
+                      placeholder="http://195.43.142.97"
+                      value={deliverySettings.publicBaseUrlRu}
+                      onChange={(event) => setDeliverySettings((prev) => ({ ...prev, publicBaseUrlRu: event.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    RU asset / update base URL
+                    <input
+                      placeholder="http://195.43.142.97"
+                      value={deliverySettings.assetBaseUrlRu}
+                      onChange={(event) => setDeliverySettings((prev) => ({ ...prev, assetBaseUrlRu: event.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    RU fallback API URLs
+                    <textarea
+                      rows={4}
+                      placeholder={'One RU URL per line\nhttp://195.43.142.97\nhttp://ru-mirror.example.com'}
+                      value={deliveryFallbackApiBaseUrlsRuText}
+                      onChange={(event) => setDeliveryFallbackApiBaseUrlsRuText(event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    Launcher API URL for RU selector
                     <input
                       placeholder="http://195.43.142.97"
                       value={deliverySettings.launcherApiBaseUrlRu}
                       onChange={(event) =>
                         setDeliverySettings((prev) => ({ ...prev, launcherApiBaseUrlRu: event.target.value }))
                       }
+                    />
+                  </label>
+                  <label>
+                    EU public base URL
+                    <input
+                      placeholder="http://95.217.99.17:8080"
+                      value={deliverySettings.publicBaseUrlEu}
+                      onChange={(event) => setDeliverySettings((prev) => ({ ...prev, publicBaseUrlEu: event.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    EU asset / update base URL
+                    <input
+                      placeholder="http://95.217.99.17:8080"
+                      value={deliverySettings.assetBaseUrlEu}
+                      onChange={(event) => setDeliverySettings((prev) => ({ ...prev, assetBaseUrlEu: event.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    EU fallback API URLs
+                    <textarea
+                      rows={4}
+                      placeholder={'One EU URL per line\nhttp://95.217.99.17:8080\nhttp://eu-mirror.example.com'}
+                      value={deliveryFallbackApiBaseUrlsEuText}
+                      onChange={(event) => setDeliveryFallbackApiBaseUrlsEuText(event.target.value)}
                     />
                   </label>
                   <label>
@@ -7843,14 +7937,42 @@ function App() {
                   </li>
                   <li>
                     <span className="list-text">
-                      Launcher RF API URL
-                      <small>{deliverySettings.launcherApiBaseUrlRu || '(falls back to public base URL / env)'}</small>
+                      RU public / asset
+                      <small>
+                        {(deliverySettings.publicBaseUrlRu || '(default)')} | {(deliverySettings.assetBaseUrlRu || '(default)')}
+                      </small>
+                    </span>
+                  </li>
+                  <li>
+                    <span className="list-text">
+                      RU fallback API URLs
+                      <small>{deliverySettings.fallbackApiBaseUrlsRu.length > 0 ? deliverySettings.fallbackApiBaseUrlsRu.join(' | ') : 'none'}</small>
+                    </span>
+                  </li>
+                  <li>
+                    <span className="list-text">
+                      Launcher RU API URL
+                      <small>{deliverySettings.launcherApiBaseUrlRu || '(falls back to RU public base URL / env)'}</small>
+                    </span>
+                  </li>
+                  <li>
+                    <span className="list-text">
+                      EU public / asset
+                      <small>
+                        {(deliverySettings.publicBaseUrlEu || '(default)')} | {(deliverySettings.assetBaseUrlEu || '(default)')}
+                      </small>
+                    </span>
+                  </li>
+                  <li>
+                    <span className="list-text">
+                      EU fallback API URLs
+                      <small>{deliverySettings.fallbackApiBaseUrlsEu.length > 0 ? deliverySettings.fallbackApiBaseUrlsEu.join(' | ') : 'none'}</small>
                     </span>
                   </li>
                   <li>
                     <span className="list-text">
                       Launcher EU API URL
-                      <small>{deliverySettings.launcherApiBaseUrlEu || '(falls back to first API fallback / env)'}</small>
+                      <small>{deliverySettings.launcherApiBaseUrlEu || '(falls back to EU public base URL / env)'}</small>
                     </span>
                   </li>
                   <li>

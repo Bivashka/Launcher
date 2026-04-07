@@ -778,6 +778,18 @@ public sealed class AdminLauncherController(
             startInfo.ArgumentList.Add($"/p:BivLauncherFallbackApiBaseUrls={launcherFallbackApiBaseUrls}");
         }
 
+        var launcherFallbackApiBaseUrlsRu = ResolveLauncherFallbackApiBaseUrls("ru");
+        if (!string.IsNullOrWhiteSpace(launcherFallbackApiBaseUrlsRu))
+        {
+            startInfo.ArgumentList.Add($"/p:BivLauncherFallbackApiBaseUrlsRu={launcherFallbackApiBaseUrlsRu}");
+        }
+
+        var launcherFallbackApiBaseUrlsEu = ResolveLauncherFallbackApiBaseUrls("eu");
+        if (!string.IsNullOrWhiteSpace(launcherFallbackApiBaseUrlsEu))
+        {
+            startInfo.ArgumentList.Add($"/p:BivLauncherFallbackApiBaseUrlsEu={launcherFallbackApiBaseUrlsEu}");
+        }
+
         var launcherClientProof = ResolveLauncherClientProof();
         if (!string.IsNullOrWhiteSpace(launcherClientProof))
         {
@@ -1025,7 +1037,9 @@ public sealed class AdminLauncherController(
             return explicitEuUrl.TrimEnd('/');
         }
 
-        var fallbackEuUrl = deliverySettings.FallbackApiBaseUrls
+        var fallbackEuUrl = (deliverySettings.FallbackApiBaseUrlsEu is { Count: > 0 }
+                ? deliverySettings.FallbackApiBaseUrlsEu
+                : deliverySettings.FallbackApiBaseUrls)
             .Select(x => (x ?? string.Empty).Trim())
             .FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
         return string.IsNullOrWhiteSpace(fallbackEuUrl)
@@ -1051,6 +1065,31 @@ public sealed class AdminLauncherController(
     {
         var deliverySettings = deliverySettingsProvider.GetCachedSettings();
         var normalizedValues = deliverySettings.FallbackApiBaseUrls
+            .Select(x => (x ?? string.Empty).Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return normalizedValues.Count == 0
+            ? string.Empty
+            : string.Join(";", normalizedValues);
+    }
+
+    private string ResolveLauncherFallbackApiBaseUrls(string regionCode)
+    {
+        var normalizedRegionCode = (regionCode ?? string.Empty).Trim().ToLowerInvariant();
+        var deliverySettings = deliverySettingsProvider.GetCachedSettings();
+        var rawValues = normalizedRegionCode switch
+        {
+            "ru" => deliverySettings.FallbackApiBaseUrlsRu is { Count: > 0 }
+                ? deliverySettings.FallbackApiBaseUrlsRu
+                : deliverySettings.FallbackApiBaseUrls,
+            "eu" => deliverySettings.FallbackApiBaseUrlsEu is { Count: > 0 }
+                ? deliverySettings.FallbackApiBaseUrlsEu
+                : [],
+            _ => deliverySettings.FallbackApiBaseUrls
+        };
+
+        var normalizedValues = rawValues
             .Select(x => (x ?? string.Empty).Trim())
             .Where(x => !string.IsNullOrWhiteSpace(x))
             .Distinct(StringComparer.OrdinalIgnoreCase)

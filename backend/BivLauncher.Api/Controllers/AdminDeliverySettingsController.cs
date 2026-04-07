@@ -31,7 +31,13 @@ public sealed class AdminDeliverySettingsController(
                 FallbackApiBaseUrls: request.FallbackApiBaseUrls,
                 UpdatedAtUtc: DateTime.UtcNow,
                 LauncherApiBaseUrlRu: request.LauncherApiBaseUrlRu,
-                LauncherApiBaseUrlEu: request.LauncherApiBaseUrlEu),
+                LauncherApiBaseUrlEu: request.LauncherApiBaseUrlEu,
+                PublicBaseUrlRu: request.PublicBaseUrlRu,
+                PublicBaseUrlEu: request.PublicBaseUrlEu,
+                AssetBaseUrlRu: request.AssetBaseUrlRu,
+                AssetBaseUrlEu: request.AssetBaseUrlEu,
+                FallbackApiBaseUrlsRu: request.FallbackApiBaseUrlsRu,
+                FallbackApiBaseUrlsEu: request.FallbackApiBaseUrlsEu),
             cancellationToken);
 
         var actor = User.Identity?.Name ?? "admin";
@@ -46,7 +52,13 @@ public sealed class AdminDeliverySettingsController(
                 saved.AssetBaseUrl,
                 fallbackApiBaseUrls = saved.FallbackApiBaseUrls,
                 saved.LauncherApiBaseUrlRu,
-                saved.LauncherApiBaseUrlEu
+                saved.LauncherApiBaseUrlEu,
+                saved.PublicBaseUrlRu,
+                saved.PublicBaseUrlEu,
+                saved.AssetBaseUrlRu,
+                saved.AssetBaseUrlEu,
+                fallbackApiBaseUrlsRu = saved.FallbackApiBaseUrlsRu,
+                fallbackApiBaseUrlsEu = saved.FallbackApiBaseUrlsEu
             },
             cancellationToken: cancellationToken);
 
@@ -61,6 +73,12 @@ public sealed class AdminDeliverySettingsController(
             config.FallbackApiBaseUrls,
             config.LauncherApiBaseUrlRu,
             config.LauncherApiBaseUrlEu,
+            config.PublicBaseUrlRu,
+            config.PublicBaseUrlEu,
+            config.AssetBaseUrlRu,
+            config.AssetBaseUrlEu,
+            config.FallbackApiBaseUrlsRu ?? [],
+            config.FallbackApiBaseUrlsEu ?? [],
             config.UpdatedAtUtc);
     }
 }

@@ -6,4 +6,10 @@ public sealed record DeliverySettingsDto(
     IReadOnlyList<string> FallbackApiBaseUrls,
     string LauncherApiBaseUrlRu,
     string LauncherApiBaseUrlEu,
+    string PublicBaseUrlRu,
+    string PublicBaseUrlEu,
+    string AssetBaseUrlRu,
+    string AssetBaseUrlEu,
+    IReadOnlyList<string> FallbackApiBaseUrlsRu,
+    IReadOnlyList<string> FallbackApiBaseUrlsEu,
     DateTime? UpdatedAtUtc);

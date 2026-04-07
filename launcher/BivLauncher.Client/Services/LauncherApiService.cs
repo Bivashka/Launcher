@@ -22,6 +22,8 @@ public sealed class LauncherApiService : ILauncherApiService
     private const string LauncherApiBaseUrlRuAssemblyMetadataKey = "BivLauncher.ApiBaseUrlRu";
     private const string LauncherApiBaseUrlEuAssemblyMetadataKey = "BivLauncher.ApiBaseUrlEu";
     private const string LauncherFallbackApiBaseUrlsAssemblyMetadataKey = "BivLauncher.FallbackApiBaseUrls";
+    private const string LauncherFallbackApiBaseUrlsRuAssemblyMetadataKey = "BivLauncher.FallbackApiBaseUrls.Ru";
+    private const string LauncherFallbackApiBaseUrlsEuAssemblyMetadataKey = "BivLauncher.FallbackApiBaseUrls.Eu";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -406,19 +408,55 @@ public sealed class LauncherApiService : ILauncherApiService
         }
 
         Add(apiBaseUrl);
-        Add(Environment.GetEnvironmentVariable(LauncherApiBaseUrlEnvVar));
-        Add(Environment.GetEnvironmentVariable(LauncherApiBaseUrlRuEnvVar));
-        Add(Environment.GetEnvironmentVariable(LauncherApiBaseUrlEuEnvVar));
-        Add(ResolveAssemblyMetadata(LauncherApiBaseUrlAssemblyMetadataKey));
-        Add(ResolveAssemblyMetadata(LauncherApiBaseUrlRuAssemblyMetadataKey));
-        Add(ResolveAssemblyMetadata(LauncherApiBaseUrlEuAssemblyMetadataKey));
-
-        foreach (var bundledFallback in ResolveBundledFallbackApiBaseUrls())
+        var selectedRegionCode = ResolveRequestedRegionCode(apiBaseUrl);
+        if (!string.IsNullOrWhiteSpace(selectedRegionCode))
         {
-            Add(bundledFallback);
+            Add(ResolveRegionalApiBaseUrl(selectedRegionCode));
+
+            foreach (var bundledFallback in ResolveBundledFallbackApiBaseUrls(selectedRegionCode))
+            {
+                Add(bundledFallback);
+            }
+        }
+        else
+        {
+            Add(Environment.GetEnvironmentVariable(LauncherApiBaseUrlEnvVar));
+            Add(Environment.GetEnvironmentVariable(LauncherApiBaseUrlRuEnvVar));
+            Add(Environment.GetEnvironmentVariable(LauncherApiBaseUrlEuEnvVar));
+            Add(ResolveAssemblyMetadata(LauncherApiBaseUrlAssemblyMetadataKey));
+            Add(ResolveAssemblyMetadata(LauncherApiBaseUrlRuAssemblyMetadataKey));
+            Add(ResolveAssemblyMetadata(LauncherApiBaseUrlEuAssemblyMetadataKey));
+
+            foreach (var bundledFallback in ResolveBundledFallbackApiBaseUrls())
+            {
+                Add(bundledFallback);
+            }
         }
 
         return candidates;
+    }
+
+    private static string ResolveRequestedRegionCode(string? apiBaseUrl)
+    {
+        var normalizedApiBaseUrl = NormalizeBaseUrlOrEmpty(apiBaseUrl);
+        if (string.IsNullOrWhiteSpace(normalizedApiBaseUrl))
+        {
+            return string.Empty;
+        }
+
+        if (BaseUrlsEqual(normalizedApiBaseUrl, ResolveRegionalApiBaseUrl("ru")) ||
+            ResolveBundledFallbackApiBaseUrls("ru").Contains(normalizedApiBaseUrl, StringComparer.OrdinalIgnoreCase))
+        {
+            return "ru";
+        }
+
+        if (BaseUrlsEqual(normalizedApiBaseUrl, ResolveRegionalApiBaseUrl("eu")) ||
+            ResolveBundledFallbackApiBaseUrls("eu").Contains(normalizedApiBaseUrl, StringComparer.OrdinalIgnoreCase))
+        {
+            return "eu";
+        }
+
+        return string.Empty;
     }
 
     private static bool TryResolvePublicAssetPath(string assetReference, out string path)
@@ -802,9 +840,56 @@ public sealed class LauncherApiService : ILauncherApiService
         return (attribute?.Value ?? string.Empty).Trim();
     }
 
-    private static IReadOnlyList<string> ResolveBundledFallbackApiBaseUrls()
+    private static string ResolveRegionalApiBaseUrl(string regionCode)
     {
-        var rawValue = ResolveAssemblyMetadata(LauncherFallbackApiBaseUrlsAssemblyMetadataKey);
+        var normalizedRegionCode = NormalizeApiRegionCode(regionCode);
+        if (string.IsNullOrWhiteSpace(normalizedRegionCode))
+        {
+            return string.Empty;
+        }
+
+        return normalizedRegionCode switch
+        {
+            "ru" => NormalizeBaseUrlOrEmpty(Environment.GetEnvironmentVariable(LauncherApiBaseUrlRuEnvVar))
+                is var envRu && !string.IsNullOrWhiteSpace(envRu)
+                    ? envRu
+                    : NormalizeBaseUrlOrEmpty(ResolveAssemblyMetadata(LauncherApiBaseUrlRuAssemblyMetadataKey)),
+            "eu" => NormalizeBaseUrlOrEmpty(Environment.GetEnvironmentVariable(LauncherApiBaseUrlEuEnvVar))
+                is var envEu && !string.IsNullOrWhiteSpace(envEu)
+                    ? envEu
+                    : NormalizeBaseUrlOrEmpty(ResolveAssemblyMetadata(LauncherApiBaseUrlEuAssemblyMetadataKey)),
+            _ => string.Empty
+        };
+    }
+
+    private static string NormalizeApiRegionCode(string? regionCode)
+    {
+        return (regionCode ?? string.Empty).Trim().ToLowerInvariant() switch
+        {
+            "ru" => "ru",
+            "eu" => "eu",
+            _ => string.Empty
+        };
+    }
+
+    private static bool BaseUrlsEqual(string? left, string? right)
+    {
+        return string.Equals(
+            NormalizeBaseUrlOrEmpty(left),
+            NormalizeBaseUrlOrEmpty(right),
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static IReadOnlyList<string> ResolveBundledFallbackApiBaseUrls(string? regionCode = null)
+    {
+        var normalizedRegionCode = NormalizeApiRegionCode(regionCode);
+        var metadataKey = normalizedRegionCode switch
+        {
+            "ru" => LauncherFallbackApiBaseUrlsRuAssemblyMetadataKey,
+            "eu" => LauncherFallbackApiBaseUrlsEuAssemblyMetadataKey,
+            _ => LauncherFallbackApiBaseUrlsAssemblyMetadataKey
+        };
+        var rawValue = ResolveAssemblyMetadata(metadataKey);
         if (string.IsNullOrWhiteSpace(rawValue))
         {
             return [];

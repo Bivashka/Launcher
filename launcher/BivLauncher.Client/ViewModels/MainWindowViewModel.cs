@@ -59,6 +59,8 @@ public partial class MainWindowViewModel : ViewModelBase
     private const string LauncherApiBaseUrlRuAssemblyMetadataKey = "BivLauncher.ApiBaseUrlRu";
     private const string LauncherApiBaseUrlEuAssemblyMetadataKey = "BivLauncher.ApiBaseUrlEu";
     private const string LauncherFallbackApiBaseUrlsAssemblyMetadataKey = "BivLauncher.FallbackApiBaseUrls";
+    private const string LauncherFallbackApiBaseUrlsRuAssemblyMetadataKey = "BivLauncher.FallbackApiBaseUrls.Ru";
+    private const string LauncherFallbackApiBaseUrlsEuAssemblyMetadataKey = "BivLauncher.FallbackApiBaseUrls.Eu";
     private readonly string _currentLauncherVersion = GetCurrentLauncherVersion();
     private string _languageCode = "ru";
     private readonly Dictionary<string, string> _profileRouteSelections = new(StringComparer.OrdinalIgnoreCase);
@@ -81,6 +83,7 @@ public partial class MainWindowViewModel : ViewModelBase
     private string _bootstrapPublicBaseUrl = string.Empty;
     private string _bootstrapApiBaseUrlRu = string.Empty;
     private string _bootstrapApiBaseUrlEu = string.Empty;
+    private readonly List<string> _bootstrapFallbackApiBaseUrls = [];
     private readonly Dictionary<string, string> _profileBundledRuntimeKeys = new(StringComparer.OrdinalIgnoreCase);
     private DateTime _lastServerOnlineRefreshUtc;
     private Avalonia.Controls.WindowIcon? _defaultWindowIcon;
@@ -566,8 +569,6 @@ public partial class MainWindowViewModel : ViewModelBase
         RebuildRouteOptions();
         RefreshLocalizedBindings();
         LoadRouteSelections(_settings.ProfileRouteSelections ?? []);
-        MergeKnownApiBaseUrls(_settings.KnownApiBaseUrls);
-        MergeKnownApiBaseUrls(ResolveBundledFallbackApiBaseUrls());
         var persistedApiBaseUrl = NormalizeBaseUrl(_settings.ApiBaseUrl);
         if (!string.IsNullOrWhiteSpace(persistedApiBaseUrl))
         {
@@ -581,7 +582,7 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             ApiBaseUrl = ResolvePreferredApiRegionApiBaseUrl();
         }
-        MergeKnownApiBaseUrls([ApiBaseUrl]);
+        ResetKnownApiBaseUrlsForCurrentRegion(_settings.KnownApiBaseUrls);
         InstallDirectory = string.IsNullOrWhiteSpace(_settings.InstallDirectory)
             ? _settingsService.GetDefaultInstallDirectory()
             : _settings.InstallDirectory;
@@ -1570,8 +1571,8 @@ public partial class MainWindowViewModel : ViewModelBase
         _bootstrapPublicBaseUrl = NormalizeBaseUrlOrEmpty(bootstrap.PublicBaseUrl);
         _bootstrapApiBaseUrlRu = NormalizeBaseUrlOrEmpty(bootstrap.LauncherApiBaseUrlRu);
         _bootstrapApiBaseUrlEu = NormalizeBaseUrlOrEmpty(bootstrap.LauncherApiBaseUrlEu);
-        MergeKnownApiBaseUrls([_bootstrapApiBaseUrlRu, _bootstrapApiBaseUrlEu]);
-        MergeKnownApiBaseUrls(bootstrap.FallbackApiBaseUrls);
+        ReplaceBootstrapFallbackApiBaseUrls(bootstrap.FallbackApiBaseUrls);
+        ResetKnownApiBaseUrlsForCurrentRegion(_settings.KnownApiBaseUrls);
         var assetRefreshVersion = Interlocked.Increment(ref _assetRefreshVersion);
         await FlushPendingSubmissionsAsync();
         _ = TrySubmitInstallTelemetryAsync(bootstrap);
@@ -2324,7 +2325,8 @@ public partial class MainWindowViewModel : ViewModelBase
         }
 
         PreferredApiRegion = normalizedRegionCode;
-        MergeKnownApiBaseUrls([preferredApiBaseUrl]);
+        ApiBaseUrl = preferredApiBaseUrl;
+        ResetKnownApiBaseUrlsForCurrentRegion(_settings.KnownApiBaseUrls);
         await PersistSettingsSnapshotAsync();
     }
 
@@ -4407,6 +4409,103 @@ public partial class MainWindowViewModel : ViewModelBase
         }
     }
 
+    private void ReplaceBootstrapFallbackApiBaseUrls(IEnumerable<string>? candidates)
+    {
+        _bootstrapFallbackApiBaseUrls.Clear();
+        foreach (var candidate in candidates ?? [])
+        {
+            var normalized = NormalizeBaseUrlOrEmpty(candidate);
+            if (string.IsNullOrWhiteSpace(normalized) ||
+                _bootstrapFallbackApiBaseUrls.Contains(normalized, StringComparer.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            _bootstrapFallbackApiBaseUrls.Add(normalized);
+        }
+    }
+
+    private void ResetKnownApiBaseUrlsForCurrentRegion(IEnumerable<string>? persistedKnownApiBaseUrls = null)
+    {
+        _knownApiBaseUrls.Clear();
+
+        var selectedRegionCode = NormalizeApiRegionCode(PreferredApiRegion);
+        if (string.IsNullOrWhiteSpace(selectedRegionCode))
+        {
+            MergeKnownApiBaseUrls(persistedKnownApiBaseUrls);
+            MergeKnownApiBaseUrls(ResolveBundledFallbackApiBaseUrls());
+            MergeKnownApiBaseUrls([ApiBaseUrl, _playerAuthApiBaseUrl]);
+            return;
+        }
+
+        MergeKnownApiBaseUrls([ResolveRuntimeApiBaseUrlForRegion(selectedRegionCode)]);
+        MergeKnownApiBaseUrls(FilterApiBaseUrlsForRegion(persistedKnownApiBaseUrls, selectedRegionCode));
+        MergeKnownApiBaseUrls(_bootstrapFallbackApiBaseUrls);
+        MergeKnownApiBaseUrls(ResolveBundledFallbackApiBaseUrls(selectedRegionCode));
+
+        if (IsApiBaseUrlAllowedForRegion(ApiBaseUrl, selectedRegionCode))
+        {
+            MergeKnownApiBaseUrls([ApiBaseUrl]);
+        }
+
+        if (IsApiBaseUrlAllowedForRegion(_playerAuthApiBaseUrl, selectedRegionCode))
+        {
+            MergeKnownApiBaseUrls([_playerAuthApiBaseUrl]);
+        }
+    }
+
+    private IEnumerable<string> FilterApiBaseUrlsForRegion(IEnumerable<string>? candidates, string regionCode)
+    {
+        foreach (var candidate in candidates ?? [])
+        {
+            if (IsApiBaseUrlAllowedForRegion(candidate, regionCode))
+            {
+                yield return candidate;
+            }
+        }
+    }
+
+    private bool IsApiBaseUrlAllowedForRegion(string? candidate, string regionCode)
+    {
+        var normalizedCandidate = NormalizeBaseUrlOrEmpty(candidate);
+        if (string.IsNullOrWhiteSpace(normalizedCandidate))
+        {
+            return false;
+        }
+
+        var normalizedRegionCode = NormalizeApiRegionCode(regionCode);
+        if (string.IsNullOrWhiteSpace(normalizedRegionCode))
+        {
+            return true;
+        }
+
+        if (BaseUrlsEqual(normalizedCandidate, ResolveRuntimeApiBaseUrlForRegion(normalizedRegionCode)))
+        {
+            return true;
+        }
+
+        if (_bootstrapFallbackApiBaseUrls.Contains(normalizedCandidate, StringComparer.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (ResolveBundledFallbackApiBaseUrls(normalizedRegionCode)
+            .Contains(normalizedCandidate, StringComparer.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool BaseUrlsEqual(string? left, string? right)
+    {
+        return string.Equals(
+            NormalizeBaseUrlOrEmpty(left),
+            NormalizeBaseUrlOrEmpty(right),
+            StringComparison.OrdinalIgnoreCase);
+    }
+
     partial void OnIsSecurityLockActiveChanged(bool value)
     {
         RefreshCommand.NotifyCanExecuteChanged();
@@ -4456,16 +4555,6 @@ public partial class MainWindowViewModel : ViewModelBase
             AddRegion(preferredRegionCode);
         }
 
-        foreach (var fallbackRegionCode in new[] { "ru", "eu" })
-        {
-            if (string.Equals(fallbackRegionCode, preferredRegionCode, StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            AddRegion(fallbackRegionCode);
-        }
-
         return candidates;
     }
 
@@ -4490,6 +4579,38 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             Add(regionalApiBaseUrl);
         }
+
+        var selectedRegionCode = NormalizeApiRegionCode(PreferredApiRegion);
+        if (!string.IsNullOrWhiteSpace(selectedRegionCode))
+        {
+            if (IsApiBaseUrlAllowedForRegion(ApiBaseUrl, selectedRegionCode))
+            {
+                Add(ApiBaseUrl);
+            }
+
+            if (IsApiBaseUrlAllowedForRegion(_playerAuthApiBaseUrl, selectedRegionCode))
+            {
+                Add(_playerAuthApiBaseUrl);
+            }
+
+            foreach (var knownApiBaseUrl in FilterApiBaseUrlsForRegion(_knownApiBaseUrls, selectedRegionCode))
+            {
+                Add(knownApiBaseUrl);
+            }
+
+            foreach (var bootstrapFallback in _bootstrapFallbackApiBaseUrls)
+            {
+                Add(bootstrapFallback);
+            }
+
+            foreach (var bundledFallback in ResolveBundledFallbackApiBaseUrls(selectedRegionCode))
+            {
+                Add(bundledFallback);
+            }
+
+            return candidates;
+        }
+
         Add(ApiBaseUrl);
         Add(_playerAuthApiBaseUrl);
         Add(TryResolveConfiguredApiBaseUrl());
@@ -4558,14 +4679,21 @@ public partial class MainWindowViewModel : ViewModelBase
             HttpStatusCode.GatewayTimeout;
     }
 
-    private static IReadOnlyList<string> ResolveBundledFallbackApiBaseUrls()
+    private static IReadOnlyList<string> ResolveBundledFallbackApiBaseUrls(string? regionCode = null)
     {
+        var normalizedRegionCode = NormalizeApiRegionCode(regionCode);
+        var metadataKey = normalizedRegionCode switch
+        {
+            "ru" => LauncherFallbackApiBaseUrlsRuAssemblyMetadataKey,
+            "eu" => LauncherFallbackApiBaseUrlsEuAssemblyMetadataKey,
+            _ => LauncherFallbackApiBaseUrlsAssemblyMetadataKey
+        };
         var assembly = Assembly.GetEntryAssembly() ?? typeof(MainWindowViewModel).Assembly;
         var rawValue = assembly
             .GetCustomAttributes<AssemblyMetadataAttribute>()
             .FirstOrDefault(attribute => string.Equals(
                 attribute.Key,
-                LauncherFallbackApiBaseUrlsAssemblyMetadataKey,
+                metadataKey,
                 StringComparison.OrdinalIgnoreCase))?
             .Value;
         if (string.IsNullOrWhiteSpace(rawValue))

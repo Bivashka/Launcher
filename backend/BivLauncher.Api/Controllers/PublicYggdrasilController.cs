@@ -866,6 +866,19 @@ public sealed class PublicYggdrasilController(
     private string ResolvePublicBaseUrl(HttpRequest request)
     {
         var deliverySettings = _deliverySettingsProvider.GetCachedSettings();
+        var requestedRegionCode = ResolveRequestedRegionCode(request, deliverySettings);
+        if (string.Equals(requestedRegionCode, "ru", StringComparison.OrdinalIgnoreCase) &&
+            !string.IsNullOrWhiteSpace(deliverySettings.PublicBaseUrlRu))
+        {
+            return deliverySettings.PublicBaseUrlRu.TrimEnd('/');
+        }
+
+        if (string.Equals(requestedRegionCode, "eu", StringComparison.OrdinalIgnoreCase) &&
+            !string.IsNullOrWhiteSpace(deliverySettings.PublicBaseUrlEu))
+        {
+            return deliverySettings.PublicBaseUrlEu.TrimEnd('/');
+        }
+
         var configuredPublicBaseUrl = (deliverySettings.PublicBaseUrl ?? string.Empty).Trim();
         if (!string.IsNullOrWhiteSpace(configuredPublicBaseUrl))
         {
@@ -873,6 +886,33 @@ public sealed class PublicYggdrasilController(
         }
 
         return ResolveApiBaseUrl(request);
+    }
+
+    private string ResolveRequestedRegionCode(HttpRequest request, DeliverySettingsConfig deliverySettings)
+    {
+        var requestBaseUrl = ResolveApiBaseUrl(request);
+        if (BaseUrlsMatch(requestBaseUrl, deliverySettings.LauncherApiBaseUrlRu) ||
+            (deliverySettings.FallbackApiBaseUrlsRu?.Any(candidate => BaseUrlsMatch(requestBaseUrl, candidate)) ?? false))
+        {
+            return "ru";
+        }
+
+        if (BaseUrlsMatch(requestBaseUrl, deliverySettings.LauncherApiBaseUrlEu) ||
+            (deliverySettings.FallbackApiBaseUrlsEu?.Any(candidate => BaseUrlsMatch(requestBaseUrl, candidate)) ?? false))
+        {
+            return "eu";
+        }
+
+        return string.Empty;
+    }
+
+    private static bool BaseUrlsMatch(string left, string right)
+    {
+        var normalizedLeft = (left ?? string.Empty).Trim().TrimEnd('/');
+        var normalizedRight = (right ?? string.Empty).Trim().TrimEnd('/');
+        return !string.IsNullOrWhiteSpace(normalizedLeft) &&
+               !string.IsNullOrWhiteSpace(normalizedRight) &&
+               string.Equals(normalizedLeft, normalizedRight, StringComparison.OrdinalIgnoreCase);
     }
 
     private string ResolveApiBaseUrl(HttpRequest request)

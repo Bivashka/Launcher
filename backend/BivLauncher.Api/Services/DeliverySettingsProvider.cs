@@ -153,7 +153,13 @@ public sealed class DeliverySettingsProvider(
             FallbackApiBaseUrls: defaultFallbackApiBaseUrls,
             UpdatedAtUtc: null,
             LauncherApiBaseUrlRu: configuredPublicBaseUrl,
-            LauncherApiBaseUrlEu: defaultEuLauncherApiBaseUrl);
+            LauncherApiBaseUrlEu: defaultEuLauncherApiBaseUrl,
+            PublicBaseUrlRu: configuredPublicBaseUrl,
+            PublicBaseUrlEu: defaultEuLauncherApiBaseUrl,
+            AssetBaseUrlRu: configuredPublicBaseUrl,
+            AssetBaseUrlEu: defaultEuLauncherApiBaseUrl,
+            FallbackApiBaseUrlsRu: defaultFallbackApiBaseUrls,
+            FallbackApiBaseUrlsEu: []);
     }
 
     private static DeliverySettingsConfig NormalizeSettings(DeliverySettingsConfig settings)
@@ -162,14 +168,50 @@ public sealed class DeliverySettingsProvider(
         var normalizedAssetBaseUrl = NormalizeAbsoluteUrl(settings.AssetBaseUrl);
         var normalizedLauncherApiBaseUrlRu = NormalizeAbsoluteUrl(settings.LauncherApiBaseUrlRu);
         var normalizedLauncherApiBaseUrlEu = NormalizeAbsoluteUrl(settings.LauncherApiBaseUrlEu);
-        var normalizedFallbacks = (settings.FallbackApiBaseUrls ?? [])
-            .Select(NormalizeAbsoluteUrl)
-            .Where(value => !string.IsNullOrWhiteSpace(value))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Where(value =>
-                !string.Equals(value, normalizedPublicBaseUrl, StringComparison.OrdinalIgnoreCase) &&
-                !string.Equals(value, normalizedAssetBaseUrl, StringComparison.OrdinalIgnoreCase))
-            .ToList();
+        var normalizedFallbacks = NormalizeFallbacks(
+            settings.FallbackApiBaseUrls,
+            normalizedPublicBaseUrl,
+            normalizedAssetBaseUrl);
+
+        var normalizedPublicBaseUrlRu = NormalizeAbsoluteUrl(settings.PublicBaseUrlRu);
+        var normalizedPublicBaseUrlEu = NormalizeAbsoluteUrl(settings.PublicBaseUrlEu);
+        var normalizedAssetBaseUrlRu = NormalizeAbsoluteUrl(settings.AssetBaseUrlRu);
+        var normalizedAssetBaseUrlEu = NormalizeAbsoluteUrl(settings.AssetBaseUrlEu);
+
+        if (string.IsNullOrWhiteSpace(normalizedPublicBaseUrlRu))
+        {
+            normalizedPublicBaseUrlRu = normalizedPublicBaseUrl;
+        }
+
+        if (string.IsNullOrWhiteSpace(normalizedPublicBaseUrlEu))
+        {
+            normalizedPublicBaseUrlEu = !string.IsNullOrWhiteSpace(normalizedLauncherApiBaseUrlEu)
+                ? normalizedLauncherApiBaseUrlEu
+                : normalizedPublicBaseUrl;
+        }
+
+        if (string.IsNullOrWhiteSpace(normalizedAssetBaseUrlRu))
+        {
+            normalizedAssetBaseUrlRu = !string.IsNullOrWhiteSpace(normalizedAssetBaseUrl)
+                ? normalizedAssetBaseUrl
+                : normalizedPublicBaseUrlRu;
+        }
+
+        if (string.IsNullOrWhiteSpace(normalizedAssetBaseUrlEu))
+        {
+            normalizedAssetBaseUrlEu = !string.IsNullOrWhiteSpace(normalizedAssetBaseUrl)
+                ? normalizedAssetBaseUrl
+                : normalizedPublicBaseUrlEu;
+        }
+
+        var normalizedFallbacksRu = NormalizeFallbacks(
+            settings.FallbackApiBaseUrlsRu is { Count: > 0 } ? settings.FallbackApiBaseUrlsRu : settings.FallbackApiBaseUrls,
+            normalizedPublicBaseUrlRu,
+            normalizedAssetBaseUrlRu);
+        var normalizedFallbacksEu = NormalizeFallbacks(
+            settings.FallbackApiBaseUrlsEu,
+            normalizedPublicBaseUrlEu,
+            normalizedAssetBaseUrlEu);
 
         return new DeliverySettingsConfig(
             PublicBaseUrl: normalizedPublicBaseUrl,
@@ -177,7 +219,28 @@ public sealed class DeliverySettingsProvider(
             FallbackApiBaseUrls: normalizedFallbacks,
             UpdatedAtUtc: DateTime.UtcNow,
             LauncherApiBaseUrlRu: normalizedLauncherApiBaseUrlRu,
-            LauncherApiBaseUrlEu: normalizedLauncherApiBaseUrlEu);
+            LauncherApiBaseUrlEu: normalizedLauncherApiBaseUrlEu,
+            PublicBaseUrlRu: normalizedPublicBaseUrlRu,
+            PublicBaseUrlEu: normalizedPublicBaseUrlEu,
+            AssetBaseUrlRu: normalizedAssetBaseUrlRu,
+            AssetBaseUrlEu: normalizedAssetBaseUrlEu,
+            FallbackApiBaseUrlsRu: normalizedFallbacksRu,
+            FallbackApiBaseUrlsEu: normalizedFallbacksEu);
+    }
+
+    private static List<string> NormalizeFallbacks(
+        IEnumerable<string>? rawValues,
+        string normalizedPublicBaseUrl,
+        string normalizedAssetBaseUrl)
+    {
+        return (rawValues ?? [])
+            .Select(NormalizeAbsoluteUrl)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Where(value =>
+                !string.Equals(value, normalizedPublicBaseUrl, StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(value, normalizedAssetBaseUrl, StringComparison.OrdinalIgnoreCase))
+            .ToList();
     }
 
     private static string NormalizeAbsoluteUrl(string? rawValue)

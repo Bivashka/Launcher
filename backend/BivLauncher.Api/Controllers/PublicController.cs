@@ -76,6 +76,7 @@ public sealed class PublicController(
         branding = MapBranding(branding);
         var deliverySettings = deliverySettingsProvider.GetCachedSettings();
         var publicBaseUrl = ResolvePublicBaseUrl(deliverySettings);
+        var fallbackApiBaseUrls = ResolveFallbackApiBaseUrls(deliverySettings);
         var installTelemetryEnabled = await ResolveInstallTelemetryEnabledAsync(cancellationToken);
         var discordRpcSettings = await ResolveDiscordRpcSettingsAsync(cancellationToken);
         var profileDiscord = discordConfigs
@@ -93,7 +94,7 @@ public sealed class PublicController(
             PublicBaseUrl: publicBaseUrl,
             LauncherApiBaseUrlRu: deliverySettings.LauncherApiBaseUrlRu,
             LauncherApiBaseUrlEu: deliverySettings.LauncherApiBaseUrlEu,
-            FallbackApiBaseUrls: deliverySettings.FallbackApiBaseUrls,
+            FallbackApiBaseUrls: fallbackApiBaseUrls,
             Branding: branding,
             Constraints: new LauncherConstraints(
                 ManagedLauncher: true,
@@ -379,6 +380,19 @@ public sealed class PublicController(
 
     private string ResolvePublicBaseUrl(DeliverySettingsConfig settings)
     {
+        var requestedRegionCode = ResolveRequestedRegionCode(settings);
+        if (string.Equals(requestedRegionCode, "ru", StringComparison.OrdinalIgnoreCase) &&
+            !string.IsNullOrWhiteSpace(settings.PublicBaseUrlRu))
+        {
+            return settings.PublicBaseUrlRu.TrimEnd('/');
+        }
+
+        if (string.Equals(requestedRegionCode, "eu", StringComparison.OrdinalIgnoreCase) &&
+            !string.IsNullOrWhiteSpace(settings.PublicBaseUrlEu))
+        {
+            return settings.PublicBaseUrlEu.TrimEnd('/');
+        }
+
         if (!string.IsNullOrWhiteSpace(settings.PublicBaseUrl))
         {
             return settings.PublicBaseUrl.TrimEnd('/');
@@ -394,6 +408,94 @@ public sealed class PublicController(
         return string.IsNullOrWhiteSpace(configured)
             ? "http://localhost:8080"
             : configured.TrimEnd('/');
+    }
+
+    private string ResolveAssetBaseUrl(DeliverySettingsConfig settings)
+    {
+        var requestedRegionCode = ResolveRequestedRegionCode(settings);
+        if (string.Equals(requestedRegionCode, "ru", StringComparison.OrdinalIgnoreCase) &&
+            !string.IsNullOrWhiteSpace(settings.AssetBaseUrlRu))
+        {
+            return settings.AssetBaseUrlRu.TrimEnd('/');
+        }
+
+        if (string.Equals(requestedRegionCode, "eu", StringComparison.OrdinalIgnoreCase) &&
+            !string.IsNullOrWhiteSpace(settings.AssetBaseUrlEu))
+        {
+            return settings.AssetBaseUrlEu.TrimEnd('/');
+        }
+
+        if (!string.IsNullOrWhiteSpace(settings.AssetBaseUrl))
+        {
+            return settings.AssetBaseUrl.TrimEnd('/');
+        }
+
+        return ResolvePublicBaseUrl(settings);
+    }
+
+    private IReadOnlyList<string> ResolveFallbackApiBaseUrls(DeliverySettingsConfig settings)
+    {
+        var requestedRegionCode = ResolveRequestedRegionCode(settings);
+        if (string.Equals(requestedRegionCode, "ru", StringComparison.OrdinalIgnoreCase) &&
+            settings.FallbackApiBaseUrlsRu is { Count: > 0 })
+        {
+            return settings.FallbackApiBaseUrlsRu;
+        }
+
+        if (string.Equals(requestedRegionCode, "eu", StringComparison.OrdinalIgnoreCase) &&
+            settings.FallbackApiBaseUrlsEu is { Count: > 0 })
+        {
+            return settings.FallbackApiBaseUrlsEu;
+        }
+
+        return settings.FallbackApiBaseUrls;
+    }
+
+    private string ResolveRequestedRegionCode(DeliverySettingsConfig settings)
+    {
+        var requestBaseUrl = ResolveRequestPublicBaseUrl();
+        if (BaseUrlsMatch(requestBaseUrl, settings.LauncherApiBaseUrlRu) ||
+            (settings.FallbackApiBaseUrlsRu?.Any(candidate => BaseUrlsMatch(requestBaseUrl, candidate)) ?? false))
+        {
+            return "ru";
+        }
+
+        if (BaseUrlsMatch(requestBaseUrl, settings.LauncherApiBaseUrlEu) ||
+            (settings.FallbackApiBaseUrlsEu?.Any(candidate => BaseUrlsMatch(requestBaseUrl, candidate)) ?? false))
+        {
+            return "eu";
+        }
+
+        return string.Empty;
+    }
+
+    private static bool BaseUrlsMatch(string left, string right)
+    {
+        var normalizedLeft = (left ?? string.Empty).Trim().TrimEnd('/');
+        var normalizedRight = (right ?? string.Empty).Trim().TrimEnd('/');
+        return !string.IsNullOrWhiteSpace(normalizedLeft) &&
+               !string.IsNullOrWhiteSpace(normalizedRight) &&
+               string.Equals(normalizedLeft, normalizedRight, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string RewriteUpdateDownloadUrl(string rawUrl, string assetBaseUrl)
+    {
+        var normalizedUrl = (rawUrl ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(normalizedUrl) || string.IsNullOrWhiteSpace(assetBaseUrl))
+        {
+            return normalizedUrl;
+        }
+
+        if (Uri.TryCreate(normalizedUrl, UriKind.Absolute, out var absoluteUri))
+        {
+            return absoluteUri.AbsolutePath.StartsWith("/api/public/assets/", StringComparison.OrdinalIgnoreCase)
+                ? $"{assetBaseUrl.TrimEnd('/')}{absoluteUri.PathAndQuery}"
+                : normalizedUrl;
+        }
+
+        return normalizedUrl.StartsWith("/api/public/assets/", StringComparison.OrdinalIgnoreCase)
+            ? $"{assetBaseUrl.TrimEnd('/')}{normalizedUrl}"
+            : normalizedUrl;
     }
 
     private static IEnumerable<NewsItem> FilterRelevantNews(
@@ -527,9 +629,12 @@ public sealed class PublicController(
             return null;
         }
 
+        var deliverySettings = deliverySettingsProvider.GetCachedSettings();
+        var assetBaseUrl = ResolveAssetBaseUrl(deliverySettings);
+
         return new LauncherUpdateInfo(
             LatestVersion: updateConfig.LatestVersion,
-            DownloadUrl: updateConfig.DownloadUrl,
+            DownloadUrl: RewriteUpdateDownloadUrl(updateConfig.DownloadUrl, assetBaseUrl),
             ReleaseNotes: updateConfig.ReleaseNotes);
     }
 
