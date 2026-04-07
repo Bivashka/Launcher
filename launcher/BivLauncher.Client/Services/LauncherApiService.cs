@@ -303,7 +303,12 @@ public sealed class LauncherApiService : ILauncherApiService
         {
             try
             {
-                var response = await _httpClient.GetAsync(candidateUri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                using var attemptTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                attemptTimeoutCts.CancelAfter(ApiRequestAttemptTimeout);
+                var response = await _httpClient.GetAsync(
+                    candidateUri,
+                    HttpCompletionOption.ResponseHeadersRead,
+                    attemptTimeoutCts.Token);
                 if (response.IsSuccessStatusCode)
                 {
                     var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
