@@ -4811,14 +4811,9 @@ public partial class MainWindowViewModel : ViewModelBase
         if (ex is LauncherApiException apiException &&
             apiException.StatusCode == HttpStatusCode.TooManyRequests)
         {
-            if (apiException.RetryAfter is TimeSpan retryAfter &&
-                retryAfter > TimeSpan.Zero)
-            {
-                var retrySeconds = Math.Max(1, (int)Math.Ceiling(retryAfter.TotalSeconds));
-                return F("status.rateLimitedRetry", retrySeconds);
-            }
-
-            return T("status.rateLimited");
+            return _languageCode == "en"
+                ? "The server is temporarily unavailable. Try again."
+                : "Сервер временно недоступен. Повторите попытку.";
         }
 
         if (ex is UnauthorizedAccessException || ex.InnerException is UnauthorizedAccessException)

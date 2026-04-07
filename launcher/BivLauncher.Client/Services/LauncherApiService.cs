@@ -728,13 +728,7 @@ public sealed class LauncherApiService : ILauncherApiService
 
         if (response.StatusCode == HttpStatusCode.TooManyRequests)
         {
-            if (response.Headers.RetryAfter?.Delta is TimeSpan retryAfterDelta && retryAfterDelta > TimeSpan.Zero)
-            {
-                var seconds = Math.Max(1, (int)Math.Ceiling(retryAfterDelta.TotalSeconds));
-                return $"{operation} is temporarily rate-limited. Retry in {seconds} second(s).";
-            }
-
-            return $"{operation} is temporarily rate-limited. Retry shortly.";
+            return $"{operation} is temporarily unavailable.";
         }
 
         return $"{operation} failed with status {(int)response.StatusCode}.";
