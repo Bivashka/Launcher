@@ -52,10 +52,11 @@ public sealed class PublicYggdrasilController(
     {
         try
         {
+            var apiBaseUrl = ResolveApiBaseUrl(Request);
             var publicBaseUrl = ResolvePublicBaseUrl(Request);
             var hostName = ResolveHostName(publicBaseUrl, Request.Host.Host);
             var signaturePublicKey = (configuration["YGGDRASIL_SIGNATURE_PUBLIC_KEY"] ?? string.Empty).Trim();
-            var apiLocation = BuildApiLocation(publicBaseUrl);
+            var apiLocation = BuildApiLocation(apiBaseUrl);
             var metadata = new Dictionary<string, object?>
             {
                 ["meta"] = new
@@ -863,6 +864,18 @@ public sealed class PublicYggdrasilController(
     }
 
     private string ResolvePublicBaseUrl(HttpRequest request)
+    {
+        var deliverySettings = _deliverySettingsProvider.GetCachedSettings();
+        var configuredPublicBaseUrl = (deliverySettings.PublicBaseUrl ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(configuredPublicBaseUrl))
+        {
+            return configuredPublicBaseUrl.TrimEnd('/');
+        }
+
+        return ResolveApiBaseUrl(request);
+    }
+
+    private string ResolveApiBaseUrl(HttpRequest request)
     {
         var forwardedProto = TryGetForwardedHeaderValue(request, "X-Forwarded-Proto");
         var forwardedHost = TryGetForwardedHeaderValue(request, "X-Forwarded-Host");

@@ -2,6 +2,8 @@ namespace BivLauncher.Api.Contracts.Public;
 
 public sealed record BootstrapResponse(
     string PublicBaseUrl,
+    string LauncherApiBaseUrlRu,
+    string LauncherApiBaseUrlEu,
     IReadOnlyList<string> FallbackApiBaseUrls,
     BrandingConfig Branding,
     LauncherConstraints Constraints,

@@ -3,6 +3,7 @@ namespace BivLauncher.Client.Models;
 public sealed class LauncherSettings
 {
     public string ApiBaseUrl { get; set; } = string.Empty;
+    public string PublicBaseUrl { get; set; } = string.Empty;
     public string PreferredApiRegion { get; set; } = string.Empty;
     public string InstallDirectory { get; set; } = string.Empty;
     public bool DebugMode { get; set; }

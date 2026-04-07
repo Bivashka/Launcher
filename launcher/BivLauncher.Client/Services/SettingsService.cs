@@ -245,6 +245,7 @@ public sealed class SettingsService : ISettingsService
     {
         var snapshot = CloneSettings(settings);
         snapshot.ApiBaseUrl = ProtectEndpoint(snapshot.ApiBaseUrl);
+        snapshot.PublicBaseUrl = ProtectEndpoint(snapshot.PublicBaseUrl);
         snapshot.PlayerAuthToken = ProtectToken(snapshot.PlayerAuthToken);
         snapshot.PlayerAuthApiBaseUrl = ProtectEndpoint(snapshot.PlayerAuthApiBaseUrl);
         snapshot.PlayerAccounts = snapshot.PlayerAccounts
@@ -263,6 +264,7 @@ public sealed class SettingsService : ISettingsService
     {
         var normalized = CloneSettings(settings);
         normalized.ApiBaseUrl = UnprotectEndpoint(normalized.ApiBaseUrl);
+        normalized.PublicBaseUrl = UnprotectEndpoint(normalized.PublicBaseUrl);
         normalized.PlayerAuthToken = UnprotectToken(normalized.PlayerAuthToken);
         normalized.PlayerAuthApiBaseUrl = UnprotectEndpoint(normalized.PlayerAuthApiBaseUrl);
         normalized.PlayerAccounts = normalized.PlayerAccounts
@@ -282,6 +284,7 @@ public sealed class SettingsService : ISettingsService
         return new LauncherSettings
         {
             ApiBaseUrl = source.ApiBaseUrl,
+            PublicBaseUrl = source.PublicBaseUrl,
             PreferredApiRegion = source.PreferredApiRegion,
             InstallDirectory = source.InstallDirectory,
             DebugMode = source.DebugMode,
@@ -332,6 +335,7 @@ public sealed class SettingsService : ISettingsService
     private static bool NeedsPersistRewrite(LauncherSettings settings)
     {
         return HasPlainEndpoint(settings.ApiBaseUrl) ||
+               HasPlainEndpoint(settings.PublicBaseUrl) ||
                HasPlainToken(settings.PlayerAuthToken) ||
                HasPlainEndpoint(settings.PlayerAuthApiBaseUrl) ||
                (settings.PlayerAccounts ?? []).Any(account =>

@@ -6,6 +6,8 @@ namespace BivLauncher.Client.Models;
 public sealed class BootstrapResponse
 {
     public string PublicBaseUrl { get; set; } = string.Empty;
+    public string LauncherApiBaseUrlRu { get; set; } = string.Empty;
+    public string LauncherApiBaseUrlEu { get; set; } = string.Empty;
     public List<string> FallbackApiBaseUrls { get; set; } = [];
     public BrandingConfig Branding { get; set; } = new();
     public LauncherConstraints Constraints { get; set; } = new();

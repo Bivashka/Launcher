@@ -148,6 +148,33 @@ public sealed class PublicControllerTests
     }
 
     [Fact]
+    public async Task Bootstrap_WhenRequestHostDiffers_UsesConfiguredPublicBaseUrlAndRegionalApiBaseUrls()
+    {
+        await using var fixture = await TestFixture.CreateAsync();
+        await fixture.SeedProfileAsync("public", isPrivate: false, allowedPlayerUsernames: string.Empty);
+
+        var controller = fixture.CreateController(
+            deliverySettingsProvider: new StubDeliverySettingsProvider(new DeliverySettingsConfig(
+                PublicBaseUrl: "http://95.217.99.17:8080",
+                AssetBaseUrl: "http://95.217.99.17:8080",
+                FallbackApiBaseUrls: [],
+                UpdatedAtUtc: null,
+                LauncherApiBaseUrlRu: "http://195.43.142.97",
+                LauncherApiBaseUrlEu: "http://95.217.99.17:8080")));
+        controller.ControllerContext.HttpContext.Request.Headers.Host = "195.43.142.97";
+        controller.ControllerContext.HttpContext.Request.Headers["X-Forwarded-Proto"] = "http";
+        controller.ControllerContext.HttpContext.Request.Headers["X-Forwarded-Host"] = "195.43.142.97";
+
+        var response = await controller.Bootstrap(CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(response.Result);
+        var payload = Assert.IsType<BootstrapResponse>(ok.Value);
+        Assert.Equal("http://95.217.99.17:8080", payload.PublicBaseUrl);
+        Assert.Equal("http://195.43.142.97", payload.LauncherApiBaseUrlRu);
+        Assert.Equal("http://95.217.99.17:8080", payload.LauncherApiBaseUrlEu);
+    }
+
+    [Fact]
     public async Task Manifest_WhenProfileIsPrivateAndUserIsNotAllowlisted_ReturnsNotFound()
     {
         await using var fixture = await TestFixture.CreateAsync();
@@ -327,7 +354,8 @@ public sealed class PublicControllerTests
         public PublicController CreateController(
             string username = "",
             IBrandingProvider? brandingProvider = null,
-            ILauncherUpdateConfigProvider? launcherUpdateConfigProvider = null)
+            ILauncherUpdateConfigProvider? launcherUpdateConfigProvider = null,
+            IDeliverySettingsProvider? deliverySettingsProvider = null)
         {
             var controller = new PublicController(
                 DbContext,
@@ -335,7 +363,7 @@ public sealed class PublicControllerTests
                 new StubBuildPipelineService(),
                 launcherUpdateConfigProvider ?? new StubLauncherUpdateConfigProvider(),
                 new ConfigurationBuilder().AddInMemoryCollection().Build(),
-                new StubDeliverySettingsProvider(new DeliverySettingsConfig(
+                deliverySettingsProvider ?? new StubDeliverySettingsProvider(new DeliverySettingsConfig(
                     PublicBaseUrl: "https://cdn.local",
                     AssetBaseUrl: "https://cdn.local",
                     FallbackApiBaseUrls: [],

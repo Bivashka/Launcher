@@ -1613,6 +1613,7 @@ public sealed class GameLaunchService(
             ? string.Empty
             : BuildLegacySessionToken(token, profileId);
         var apiBaseUrl = ResolvePlayerAuthApiBaseUrl(settings);
+        var publicBaseUrl = ResolvePlayerPublicBaseUrl(settings);
         var yggdrasilUrl = BuildYggdrasilBaseUrl(apiBaseUrl);
 
         var insertionIndex = FindLaunchModeArgumentIndex(jvmArgs);
@@ -1621,11 +1622,11 @@ public sealed class GameLaunchService(
         insertionIndex = EnsureJvmProperty(jvmArgs, "biv.auth.externalId", externalId, insertionIndex);
         insertionIndex = EnsureJvmProperty(jvmArgs, "biv.auth.token", token, insertionIndex);
         insertionIndex = EnsureJvmProperty(jvmArgs, "biv.auth.session", sessionToken, insertionIndex);
-        insertionIndex = EnsureJvmProperty(jvmArgs, "biv.auth.publicBaseUrl", apiBaseUrl, insertionIndex);
+        insertionIndex = EnsureJvmProperty(jvmArgs, "biv.auth.publicBaseUrl", publicBaseUrl, insertionIndex);
         _ = EnsureJvmProperty(jvmArgs, "biv.auth.yggdrasil", yggdrasilUrl, insertionIndex);
 
         logService.LogInfo(
-            $"Legacy bridge JVM auth properties prepared: username={username}, tokenLength={token.Length}, profileIdLength={profileId.Length}, hasSession={!string.IsNullOrWhiteSpace(sessionToken)}, hasYggdrasil={!string.IsNullOrWhiteSpace(yggdrasilUrl)}, hasPublicBase={!string.IsNullOrWhiteSpace(apiBaseUrl)}.");
+            $"Legacy bridge JVM auth properties prepared: username={username}, tokenLength={token.Length}, profileIdLength={profileId.Length}, hasSession={!string.IsNullOrWhiteSpace(sessionToken)}, hasYggdrasil={!string.IsNullOrWhiteSpace(yggdrasilUrl)}, hasPublicBase={!string.IsNullOrWhiteSpace(publicBaseUrl)}.");
     }
 
     private static int EnsureJvmProperty(IList<string> args, string propertyName, string value, int insertionIndex)
@@ -1946,6 +1947,17 @@ public sealed class GameLaunchService(
         return string.IsNullOrWhiteSpace(apiBaseUrl)
             ? string.Empty
             : apiBaseUrl.TrimEnd('/');
+    }
+
+    private static string ResolvePlayerPublicBaseUrl(LauncherSettings settings)
+    {
+        var publicBaseUrl = (settings.PublicBaseUrl ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(publicBaseUrl))
+        {
+            return publicBaseUrl.TrimEnd('/');
+        }
+
+        return ResolvePlayerAuthApiBaseUrl(settings);
     }
 
     private static string ResolveConfiguredLauncherApiBaseUrl()

@@ -91,6 +91,8 @@ public sealed class PublicController(
 
         var response = new BootstrapResponse(
             PublicBaseUrl: publicBaseUrl,
+            LauncherApiBaseUrlRu: deliverySettings.LauncherApiBaseUrlRu,
+            LauncherApiBaseUrlEu: deliverySettings.LauncherApiBaseUrlEu,
             FallbackApiBaseUrls: deliverySettings.FallbackApiBaseUrls,
             Branding: branding,
             Constraints: new LauncherConstraints(
@@ -377,15 +379,15 @@ public sealed class PublicController(
 
     private string ResolvePublicBaseUrl(DeliverySettingsConfig settings)
     {
+        if (!string.IsNullOrWhiteSpace(settings.PublicBaseUrl))
+        {
+            return settings.PublicBaseUrl.TrimEnd('/');
+        }
+
         var requestBaseUrl = ResolveRequestPublicBaseUrl();
         if (!string.IsNullOrWhiteSpace(requestBaseUrl))
         {
             return requestBaseUrl;
-        }
-
-        if (!string.IsNullOrWhiteSpace(settings.PublicBaseUrl))
-        {
-            return settings.PublicBaseUrl;
         }
 
         var configured = (configuration["PUBLIC_BASE_URL"] ?? configuration["PublicBaseUrl"] ?? string.Empty).Trim();

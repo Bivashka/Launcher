@@ -10,6 +10,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using System.Text;
 using System.Text.Json;
 using Xunit;
 
@@ -406,6 +407,60 @@ public sealed class PublicYggdrasilControllerTests
         Assert.True(payload.TryGetProperty("skinDomains", out var skinDomainsNode));
         Assert.Equal(JsonValueKind.Array, skinDomainsNode.ValueKind);
         Assert.False(payload.TryGetProperty("signaturePublickey", out _));
+    }
+
+    [Fact]
+    public async Task HasJoined_WhenRequestHostDiffers_UsesConfiguredPublicBaseUrlForTextures()
+    {
+        await using var fixture = await TestFixture.CreateAsync();
+        var options = BuildJwtOptions();
+
+        var account = new AuthAccount
+        {
+            Username = "TextureUser",
+            ExternalId = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            SessionVersion = 0,
+            Roles = "player"
+        };
+        fixture.DbContext.AuthAccounts.Add(account);
+        fixture.DbContext.SkinAssets.Add(new SkinAsset
+        {
+            AccountId = account.Id,
+            Key = "skins/texture-user.png"
+        });
+        await fixture.DbContext.SaveChangesAsync();
+
+        var controller = new PublicYggdrasilController(
+            fixture.DbContext,
+            BuildConfiguration(),
+            new StubDeliverySettingsProvider(new DeliverySettingsConfig(
+                PublicBaseUrl: "http://95.217.99.17:8080",
+                AssetBaseUrl: "http://95.217.99.17:8080",
+                FallbackApiBaseUrls: [],
+                UpdatedAtUtc: null,
+                LauncherApiBaseUrlRu: "http://195.43.142.97",
+                LauncherApiBaseUrlEu: "http://95.217.99.17:8080")),
+            Microsoft.Extensions.Options.Options.Create(options),
+            NullLogger<PublicYggdrasilController>.Instance)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext()
+            }
+        };
+
+        controller.ControllerContext.HttpContext.Request.Scheme = "http";
+        controller.ControllerContext.HttpContext.Request.Host = new HostString("195.43.142.97");
+
+        var profileResult = await controller.Profile(account.ExternalId, CancellationToken.None);
+        var ok = Assert.IsType<OkObjectResult>(profileResult);
+        var payload = JsonSerializer.SerializeToElement(ok.Value);
+        var texturesProperty = payload.GetProperty("properties")[0];
+        var encoded = texturesProperty.GetProperty("value").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(encoded));
+        var decoded = JsonDocument.Parse(Encoding.UTF8.GetString(Convert.FromBase64String(encoded!)));
+        var skinUrl = decoded.RootElement.GetProperty("textures").GetProperty("SKIN").GetProperty("url").GetString();
+        Assert.Equal("http://95.217.99.17:8080/skins/TextureUser.png", skinUrl);
     }
 
     private static JwtOptions BuildJwtOptions()

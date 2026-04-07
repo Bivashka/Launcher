@@ -78,6 +78,9 @@ public partial class MainWindowViewModel : ViewModelBase
     private string _playerAuthExternalId = string.Empty;
     private List<string> _playerAuthRoles = [];
     private string _playerAuthApiBaseUrl = string.Empty;
+    private string _bootstrapPublicBaseUrl = string.Empty;
+    private string _bootstrapApiBaseUrlRu = string.Empty;
+    private string _bootstrapApiBaseUrlEu = string.Empty;
     private readonly Dictionary<string, string> _profileBundledRuntimeKeys = new(StringComparer.OrdinalIgnoreCase);
     private DateTime _lastServerOnlineRefreshUtc;
     private Avalonia.Controls.WindowIcon? _defaultWindowIcon;
@@ -557,6 +560,7 @@ public partial class MainWindowViewModel : ViewModelBase
         }
 
         _languageCode = LauncherLocalization.NormalizeLanguage(_settings.Language);
+        _bootstrapPublicBaseUrl = NormalizeBaseUrlOrEmpty(_settings.PublicBaseUrl);
         SyncSelectedLanguageOption();
         RebuildJavaModeOptions();
         RebuildRouteOptions();
@@ -836,6 +840,13 @@ public partial class MainWindowViewModel : ViewModelBase
     partial void OnPreferredApiRegionChanged(string value)
     {
         PreferredApiRegion = NormalizeApiRegionCode(value);
+        var preferredRegionalApiBaseUrl = ResolvePreferredApiRegionApiBaseUrl();
+        if (!string.IsNullOrWhiteSpace(preferredRegionalApiBaseUrl))
+        {
+            ApiBaseUrl = preferredRegionalApiBaseUrl;
+            MergeKnownApiBaseUrls([preferredRegionalApiBaseUrl]);
+        }
+
         NotifyApiRegionSelectionPresentationChanged();
     }
 
@@ -1563,15 +1574,16 @@ public partial class MainWindowViewModel : ViewModelBase
                 candidate,
                 _playerAuthToken,
                 _playerAuthTokenType));
-        var bootstrapApiBaseUrl = NormalizeBaseUrlOrEmpty(bootstrap.PublicBaseUrl);
-        if (!string.IsNullOrWhiteSpace(bootstrapApiBaseUrl))
+        _bootstrapPublicBaseUrl = NormalizeBaseUrlOrEmpty(bootstrap.PublicBaseUrl);
+        _bootstrapApiBaseUrlRu = NormalizeBaseUrlOrEmpty(bootstrap.LauncherApiBaseUrlRu);
+        _bootstrapApiBaseUrlEu = NormalizeBaseUrlOrEmpty(bootstrap.LauncherApiBaseUrlEu);
+        MergeKnownApiBaseUrls([_bootstrapApiBaseUrlRu, _bootstrapApiBaseUrlEu]);
+        var preferredRegionalApiBaseUrl = ResolvePreferredApiRegionApiBaseUrl();
+        if (!string.IsNullOrWhiteSpace(preferredRegionalApiBaseUrl))
         {
-            MergeKnownApiBaseUrls([bootstrapApiBaseUrl]);
-            if (string.IsNullOrWhiteSpace(ResolvePreferredApiRegionApiBaseUrl()))
-            {
-                ApiBaseUrl = bootstrapApiBaseUrl;
-            }
+            ApiBaseUrl = preferredRegionalApiBaseUrl;
         }
+
         MergeKnownApiBaseUrls(bootstrap.FallbackApiBaseUrls);
         var assetRefreshVersion = Interlocked.Increment(ref _assetRefreshVersion);
         await FlushPendingSubmissionsAsync();
@@ -2354,7 +2366,26 @@ public partial class MainWindowViewModel : ViewModelBase
         var resolvedRegionCode = ResolveInitialApiRegion(PreferredApiRegion);
         return string.IsNullOrWhiteSpace(resolvedRegionCode)
             ? string.Empty
-            : ResolveConfiguredApiBaseUrlForRegion(resolvedRegionCode);
+            : ResolveRuntimeApiBaseUrlForRegion(resolvedRegionCode);
+    }
+
+    private string ResolveRuntimeApiBaseUrlForRegion(string regionCode)
+    {
+        var normalizedRegionCode = NormalizeApiRegionCode(regionCode);
+        if (string.IsNullOrWhiteSpace(normalizedRegionCode))
+        {
+            return string.Empty;
+        }
+
+        var bootstrapApiBaseUrl = normalizedRegionCode == "ru"
+            ? _bootstrapApiBaseUrlRu
+            : _bootstrapApiBaseUrlEu;
+        if (!string.IsNullOrWhiteSpace(bootstrapApiBaseUrl))
+        {
+            return bootstrapApiBaseUrl;
+        }
+
+        return ResolveConfiguredApiBaseUrlForRegion(normalizedRegionCode);
     }
 
     private static string NormalizeApiRegionCode(string? regionCode)
@@ -2503,6 +2534,7 @@ public partial class MainWindowViewModel : ViewModelBase
         return new LauncherSettings
         {
             ApiBaseUrl = persistedApiBaseUrl,
+            PublicBaseUrl = NormalizePersistedApiBaseUrl(_bootstrapPublicBaseUrl, configuredApiBaseUrl),
             PreferredApiRegion = NormalizeApiRegionCode(PreferredApiRegion),
             InstallDirectory = InstallDirectory.Trim(),
             DebugMode = DebugMode,
@@ -4422,7 +4454,7 @@ public partial class MainWindowViewModel : ViewModelBase
 
         void AddRegion(string regionCode)
         {
-            var configuredApiBaseUrl = ResolveConfiguredApiBaseUrlForRegion(regionCode);
+            var configuredApiBaseUrl = ResolveRuntimeApiBaseUrlForRegion(regionCode);
             if (string.IsNullOrWhiteSpace(configuredApiBaseUrl) ||
                 candidates.Contains(configuredApiBaseUrl, StringComparer.OrdinalIgnoreCase))
             {
@@ -4497,7 +4529,7 @@ public partial class MainWindowViewModel : ViewModelBase
             return true;
         }
 
-        var preferredApiBaseUrl = NormalizeBaseUrlOrEmpty(ResolveConfiguredApiBaseUrlForRegion(preferredRegionCode));
+        var preferredApiBaseUrl = NormalizeBaseUrlOrEmpty(ResolveRuntimeApiBaseUrlForRegion(preferredRegionCode));
         if (string.IsNullOrWhiteSpace(preferredApiBaseUrl))
         {
             return true;
@@ -4515,7 +4547,7 @@ public partial class MainWindowViewModel : ViewModelBase
                 continue;
             }
 
-            var blockedApiBaseUrl = NormalizeBaseUrlOrEmpty(ResolveConfiguredApiBaseUrlForRegion(regionCode));
+            var blockedApiBaseUrl = NormalizeBaseUrlOrEmpty(ResolveRuntimeApiBaseUrlForRegion(regionCode));
             if (!string.IsNullOrWhiteSpace(blockedApiBaseUrl) &&
                 string.Equals(normalizedCandidate, blockedApiBaseUrl, StringComparison.OrdinalIgnoreCase))
             {
