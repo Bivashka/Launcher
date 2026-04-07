@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Collections.Concurrent;
+using System.Net;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
@@ -566,10 +567,45 @@ public sealed class PublicAuthController(
 
             if (!authResult.Success)
             {
-                return Unauthorized(new { error = authResult.ErrorMessage });
+                if (IsTemporaryAuthProviderFailure(authResult))
+                {
+                    account = await TryResolveKnownDeviceFallbackAccountAsync(
+                        username,
+                        hwidHash,
+                        deviceUserName,
+                        cancellationToken);
+                    if (account is null)
+                    {
+                        return StatusCode(
+                            StatusCodes.Status503ServiceUnavailable,
+                            new { error = "Auth provider temporarily unavailable." });
+                    }
+
+                    roles = NormalizeRoles(account.Roles.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries));
+                    account.UpdatedAtUtc = now;
+                    if (!string.IsNullOrWhiteSpace(hwidHash))
+                    {
+                        account.HwidHash = hwidHash;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(deviceUserName))
+                    {
+                        account.DeviceUserName = deviceUserName;
+                    }
+
+                    logger.LogWarning(
+                        "Using local known-device auth fallback for player {Username} after temporary auth provider failure. Status={StatusCode}, Message={Message}",
+                        username,
+                        authResult.StatusCode,
+                        authResult.ErrorMessage);
+                }
+                else
+                {
+                    return Unauthorized(new { error = authResult.ErrorMessage });
+                }
             }
 
-            if (authResult.Banned)
+            if (account is null && authResult.Banned)
             {
                 return BanResponse("account_ban", "Account is banned.");
             }
@@ -580,95 +616,99 @@ public sealed class PublicAuthController(
             var normalizedUsername = string.IsNullOrWhiteSpace(authResult.Username)
                 ? username
                 : authResult.Username.Trim();
-            if (string.IsNullOrWhiteSpace(normalizedExternalId) || string.IsNullOrWhiteSpace(normalizedUsername))
+            if (account is null &&
+                (string.IsNullOrWhiteSpace(normalizedExternalId) || string.IsNullOrWhiteSpace(normalizedUsername)))
             {
                 return Unauthorized(new { error = "Auth provider returned invalid identity payload." });
             }
 
             var providerRoles = NormalizeRoles(authResult.Roles);
-            roles = await ApplyConfiguredSecurityRolesAsync(
-                normalizedUsername,
-                providerRoles,
-                cancellationToken);
-
-            var accountByExternalId = await dbContext.AuthAccounts.FirstOrDefaultAsync(
-                x => x.ExternalId == normalizedExternalId,
-                cancellationToken);
-            var accountByUsername = await dbContext.AuthAccounts.FirstOrDefaultAsync(
-                x => x.Username == normalizedUsername,
-                cancellationToken);
-            var canRelinkLegacyUsernameAccount =
-                accountByExternalId is null &&
-                accountByUsername is not null &&
-                IsLegacyUsernameExternalId(accountByUsername);
-
-            if (accountByExternalId is not null &&
-                !string.Equals(
-                    accountByExternalId.Username,
-                    normalizedUsername,
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                logger.LogWarning(
-                    "Auth identity mismatch by externalId. ExternalId={ExternalId}, existingUsername={ExistingUsername}, providerUsername={ProviderUsername}",
-                    normalizedExternalId,
-                    accountByExternalId.Username,
-                    normalizedUsername);
-                return Conflict(new
-                {
-                    error = "Auth provider identity mismatch: externalId is already linked to another username."
-                });
-            }
-
-            if (accountByUsername is not null &&
-                !string.Equals(
-                    accountByUsername.ExternalId,
-                    normalizedExternalId,
-                    StringComparison.OrdinalIgnoreCase) &&
-                !canRelinkLegacyUsernameAccount)
-            {
-                logger.LogWarning(
-                    "Auth identity mismatch by username. Username={Username}, existingExternalId={ExistingExternalId}, providerExternalId={ProviderExternalId}",
-                    normalizedUsername,
-                    accountByUsername.ExternalId,
-                    normalizedExternalId);
-                return Conflict(new
-                {
-                    error = "Auth provider identity mismatch: username is already linked to another externalId."
-                });
-            }
-
-            account = accountByExternalId ?? accountByUsername;
-
             if (account is null)
             {
-                account = new AuthAccount
+                roles = await ApplyConfiguredSecurityRolesAsync(
+                    normalizedUsername,
+                    providerRoles,
+                    cancellationToken);
+
+                var accountByExternalId = await dbContext.AuthAccounts.FirstOrDefaultAsync(
+                    x => x.ExternalId == normalizedExternalId,
+                    cancellationToken);
+                var accountByUsername = await dbContext.AuthAccounts.FirstOrDefaultAsync(
+                    x => x.Username == normalizedUsername,
+                    cancellationToken);
+                var canRelinkLegacyUsernameAccount =
+                    accountByExternalId is null &&
+                    accountByUsername is not null &&
+                    IsLegacyUsernameExternalId(accountByUsername);
+
+                if (accountByExternalId is not null &&
+                    !string.Equals(
+                        accountByExternalId.Username,
+                        normalizedUsername,
+                        StringComparison.OrdinalIgnoreCase))
                 {
-                    ExternalId = normalizedExternalId,
-                    Username = normalizedUsername,
-                    Roles = string.Join(',', providerRoles),
-                    Banned = false,
-                    HwidHash = hwidHash,
-                    DeviceUserName = deviceUserName
-                };
-                dbContext.AuthAccounts.Add(account);
-            }
-            else
-            {
-                if (canRelinkLegacyUsernameAccount)
-                {
-                    logger.LogInformation(
-                        "Auth legacy username-based externalId relinked. Username={Username}, oldExternalId={OldExternalId}, newExternalId={NewExternalId}",
-                        account.Username,
-                        account.ExternalId,
-                        normalizedExternalId);
+                    logger.LogWarning(
+                        "Auth identity mismatch by externalId. ExternalId={ExternalId}, existingUsername={ExistingUsername}, providerUsername={ProviderUsername}",
+                        normalizedExternalId,
+                        accountByExternalId.Username,
+                        normalizedUsername);
+                    return Conflict(new
+                    {
+                        error = "Auth provider identity mismatch: externalId is already linked to another username."
+                    });
                 }
 
-                account.Username = normalizedUsername;
-                account.ExternalId = normalizedExternalId;
-                account.Roles = string.Join(',', providerRoles);
-                account.HwidHash = hwidHash;
-                account.DeviceUserName = deviceUserName;
-                account.UpdatedAtUtc = now;
+                if (accountByUsername is not null &&
+                    !string.Equals(
+                        accountByUsername.ExternalId,
+                        normalizedExternalId,
+                        StringComparison.OrdinalIgnoreCase) &&
+                    !canRelinkLegacyUsernameAccount)
+                {
+                    logger.LogWarning(
+                        "Auth identity mismatch by username. Username={Username}, existingExternalId={ExistingExternalId}, providerExternalId={ProviderExternalId}",
+                        normalizedUsername,
+                        accountByUsername.ExternalId,
+                        normalizedExternalId);
+                    return Conflict(new
+                    {
+                        error = "Auth provider identity mismatch: username is already linked to another externalId."
+                    });
+                }
+
+                account = accountByExternalId ?? accountByUsername;
+
+                if (account is null)
+                {
+                    account = new AuthAccount
+                    {
+                        ExternalId = normalizedExternalId,
+                        Username = normalizedUsername,
+                        Roles = string.Join(',', providerRoles),
+                        Banned = false,
+                        HwidHash = hwidHash,
+                        DeviceUserName = deviceUserName
+                    };
+                    dbContext.AuthAccounts.Add(account);
+                }
+                else
+                {
+                    if (canRelinkLegacyUsernameAccount)
+                    {
+                        logger.LogInformation(
+                            "Auth legacy username-based externalId relinked. Username={Username}, oldExternalId={OldExternalId}, newExternalId={NewExternalId}",
+                            account.Username,
+                            account.ExternalId,
+                            normalizedExternalId);
+                    }
+
+                    account.Username = normalizedUsername;
+                    account.ExternalId = normalizedExternalId;
+                    account.Roles = string.Join(',', providerRoles);
+                    account.HwidHash = hwidHash;
+                    account.DeviceUserName = deviceUserName;
+                    account.UpdatedAtUtc = now;
+                }
             }
         }
 
@@ -946,6 +986,73 @@ public sealed class PublicAuthController(
         var normalizedHwid = (hwidHash ?? string.Empty).Trim().ToLowerInvariant();
         var normalizedDeviceUser = (deviceUserName ?? string.Empty).Trim().ToLowerInvariant();
         return $"{normalizedUsername}|{normalizedHwid}|{normalizedDeviceUser}";
+    }
+
+    private async Task<AuthAccount?> TryResolveKnownDeviceFallbackAccountAsync(
+        string username,
+        string hwidHash,
+        string deviceUserName,
+        CancellationToken cancellationToken)
+    {
+        var account = await dbContext.AuthAccounts.FirstOrDefaultAsync(
+            x => x.Username == username,
+            cancellationToken);
+        if (account is null)
+        {
+            return null;
+        }
+
+        return CanUseKnownDeviceFallback(account, hwidHash, deviceUserName)
+            ? account
+            : null;
+    }
+
+    private static bool CanUseKnownDeviceFallback(AuthAccount account, string hwidHash, string deviceUserName)
+    {
+        var hasStoredHwid = !string.IsNullOrWhiteSpace(account.HwidHash);
+        var hasStoredDevice = !string.IsNullOrWhiteSpace(account.DeviceUserName);
+        if (!hasStoredHwid && !hasStoredDevice)
+        {
+            return false;
+        }
+
+        var hwidMatches = !hasStoredHwid ||
+            (!string.IsNullOrWhiteSpace(hwidHash) &&
+             string.Equals(account.HwidHash, hwidHash, StringComparison.OrdinalIgnoreCase));
+        var deviceMatches = !hasStoredDevice ||
+            (!string.IsNullOrWhiteSpace(deviceUserName) &&
+             string.Equals(account.DeviceUserName, deviceUserName, StringComparison.OrdinalIgnoreCase));
+
+        return hwidMatches && deviceMatches;
+    }
+
+    private static bool IsTemporaryAuthProviderFailure(ExternalAuthResult authResult)
+    {
+        if (authResult.StatusCode is HttpStatusCode.TooManyRequests)
+        {
+            return true;
+        }
+
+        if (authResult.StatusCode is >= HttpStatusCode.InternalServerError)
+        {
+            return true;
+        }
+
+        var message = (authResult.ErrorMessage ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return false;
+        }
+
+        return
+            message.Contains("too many attempts", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("too many requests", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("temporarily unavailable", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("retry later", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("timeout", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("слишком много попыток", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("повторите позже", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("временно недоступ", StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task<AuthAccount?> ResolveAccountForSessionMutationAsync(

@@ -1,3 +1,5 @@
+using System.Net;
+
 namespace BivLauncher.Api.Services;
 
 public interface IExternalAuthService
@@ -17,4 +19,5 @@ public sealed class ExternalAuthResult
     public List<string> Roles { get; init; } = ["player"];
     public bool Banned { get; init; }
     public string ErrorMessage { get; init; } = string.Empty;
+    public HttpStatusCode? StatusCode { get; init; }
 }

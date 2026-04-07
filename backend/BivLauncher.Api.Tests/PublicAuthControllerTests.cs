@@ -356,11 +356,100 @@ public sealed class PublicAuthControllerTests
         Assert.Equal("Bivashka-id", account.ExternalId);
     }
 
+    [Fact]
+    public async Task Login_WhenAuthProviderRateLimitsKnownDevice_UsesLocalFallback()
+    {
+        await using var fixture = await TestFixture.CreateAsync();
+        fixture.DbContext.AuthAccounts.Add(new AuthAccount
+        {
+            Username = "Freaking",
+            ExternalId = "Freaking-id",
+            Roles = "player",
+            SessionVersion = 0,
+            HwidHash = "hwid-1",
+            DeviceUserName = "pc-1"
+        });
+        await fixture.DbContext.SaveChangesAsync();
+
+        var controller = CreateController(
+            fixture.DbContext,
+            minClientVersion: "1.0.0",
+            externalAuthService: new StubExternalAuthService
+            {
+                Failure = new ExternalAuthResult
+                {
+                    Success = false,
+                    ErrorMessage = "Слишком много попыток входа. Попробуйте позже.",
+                    StatusCode = System.Net.HttpStatusCode.TooManyRequests
+                }
+            });
+        controller.ControllerContext.HttpContext.Request.Headers["X-BivLauncher-Client"] = "BivLauncher.Client/1.2.3";
+
+        var response = await controller.Login(
+            new PublicAuthLoginRequest
+            {
+                Username = "Freaking",
+                Password = "secret",
+                HwidFingerprint = "hwid-1",
+                DeviceUserName = "pc-1"
+            },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(response.Result);
+        var payload = Assert.IsType<PublicAuthLoginResponse>(ok.Value);
+        Assert.Equal("Freaking", payload.Username);
+        Assert.Equal("Freaking-id", payload.ExternalId);
+    }
+
+    [Fact]
+    public async Task Login_WhenAuthProviderRateLimitsUnknownDevice_ReturnsServiceUnavailable()
+    {
+        await using var fixture = await TestFixture.CreateAsync();
+        fixture.DbContext.AuthAccounts.Add(new AuthAccount
+        {
+            Username = "Freaking",
+            ExternalId = "Freaking-id",
+            Roles = "player",
+            SessionVersion = 0,
+            HwidHash = "hwid-1",
+            DeviceUserName = "pc-1"
+        });
+        await fixture.DbContext.SaveChangesAsync();
+
+        var controller = CreateController(
+            fixture.DbContext,
+            minClientVersion: "1.0.0",
+            externalAuthService: new StubExternalAuthService
+            {
+                Failure = new ExternalAuthResult
+                {
+                    Success = false,
+                    ErrorMessage = "Слишком много попыток входа. Попробуйте позже.",
+                    StatusCode = System.Net.HttpStatusCode.TooManyRequests
+                }
+            });
+        controller.ControllerContext.HttpContext.Request.Headers["X-BivLauncher-Client"] = "BivLauncher.Client/1.2.3";
+
+        var response = await controller.Login(
+            new PublicAuthLoginRequest
+            {
+                Username = "Freaking",
+                Password = "secret",
+                HwidFingerprint = "other-hwid",
+                DeviceUserName = "other-pc"
+            },
+            CancellationToken.None);
+
+        var unavailable = Assert.IsType<ObjectResult>(response.Result);
+        Assert.Equal(StatusCodes.Status503ServiceUnavailable, unavailable.StatusCode);
+    }
+
     private static PublicAuthController CreateController(
         AppDbContext dbContext,
         string minClientVersion,
         string launcherProof = "",
-        ISecuritySettingsProvider? securitySettingsProvider = null)
+        ISecuritySettingsProvider? securitySettingsProvider = null,
+        IExternalAuthService? externalAuthService = null)
     {
         var values = new Dictionary<string, string?>();
         if (!string.IsNullOrWhiteSpace(minClientVersion))
@@ -380,7 +469,7 @@ public sealed class PublicAuthControllerTests
         var controller = new PublicAuthController(
             dbContext,
             configuration,
-            new StubExternalAuthService(),
+            externalAuthService ?? new StubExternalAuthService(),
             new StubHardwareFingerprintService(),
             new JwtTokenService(Microsoft.Extensions.Options.Options.Create(BuildJwtOptions())),
             new StubTwoFactorService(),
@@ -414,12 +503,19 @@ public sealed class PublicAuthControllerTests
 
     private sealed class StubExternalAuthService : IExternalAuthService
     {
+        public ExternalAuthResult? Failure { get; init; }
+
         public Task<ExternalAuthResult> AuthenticateAsync(
             string username,
             string password,
             string hwidHash,
             CancellationToken cancellationToken = default)
         {
+            if (Failure is not null)
+            {
+                return Task.FromResult(Failure);
+            }
+
             return Task.FromResult(new ExternalAuthResult
             {
                 Success = true,

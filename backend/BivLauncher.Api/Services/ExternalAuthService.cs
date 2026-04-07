@@ -69,7 +69,8 @@ public sealed class ExternalAuthService(
                 return new ExternalAuthResult
                 {
                     Success = false,
-                    ErrorMessage = reason
+                    ErrorMessage = reason,
+                    StatusCode = response.StatusCode
                 };
             }
 
