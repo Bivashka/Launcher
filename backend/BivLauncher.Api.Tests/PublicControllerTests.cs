@@ -103,6 +103,51 @@ public sealed class PublicControllerTests
     }
 
     [Fact]
+    public async Task Bootstrap_WhenLauncherUpdateExists_PreservesConfiguredDownloadUrl()
+    {
+        await using var fixture = await TestFixture.CreateAsync();
+        await fixture.SeedProfileAsync("public", isPrivate: false, allowedPlayerUsernames: string.Empty);
+
+        var controller = fixture.CreateController(
+            launcherUpdateConfigProvider: new StubLauncherUpdateConfigProvider(
+                new LauncherUpdateConfig(
+                    LatestVersion: "1.0.8",
+                    DownloadUrl: "http://95.217.99.17:8080/api/public/assets/launcher-updates/1.0.8/BivLauncher.zip",
+                    ReleaseNotes: "test")));
+        controller.ControllerContext.HttpContext.Request.Headers.Host = "195.43.142.97";
+        controller.ControllerContext.HttpContext.Request.Headers["X-Forwarded-Proto"] = "http";
+        controller.ControllerContext.HttpContext.Request.Headers["X-Forwarded-Host"] = "195.43.142.97";
+
+        var response = await controller.Bootstrap(CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(response.Result);
+        var payload = Assert.IsType<BootstrapResponse>(ok.Value);
+        Assert.NotNull(payload.LauncherUpdate);
+        Assert.Equal("http://95.217.99.17:8080/api/public/assets/launcher-updates/1.0.8/BivLauncher.zip", payload.LauncherUpdate!.DownloadUrl);
+    }
+
+    [Fact]
+    public async Task Bootstrap_WhenClientVersionIs103_SuppressesLauncherUpdate()
+    {
+        await using var fixture = await TestFixture.CreateAsync();
+        await fixture.SeedProfileAsync("public", isPrivate: false, allowedPlayerUsernames: string.Empty);
+
+        var controller = fixture.CreateController(
+            launcherUpdateConfigProvider: new StubLauncherUpdateConfigProvider(
+                new LauncherUpdateConfig(
+                    LatestVersion: "1.0.8",
+                    DownloadUrl: "http://95.217.99.17:8080/api/public/assets/launcher-updates/1.0.8/BivLauncher.zip",
+                    ReleaseNotes: "test")));
+        controller.ControllerContext.HttpContext.Request.Headers["X-BivLauncher-Client"] = "BivLauncher.Client/1.0.3";
+
+        var response = await controller.Bootstrap(CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(response.Result);
+        var payload = Assert.IsType<BootstrapResponse>(ok.Value);
+        Assert.Null(payload.LauncherUpdate);
+    }
+
+    [Fact]
     public async Task Manifest_WhenProfileIsPrivateAndUserIsNotAllowlisted_ReturnsNotFound()
     {
         await using var fixture = await TestFixture.CreateAsync();
@@ -279,13 +324,16 @@ public sealed class PublicControllerTests
             await _objectStorage.UploadJsonAsync(profile.LatestManifestKey, manifest);
         }
 
-        public PublicController CreateController(string username = "", IBrandingProvider? brandingProvider = null)
+        public PublicController CreateController(
+            string username = "",
+            IBrandingProvider? brandingProvider = null,
+            ILauncherUpdateConfigProvider? launcherUpdateConfigProvider = null)
         {
             var controller = new PublicController(
                 DbContext,
                 brandingProvider ?? new StubBrandingProvider(),
                 new StubBuildPipelineService(),
-                new StubLauncherUpdateConfigProvider(),
+                launcherUpdateConfigProvider ?? new StubLauncherUpdateConfigProvider(),
                 new ConfigurationBuilder().AddInMemoryCollection().Build(),
                 new StubDeliverySettingsProvider(new DeliverySettingsConfig(
                     PublicBaseUrl: "https://cdn.local",
@@ -374,11 +422,11 @@ public sealed class PublicControllerTests
         }
     }
 
-    private sealed class StubLauncherUpdateConfigProvider : ILauncherUpdateConfigProvider
+    private sealed class StubLauncherUpdateConfigProvider(LauncherUpdateConfig? config = null) : ILauncherUpdateConfigProvider
     {
         public Task<LauncherUpdateConfig?> GetAsync(CancellationToken cancellationToken = default)
         {
-            return Task.FromResult<LauncherUpdateConfig?>(null);
+            return Task.FromResult(config);
         }
 
         public Task<LauncherUpdateConfig> SaveAsync(LauncherUpdateConfig config, CancellationToken cancellationToken = default)

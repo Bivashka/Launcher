@@ -514,6 +514,11 @@ public sealed class PublicController(
 
     private async Task<LauncherUpdateInfo?> ResolveLauncherUpdateAsync(CancellationToken cancellationToken)
     {
+        if (ShouldSuppressLauncherUpdateForCurrentClient())
+        {
+            return null;
+        }
+
         var updateConfig = await launcherUpdateConfigProvider.GetAsync(cancellationToken);
         if (updateConfig is null)
         {
@@ -522,7 +527,7 @@ public sealed class PublicController(
 
         return new LauncherUpdateInfo(
             LatestVersion: updateConfig.LatestVersion,
-            DownloadUrl: RewritePublicAssetUrlToCurrentRequestHost(updateConfig.DownloadUrl),
+            DownloadUrl: updateConfig.DownloadUrl,
             ReleaseNotes: updateConfig.ReleaseNotes);
     }
 
@@ -621,6 +626,85 @@ public sealed class PublicController(
         return normalizedUrl.StartsWith("/api/public/assets/", StringComparison.OrdinalIgnoreCase)
             ? normalizedUrl
             : normalizedUrl;
+    }
+
+    private bool ShouldSuppressLauncherUpdateForCurrentClient()
+    {
+        var versionText = ResolveLauncherClientVersionText();
+        if (string.IsNullOrWhiteSpace(versionText))
+        {
+            return false;
+        }
+
+        if (!TryParseLauncherVersion(versionText, out var currentVersion))
+        {
+            return false;
+        }
+
+        return currentVersion <= new Version(1, 0, 3);
+    }
+
+    private string ResolveLauncherClientVersionText()
+    {
+        var explicitHeader = Request.Headers["X-BivLauncher-Client"].FirstOrDefault();
+        var parsed = TryExtractLauncherVersion(explicitHeader);
+        if (!string.IsNullOrWhiteSpace(parsed))
+        {
+            return parsed;
+        }
+
+        var userAgent = Request.Headers.UserAgent.ToString();
+        return TryExtractLauncherVersion(userAgent);
+    }
+
+    private static string TryExtractLauncherVersion(string? value)
+    {
+        var normalized = (value ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return string.Empty;
+        }
+
+        const string marker = "BivLauncher.Client/";
+        var markerIndex = normalized.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (markerIndex < 0)
+        {
+            return string.Empty;
+        }
+
+        var versionStart = markerIndex + marker.Length;
+        var tail = normalized[versionStart..].Trim();
+        if (string.IsNullOrWhiteSpace(tail))
+        {
+            return string.Empty;
+        }
+
+        var separatorIndex = tail.IndexOfAny([' ', ';', ')', '(']);
+        return separatorIndex >= 0 ? tail[..separatorIndex].Trim() : tail;
+    }
+
+    private static bool TryParseLauncherVersion(string? value, out Version version)
+    {
+        version = new Version(0, 0);
+        var normalized = (value ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return false;
+        }
+
+        var separatorIndex = normalized.IndexOfAny(['-', '+']);
+        if (separatorIndex >= 0)
+        {
+            normalized = normalized[..separatorIndex];
+        }
+
+        if (!Version.TryParse(normalized, out var parsedVersion) || parsedVersion is null)
+        {
+            return false;
+        }
+
+        version = parsedVersion;
+        return true;
     }
 
     private string ResolveRequestPublicBaseUrl()
