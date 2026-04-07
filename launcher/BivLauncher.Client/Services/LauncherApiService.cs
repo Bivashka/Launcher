@@ -10,6 +10,7 @@ namespace BivLauncher.Client.Services;
 public sealed class LauncherApiService : ILauncherApiService
 {
     private const int MaxRetryAttempts = 3;
+    private static readonly TimeSpan ApiRequestAttemptTimeout = TimeSpan.FromSeconds(12);
     private const string LauncherClientHeaderName = "X-BivLauncher-Client";
     private const string LauncherProofHeaderName = "X-BivLauncher-Proof";
     private const string LauncherClientProofMetadataKey = "BivLauncher.ClientProof";
@@ -525,7 +526,12 @@ public sealed class LauncherApiService : ILauncherApiService
             try
             {
                 using var request = requestFactory();
-                var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                using var attemptTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                attemptTimeoutCts.CancelAfter(ApiRequestAttemptTimeout);
+                var response = await _httpClient.SendAsync(
+                    request,
+                    HttpCompletionOption.ResponseHeadersRead,
+                    attemptTimeoutCts.Token);
 
                 if (attempt >= MaxRetryAttempts || !ShouldRetry(response.StatusCode))
                 {

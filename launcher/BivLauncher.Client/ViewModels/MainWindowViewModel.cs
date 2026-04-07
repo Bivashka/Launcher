@@ -4484,7 +4484,6 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             var normalized = NormalizeBaseUrlOrEmpty(value);
             if (string.IsNullOrWhiteSpace(normalized) ||
-                !IsApiBaseUrlCandidateAllowedForSelectedRegion(normalized) ||
                 candidates.Contains(normalized, StringComparer.OrdinalIgnoreCase))
             {
                 return;
@@ -4513,49 +4512,6 @@ public partial class MainWindowViewModel : ViewModelBase
         }
 
         return candidates;
-    }
-
-    private bool IsApiBaseUrlCandidateAllowedForSelectedRegion(string candidate)
-    {
-        var normalizedCandidate = NormalizeBaseUrlOrEmpty(candidate);
-        if (string.IsNullOrWhiteSpace(normalizedCandidate))
-        {
-            return false;
-        }
-
-        var preferredRegionCode = NormalizeApiRegionCode(PreferredApiRegion);
-        if (string.IsNullOrWhiteSpace(preferredRegionCode))
-        {
-            return true;
-        }
-
-        var preferredApiBaseUrl = NormalizeBaseUrlOrEmpty(ResolveRuntimeApiBaseUrlForRegion(preferredRegionCode));
-        if (string.IsNullOrWhiteSpace(preferredApiBaseUrl))
-        {
-            return true;
-        }
-
-        if (string.Equals(normalizedCandidate, preferredApiBaseUrl, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        foreach (var regionCode in new[] { "ru", "eu" })
-        {
-            if (string.Equals(regionCode, preferredRegionCode, StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            var blockedApiBaseUrl = NormalizeBaseUrlOrEmpty(ResolveRuntimeApiBaseUrlForRegion(regionCode));
-            if (!string.IsNullOrWhiteSpace(blockedApiBaseUrl) &&
-                string.Equals(normalizedCandidate, blockedApiBaseUrl, StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     private async Task<T> ExecuteAgainstApiFailoverAsync<T>(
