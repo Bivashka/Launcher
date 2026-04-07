@@ -765,7 +765,11 @@ public sealed class BuildPipelineService(
         }
 
         var artifactPath = ResolveGeneratedArtifactPath(existingRelativePaths, LegacyBridgeCompatArtifactPath);
-        var compatJarBytes = BuildLegacyBridgeCompatJar(requiredMethods);
+        var assetClassBytes = TryLoadCanonicalLegacyBridgeClassBytes();
+        var useCanonicalBridgeAsset = assetClassBytes.Length > 0 && CanUseCanonicalLegacyBridge(requiredMethods);
+        var compatJarBytes = useCanonicalBridgeAsset
+            ? BuildLegacyBridgeCompatJar(assetClassBytes)
+            : BuildLegacyBridgeCompatJar(requiredMethods);
         var methodSignaturePreview = string.Join(
             ", ",
             requiredMethods
@@ -773,11 +777,22 @@ public sealed class BuildPipelineService(
                 .ThenBy(x => x.Descriptor, StringComparer.Ordinal)
                 .Take(16)
                 .Select(x => $"{x.Name}{x.Descriptor}"));
-        logger.LogWarning(
-            "Generated LegacyBridge compatibility artifact '{ArtifactPath}' with {MethodCount} method signature(s): {MethodSignatures}",
-            artifactPath,
-            requiredMethods.Count,
-            methodSignaturePreview);
+        if (useCanonicalBridgeAsset)
+        {
+            logger.LogWarning(
+                "Generated LegacyBridge compatibility artifact '{ArtifactPath}' from canonical bridge asset with {MethodCount} method signature(s): {MethodSignatures}",
+                artifactPath,
+                requiredMethods.Count,
+                methodSignaturePreview);
+        }
+        else
+        {
+            logger.LogWarning(
+                "Generated LegacyBridge compatibility artifact '{ArtifactPath}' with generated stub bridge for {MethodCount} method signature(s): {MethodSignatures}",
+                artifactPath,
+                requiredMethods.Count,
+                methodSignaturePreview);
+        }
 
         return new GeneratedManifestFile(
             Path: artifactPath,
@@ -791,6 +806,55 @@ public sealed class BuildPipelineService(
         return extension.Equals(".jar", StringComparison.OrdinalIgnoreCase) ||
                extension.Equals(".jar2", StringComparison.OrdinalIgnoreCase) ||
                extension.Equals(".zip", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private byte[] TryLoadCanonicalLegacyBridgeClassBytes()
+    {
+        try
+        {
+            var candidate = Path.Combine(environment.ContentRootPath, "Assets", "LegacyBridge.class");
+            if (!File.Exists(candidate))
+            {
+                return [];
+            }
+
+            return File.ReadAllBytes(candidate);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            logger.LogDebug(ex, "Failed to load canonical LegacyBridge.class asset for compatibility artifact generation.");
+            return [];
+        }
+    }
+
+    private static bool CanUseCanonicalLegacyBridge(IReadOnlyCollection<LegacyBridgeMethodSignature> requiredMethods)
+    {
+        foreach (var method in requiredMethods)
+        {
+            if (!IsCanonicalLegacyBridgeMethod(method))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsCanonicalLegacyBridgeMethod(LegacyBridgeMethodSignature method)
+    {
+        return (method.Name, method.Descriptor) switch
+        {
+            ("getUsername", "()Ljava/lang/String;") => true,
+            ("getAccessToken", "()Ljava/lang/String;") => true,
+            ("getSessionId", "()Ljava/lang/String;") => true,
+            ("getServerUrl", "()Ljava/lang/String;") => true,
+            ("getSkinURL", "(Ljava/lang/String;)Ljava/lang/String;") => true,
+            ("getCloakURL", "(Ljava/lang/String;)Ljava/lang/String;") => true,
+            ("joinServer", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;") => true,
+            ("checkServer", "(Ljava/lang/String;Ljava/lang/String;)Z") => true,
+            ("checkServer", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;") => true,
+            _ => false
+        };
     }
 
     private static string ResolveGeneratedArtifactPath(IReadOnlySet<string> existingRelativePaths, string preferredPath)
@@ -1064,7 +1128,11 @@ public sealed class BuildPipelineService(
     private static byte[] BuildLegacyBridgeCompatJar(IReadOnlyCollection<LegacyBridgeMethodSignature> requiredMethods)
     {
         var classBytes = BuildLegacyBridgeClass(requiredMethods);
+        return BuildLegacyBridgeCompatJar(classBytes);
+    }
 
+    private static byte[] BuildLegacyBridgeCompatJar(byte[] classBytes)
+    {
         using var stream = new MemoryStream();
         using (var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
         {
