@@ -11,6 +11,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<ActiveGameSession> ActiveGameSessions => Set<ActiveGameSession>();
     public DbSet<TwoFactorConfig> TwoFactorConfigs => Set<TwoFactorConfig>();
     public DbSet<AuthProviderConfig> AuthProviderConfigs => Set<AuthProviderConfig>();
+    public DbSet<SecuritySettingsState> SecuritySettingsStates => Set<SecuritySettingsState>();
     public DbSet<NewsSourceConfig> NewsSourceConfigs => Set<NewsSourceConfig>();
     public DbSet<NewsSyncConfig> NewsSyncConfigs => Set<NewsSyncConfig>();
     public DbSet<NewsRetentionConfig> NewsRetentionConfigs => Set<NewsRetentionConfig>();
@@ -98,6 +99,14 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.Property(x => x.LoginUrl).HasMaxLength(512);
             entity.Property(x => x.LoginFieldKey).HasMaxLength(64);
             entity.Property(x => x.PasswordFieldKey).HasMaxLength(64);
+        });
+
+        modelBuilder.Entity<SecuritySettingsState>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).ValueGeneratedNever();
+            entity.Property(x => x.LauncherAdminUsernamesJson).HasMaxLength(8192);
+            entity.Property(x => x.SiteCosmeticsUploadSecret).HasMaxLength(256);
         });
 
         modelBuilder.Entity<S3StorageConfig>(entity =>

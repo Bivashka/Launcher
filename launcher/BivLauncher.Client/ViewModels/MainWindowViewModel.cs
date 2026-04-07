@@ -2539,7 +2539,8 @@ public partial class MainWindowViewModel : ViewModelBase
                 ApiBaseUrl = NormalizePersistedApiBaseUrl(account.ApiBaseUrl, configuredApiBaseUrl),
                 LastUsedAtUtc = account.LastUsedAtUtc
             })],
-            ActivePlayerAccountUsername = canAutoRestore ? (activeStoredAccount?.Username ?? string.Empty) : string.Empty
+            ActivePlayerAccountUsername = canAutoRestore ? (activeStoredAccount?.Username ?? string.Empty) : string.Empty,
+            LastAutoUpdateVersionAttempted = _settings.LastAutoUpdateVersionAttempted
         };
     }
 
@@ -3899,9 +3900,17 @@ public partial class MainWindowViewModel : ViewModelBase
             return;
         }
 
+        if (string.Equals(_settings.LastAutoUpdateVersionAttempted, LatestLauncherVersion, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
         _isAutomaticUpdateInProgress = true;
         try
         {
+            _settings.LastAutoUpdateVersionAttempted = LatestLauncherVersion;
+            await PersistSettingsSnapshotAsync();
+
             var readyPackage = IsUpdatePackageReady &&
                                string.Equals(DownloadedUpdateVersion, LatestLauncherVersion, StringComparison.OrdinalIgnoreCase);
 
@@ -3914,8 +3923,6 @@ public partial class MainWindowViewModel : ViewModelBase
             {
                 return;
             }
-
-            await ScheduleUpdateInstallAndShutdownAsync(automatic: true);
         }
         finally
         {

@@ -10,6 +10,7 @@ public sealed class LauncherUpdateService(
     ISettingsService settingsService,
     ILogService logService) : ILauncherUpdateService
 {
+    private static readonly TimeSpan DownloadCandidateHeaderTimeout = TimeSpan.FromSeconds(20);
     private const string LauncherApiBaseUrlEnvVar = "BIVLAUNCHER_API_BASE_URL";
     private const string LauncherApiBaseUrlRuEnvVar = "BIVLAUNCHER_API_BASE_URL_RU";
     private const string LauncherApiBaseUrlEuEnvVar = "BIVLAUNCHER_API_BASE_URL_EU";
@@ -41,7 +42,8 @@ public sealed class LauncherUpdateService(
 
         using var response = await SendDownloadRequestAsync(normalizedUrl, cancellationToken);
 
-        var extension = ResolvePackageExtension(normalizedUrl, response.Content.Headers);
+        var resolvedDownloadUrl = response.RequestMessage?.RequestUri?.ToString() ?? normalizedUrl;
+        var extension = ResolvePackageExtension(resolvedDownloadUrl, response.Content.Headers);
         if (!string.Equals(extension, ".zip", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException("Update package must be a .zip archive.");
@@ -80,10 +82,12 @@ public sealed class LauncherUpdateService(
         {
             try
             {
+                using var requestCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                requestCts.CancelAfter(DownloadCandidateHeaderTimeout);
                 var response = await _httpClient.GetAsync(
                     candidateUrl,
                     HttpCompletionOption.ResponseHeadersRead,
-                    cancellationToken);
+                    requestCts.Token);
                 if (response.IsSuccessStatusCode)
                 {
                     if (!string.Equals(candidateUrl, downloadUrl, StringComparison.OrdinalIgnoreCase))

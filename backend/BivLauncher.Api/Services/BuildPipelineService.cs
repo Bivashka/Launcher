@@ -1165,6 +1165,14 @@ public sealed class BuildPipelineService(
         var ctorNameIndex = pool.AddUtf8("<init>");
         var ctorDescriptorIndex = pool.AddUtf8("()V");
         var objectCtorMethodRefIndex = pool.AddMethodRef("java/lang/Object", "<init>", "()V");
+        var stringBuilderClassIndex = pool.AddClass("java/lang/StringBuilder");
+        var stringLengthMethodRefIndex = pool.AddMethodRef("java/lang/String", "length", "()I");
+        var stringBuilderCtorMethodRefIndex = pool.AddMethodRef("java/lang/StringBuilder", "<init>", "()V");
+        var stringBuilderAppendStringMethodRefIndex = pool.AddMethodRef(
+            "java/lang/StringBuilder",
+            "append",
+            "(Ljava/lang/String;)Ljava/lang/StringBuilder;");
+        var stringBuilderToStringMethodRefIndex = pool.AddMethodRef("java/lang/StringBuilder", "toString", "()Ljava/lang/String;");
         var systemGetPropertyMethodRefIndex = pool.AddMethodRef(
             "java/lang/System",
             "getProperty",
@@ -1194,6 +1202,10 @@ public sealed class BuildPipelineService(
         var legacyUuidKeyIndex = pool.AddStringConstant("biv.auth.uuid");
         var legacyExternalIdKeyIndex = pool.AddStringConstant("biv.auth.externalId");
         var legacyYggdrasilKeyIndex = pool.AddStringConstant("biv.auth.yggdrasil");
+        var legacyPublicBaseUrlKeyIndex = pool.AddStringConstant("biv.auth.publicBaseUrl");
+        var skinsPathConstantIndex = pool.AddStringConstant("/skins/");
+        var capesPathConstantIndex = pool.AddStringConstant("/capes/");
+        var pngSuffixConstantIndex = pool.AddStringConstant(".png");
 
         var methodIndices = requiredMethods
             .OrderBy(x => x.Name, StringComparer.Ordinal)
@@ -1232,12 +1244,17 @@ public sealed class BuildPipelineService(
 
         foreach (var method in methodIndices)
         {
-            var (stubCode, maxStack) = BuildStubCodeForMethod(
+            var (stubCode, maxStack, maxLocals) = BuildStubCodeForMethod(
                 method.Name,
                 method.Descriptor,
                 emptyStringConstantIndex,
                 okStringConstantIndex,
                 systemGetPropertyMethodRefIndex,
+                stringBuilderClassIndex,
+                stringLengthMethodRefIndex,
+                stringBuilderCtorMethodRefIndex,
+                stringBuilderAppendStringMethodRefIndex,
+                stringBuilderToStringMethodRefIndex,
                 collectionsEmptyMapMethodRefIndex,
                 collectionsEmptyListMethodRefIndex,
                 collectionsEmptySetMethodRefIndex,
@@ -1247,8 +1264,11 @@ public sealed class BuildPipelineService(
                 legacySessionKeyIndex,
                 legacyUuidKeyIndex,
                 legacyExternalIdKeyIndex,
-                legacyYggdrasilKeyIndex);
-            var maxLocals = checked((ushort)GetMethodParameterSlotCount(method.Descriptor));
+                legacyYggdrasilKeyIndex,
+                legacyPublicBaseUrlKeyIndex,
+                skinsPathConstantIndex,
+                capesPathConstantIndex,
+                pngSuffixConstantIndex);
             WriteMethod(
                 stream,
                 accessFlags: 0x0009,
@@ -1264,12 +1284,17 @@ public sealed class BuildPipelineService(
         return stream.ToArray();
     }
 
-    private static (byte[] Code, ushort MaxStack) BuildStubCodeForMethod(
+    private static (byte[] Code, ushort MaxStack, ushort MaxLocals) BuildStubCodeForMethod(
         string methodName,
         string descriptor,
         ushort emptyStringConstantIndex,
         ushort okStringConstantIndex,
         ushort systemGetPropertyMethodRefIndex,
+        ushort stringBuilderClassIndex,
+        ushort stringLengthMethodRefIndex,
+        ushort stringBuilderCtorMethodRefIndex,
+        ushort stringBuilderAppendStringMethodRefIndex,
+        ushort stringBuilderToStringMethodRefIndex,
         ushort collectionsEmptyMapMethodRefIndex,
         ushort collectionsEmptyListMethodRefIndex,
         ushort collectionsEmptySetMethodRefIndex,
@@ -1279,8 +1304,13 @@ public sealed class BuildPipelineService(
         ushort legacySessionKeyIndex,
         ushort legacyUuidKeyIndex,
         ushort legacyExternalIdKeyIndex,
-        ushort legacyYggdrasilKeyIndex)
+        ushort legacyYggdrasilKeyIndex,
+        ushort legacyPublicBaseUrlKeyIndex,
+        ushort skinsPathConstantIndex,
+        ushort capesPathConstantIndex,
+        ushort pngSuffixConstantIndex)
     {
+        var parameterSlotCount = checked((ushort)GetMethodParameterSlotCount(descriptor));
         var returnDescriptor = GetMethodReturnDescriptor(descriptor);
         switch (returnDescriptor)
         {
@@ -1291,10 +1321,21 @@ public sealed class BuildPipelineService(
                         descriptor,
                         emptyStringConstantIndex,
                         okStringConstantIndex,
+                        systemGetPropertyMethodRefIndex,
+                        stringBuilderClassIndex,
+                        stringLengthMethodRefIndex,
+                        stringBuilderCtorMethodRefIndex,
+                        stringBuilderAppendStringMethodRefIndex,
+                        stringBuilderToStringMethodRefIndex,
+                        legacyPublicBaseUrlKeyIndex,
+                        skinsPathConstantIndex,
+                        capesPathConstantIndex,
+                        pngSuffixConstantIndex,
                         out var specialCaseCode,
-                        out var specialCaseMaxStack))
+                        out var specialCaseMaxStack,
+                        out var specialCaseMaxLocals))
                 {
-                    return (specialCaseCode, specialCaseMaxStack);
+                    return (specialCaseCode, specialCaseMaxStack, specialCaseMaxLocals);
                 }
 
                 var propertyKeyIndex = ResolveLegacyBridgePropertyKeyIndex(
@@ -1309,28 +1350,30 @@ public sealed class BuildPipelineService(
                         propertyKeyIndex,
                         emptyStringConstantIndex,
                         systemGetPropertyMethodRefIndex),
-                    2);
+                    2,
+                    parameterSlotCount);
             }
             case "Ljava/util/Map;":
-                return (BuildInvokeStaticObjectReturnCode(collectionsEmptyMapMethodRefIndex), 1);
+                return (BuildInvokeStaticObjectReturnCode(collectionsEmptyMapMethodRefIndex), 1, parameterSlotCount);
             case "Ljava/util/List;":
             case "Ljava/util/Collection;":
-                return (BuildInvokeStaticObjectReturnCode(collectionsEmptyListMethodRefIndex), 1);
+                return (BuildInvokeStaticObjectReturnCode(collectionsEmptyListMethodRefIndex), 1, parameterSlotCount);
             case "Ljava/util/Set;":
-                return (BuildInvokeStaticObjectReturnCode(collectionsEmptySetMethodRefIndex), 1);
+                return (BuildInvokeStaticObjectReturnCode(collectionsEmptySetMethodRefIndex), 1, parameterSlotCount);
             case "Ljava/util/Optional;":
-                return (BuildInvokeStaticObjectReturnCode(optionalEmptyMethodRefIndex), 1);
+                return (BuildInvokeStaticObjectReturnCode(optionalEmptyMethodRefIndex), 1, parameterSlotCount);
             case "Ljava/lang/Object;":
-                return (BuildLdcStringReturnCode(emptyStringConstantIndex), 1);
+                return (BuildLdcStringReturnCode(emptyStringConstantIndex), 1, parameterSlotCount);
             default:
             {
                 if (returnDescriptor.StartsWith("L", StringComparison.Ordinal) ||
                     returnDescriptor.StartsWith("[", StringComparison.Ordinal))
                 {
-                    return ([0x01, 0xB0], 1);
+                    return ([0x01, 0xB0], 1, parameterSlotCount);
                 }
 
-                return BuildStubCodeForDescriptor(descriptor);
+                var (code, maxStack) = BuildStubCodeForDescriptor(descriptor);
+                return (code, maxStack, parameterSlotCount);
             }
         }
     }
@@ -1340,25 +1383,52 @@ public sealed class BuildPipelineService(
         string descriptor,
         ushort emptyStringConstantIndex,
         ushort okStringConstantIndex,
+        ushort systemGetPropertyMethodRefIndex,
+        ushort stringBuilderClassIndex,
+        ushort stringLengthMethodRefIndex,
+        ushort stringBuilderCtorMethodRefIndex,
+        ushort stringBuilderAppendStringMethodRefIndex,
+        ushort stringBuilderToStringMethodRefIndex,
+        ushort legacyPublicBaseUrlKeyIndex,
+        ushort skinsPathConstantIndex,
+        ushort capesPathConstantIndex,
+        ushort pngSuffixConstantIndex,
         out byte[] code,
-        out ushort maxStack)
+        out ushort maxStack,
+        out ushort maxLocals)
     {
         if (IsLegacyJoinServerMethod(methodName, descriptor))
         {
             code = BuildLdcStringReturnCode(okStringConstantIndex);
             maxStack = 1;
+            maxLocals = checked((ushort)GetMethodParameterSlotCount(descriptor));
             return true;
         }
 
         if (IsLegacyTextureLookupMethod(methodName, descriptor))
         {
-            code = BuildLdcStringReturnCode(emptyStringConstantIndex);
-            maxStack = 1;
+            var pathConstantIndex = LooksLikeCapeLookupMethod(methodName)
+                ? capesPathConstantIndex
+                : skinsPathConstantIndex;
+            code = BuildTextureLookupStringCode(
+                legacyPublicBaseUrlKeyIndex,
+                emptyStringConstantIndex,
+                pathConstantIndex,
+                pngSuffixConstantIndex,
+                systemGetPropertyMethodRefIndex,
+                stringBuilderClassIndex,
+                stringLengthMethodRefIndex,
+                stringBuilderCtorMethodRefIndex,
+                stringBuilderAppendStringMethodRefIndex,
+                stringBuilderToStringMethodRefIndex);
+            maxStack = 2;
+            maxLocals = 2;
             return true;
         }
 
         code = [];
         maxStack = 0;
+        maxLocals = 0;
         return false;
     }
 
@@ -1411,6 +1481,13 @@ public sealed class BuildPipelineService(
 
         // Legacy obfuscation often rewrites these lookups to tiny names.
         return normalized.Length <= 2;
+    }
+
+    private static bool LooksLikeCapeLookupMethod(string methodName)
+    {
+        var normalized = (methodName ?? string.Empty).Trim().ToLowerInvariant();
+        return normalized.Contains("cloak", StringComparison.Ordinal) ||
+               normalized.Contains("cape", StringComparison.Ordinal);
     }
 
     private static string GetMethodReturnDescriptor(string descriptor)
@@ -1501,6 +1578,45 @@ public sealed class BuildPipelineService(
             0x13, (byte)(propertyKeyIndex >> 8), (byte)(propertyKeyIndex & 0xFF),
             0x13, (byte)(emptyStringConstantIndex >> 8), (byte)(emptyStringConstantIndex & 0xFF),
             0xB8, (byte)(systemGetPropertyMethodRefIndex >> 8), (byte)(systemGetPropertyMethodRefIndex & 0xFF),
+            0xB0
+        ];
+    }
+
+    private static byte[] BuildTextureLookupStringCode(
+        ushort publicBaseUrlKeyIndex,
+        ushort emptyStringConstantIndex,
+        ushort pathConstantIndex,
+        ushort pngSuffixConstantIndex,
+        ushort systemGetPropertyMethodRefIndex,
+        ushort stringBuilderClassIndex,
+        ushort stringLengthMethodRefIndex,
+        ushort stringBuilderCtorMethodRefIndex,
+        ushort stringBuilderAppendStringMethodRefIndex,
+        ushort stringBuilderToStringMethodRefIndex)
+    {
+        return
+        [
+            0x13, (byte)(publicBaseUrlKeyIndex >> 8), (byte)(publicBaseUrlKeyIndex & 0xFF),
+            0x13, (byte)(emptyStringConstantIndex >> 8), (byte)(emptyStringConstantIndex & 0xFF),
+            0xB8, (byte)(systemGetPropertyMethodRefIndex >> 8), (byte)(systemGetPropertyMethodRefIndex & 0xFF),
+            0x4C,
+            0x2B,
+            0xB6, (byte)(stringLengthMethodRefIndex >> 8), (byte)(stringLengthMethodRefIndex & 0xFF),
+            0x99, 0x00, 0x1C,
+            0xBB, (byte)(stringBuilderClassIndex >> 8), (byte)(stringBuilderClassIndex & 0xFF),
+            0x59,
+            0xB7, (byte)(stringBuilderCtorMethodRefIndex >> 8), (byte)(stringBuilderCtorMethodRefIndex & 0xFF),
+            0x2B,
+            0xB6, (byte)(stringBuilderAppendStringMethodRefIndex >> 8), (byte)(stringBuilderAppendStringMethodRefIndex & 0xFF),
+            0x13, (byte)(pathConstantIndex >> 8), (byte)(pathConstantIndex & 0xFF),
+            0xB6, (byte)(stringBuilderAppendStringMethodRefIndex >> 8), (byte)(stringBuilderAppendStringMethodRefIndex & 0xFF),
+            0x2A,
+            0xB6, (byte)(stringBuilderAppendStringMethodRefIndex >> 8), (byte)(stringBuilderAppendStringMethodRefIndex & 0xFF),
+            0x13, (byte)(pngSuffixConstantIndex >> 8), (byte)(pngSuffixConstantIndex & 0xFF),
+            0xB6, (byte)(stringBuilderAppendStringMethodRefIndex >> 8), (byte)(stringBuilderAppendStringMethodRefIndex & 0xFF),
+            0xB6, (byte)(stringBuilderToStringMethodRefIndex >> 8), (byte)(stringBuilderToStringMethodRefIndex & 0xFF),
+            0xB0,
+            0x13, (byte)(emptyStringConstantIndex >> 8), (byte)(emptyStringConstantIndex & 0xFF),
             0xB0
         ];
     }

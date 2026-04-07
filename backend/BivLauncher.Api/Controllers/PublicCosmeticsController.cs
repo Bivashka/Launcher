@@ -57,6 +57,10 @@ public sealed class PublicCosmeticsController(
             Response.ContentLength = sizeBytes;
         }
 
+        Response.Headers.CacheControl = "no-store, no-cache, must-revalidate";
+        Response.Headers.Pragma = "no-cache";
+        Response.Headers.Expires = "0";
+
         var result = File(storedObject.Stream, storedObject.ContentType);
         result.EnableRangeProcessing = true;
         return result;
