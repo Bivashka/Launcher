@@ -117,6 +117,22 @@ public sealed class PendingSubmissionService(ISettingsService settingsService) :
         }
     }
 
+    public async Task<bool> HasPendingSecurityViolationAsync(CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            var store = await LoadStoreUnsafeAsync(cancellationToken);
+            return store.Items.Any(item =>
+                item.Type.Equals(PendingSubmissionTypes.SecurityViolation, StringComparison.OrdinalIgnoreCase) &&
+                HasPayload(item));
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
     public async Task<PendingSubmissionFlushResult> FlushAsync(
         Func<PendingSubmissionItem, CancellationToken, Task<bool>> sender,
         CancellationToken cancellationToken = default)

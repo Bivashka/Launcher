@@ -366,6 +366,9 @@ public partial class MainWindowViewModel : ViewModelBase
     private bool _isPlayerLoggedIn;
 
     [ObservableProperty]
+    private bool _isSecurityLockActive;
+
+    [ObservableProperty]
     private bool _isBanNoticeVisible;
 
     [ObservableProperty]
@@ -540,8 +543,8 @@ public partial class MainWindowViewModel : ViewModelBase
     public bool IsUpdatePackageReady => !string.IsNullOrWhiteSpace(DownloadedUpdatePackagePath) && File.Exists(DownloadedUpdatePackagePath);
     public bool HasBrandingBackgroundImage => BrandingBackgroundImage is not null;
     public bool HasStoredAccounts => StoredPlayerAccounts.Count > 0;
-    public bool IsLoginRequired => !IsPlayerLoggedIn;
-    public bool IsLauncherReady => IsPlayerLoggedIn;
+    public bool IsLoginRequired => !IsPlayerLoggedIn && !IsSecurityLockActive;
+    public bool IsLauncherReady => IsPlayerLoggedIn && !IsSecurityLockActive;
 
     public async Task InitializeAsync()
     {
@@ -586,10 +589,18 @@ public partial class MainWindowViewModel : ViewModelBase
         ResetTwoFactorState();
         AuthStatusText = T("status.notLoggedIn");
         LoadStoredPlayerSessionState();
+        await RefreshSecurityLockStateAsync();
         await RefreshAsync();
-        await TryRestorePlayerSessionAsync();
+        await RefreshSecurityLockStateAsync(clearNoticeWhenUnlocked: true);
+        if (!IsSecurityLockActive)
+        {
+            await TryRestorePlayerSessionAsync();
+        }
         await TryApplyAutomaticUpdateAsync();
-        StatusText = T("status.ready");
+        if (!IsSecurityLockActive)
+        {
+            StatusText = T("status.ready");
+        }
     }
 
     partial void OnIsBusyChanged(bool value)
@@ -930,9 +941,9 @@ public partial class MainWindowViewModel : ViewModelBase
         }
     }
 
-    private bool CanOperate() => !IsBusy;
+    private bool CanOperate() => !IsBusy && !IsSecurityLockActive;
 
-    private bool CanVerifyOrLaunch() => !IsBusy && !IsGameSessionActive && IsPlayerLoggedIn && SelectedServer is not null;
+    private bool CanVerifyOrLaunch() => !IsBusy && !IsGameSessionActive && !IsSecurityLockActive && IsPlayerLoggedIn && SelectedServer is not null;
 
     private bool CanSelectRuApiRegion()
     {
@@ -953,6 +964,7 @@ public partial class MainWindowViewModel : ViewModelBase
     private bool CanSwitchAccount()
     {
         return !IsBusy &&
+               !IsSecurityLockActive &&
                IsPlayerLoggedIn &&
                SelectedStoredAccount is not null &&
                !string.IsNullOrWhiteSpace(SelectedStoredAccount.AuthToken) &&
@@ -961,17 +973,18 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private bool CanLogout()
     {
-        return !IsBusy && IsPlayerLoggedIn;
+        return !IsBusy && !IsSecurityLockActive && IsPlayerLoggedIn;
     }
 
     private bool CanAddAccount()
     {
-        return !IsBusy && IsPlayerLoggedIn;
+        return !IsBusy && !IsSecurityLockActive && IsPlayerLoggedIn;
     }
 
     private bool CanDeleteAccount()
     {
         return !IsBusy &&
+               !IsSecurityLockActive &&
                SelectedStoredAccount is not null &&
                !string.IsNullOrWhiteSpace(SelectedStoredAccount.Username);
     }
@@ -1561,7 +1574,7 @@ public partial class MainWindowViewModel : ViewModelBase
         }
         MergeKnownApiBaseUrls(bootstrap.FallbackApiBaseUrls);
         var assetRefreshVersion = Interlocked.Increment(ref _assetRefreshVersion);
-        _ = FlushPendingSubmissionsAsync();
+        await FlushPendingSubmissionsAsync();
         _ = TrySubmitInstallTelemetryAsync(bootstrap);
 
         await ApplyLauncherDirectoryNameAsync(bootstrap.Branding);
@@ -1702,7 +1715,7 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private async Task VerifyFilesAsync()
     {
-        if (SelectedServer is null)
+        if (IsSecurityLockActive || SelectedServer is null)
         {
             return;
         }
@@ -1754,7 +1767,7 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private async Task LaunchAsync()
     {
-        if (SelectedServer is null || IsBusy || IsGameSessionActive)
+        if (IsSecurityLockActive || SelectedServer is null || IsBusy || IsGameSessionActive)
         {
             return;
         }
@@ -2106,12 +2119,21 @@ public partial class MainWindowViewModel : ViewModelBase
                         return true;
                     }
 
-                    var response = await _launcherApiService.ReportSecurityViolationAsync(
-                        item.ApiBaseUrl,
-                        item.AuthToken,
-                        item.AuthTokenType,
-                        item.SecurityViolation,
-                        sendToken);
+                    PublicSecurityViolationReportResponse response;
+                    try
+                    {
+                        response = await _launcherApiService.ReportSecurityViolationAsync(
+                            item.ApiBaseUrl,
+                            item.AuthToken,
+                            item.AuthTokenType,
+                            item.SecurityViolation,
+                            sendToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logService.LogInfo($"Queued security violation report failed: {ex.Message}");
+                        return false;
+                    }
 
                     if (response.Banned)
                     {
@@ -2142,6 +2164,50 @@ public partial class MainWindowViewModel : ViewModelBase
 
         _logService.LogInfo(
             $"Pending submissions sync: sent={result.SentCount}, failed={result.FailedCount}, dropped={result.DroppedCount}, remaining={result.RemainingCount}.");
+        await RefreshSecurityLockStateAsync(clearNoticeWhenUnlocked: true);
+    }
+
+    private async Task RefreshSecurityLockStateAsync(bool clearNoticeWhenUnlocked = false)
+    {
+        bool hasPendingSecurityViolation;
+        try
+        {
+            hasPendingSecurityViolation = await _pendingSubmissionService.HasPendingSecurityViolationAsync();
+        }
+        catch (Exception ex)
+        {
+            _logService.LogInfo($"Security violation lock state refresh warning: {ex.Message}");
+            return;
+        }
+
+        if (!hasPendingSecurityViolation)
+        {
+            if (IsSecurityLockActive)
+            {
+                IsSecurityLockActive = false;
+            }
+
+            var isLocalSecurityLockNotice =
+                string.Equals(BanNoticeTitle, "Launcher lock active", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(BanNoticeTitle, "Лаунчер заблокирован", StringComparison.Ordinal);
+            if (clearNoticeWhenUnlocked && isLocalSecurityLockNotice)
+            {
+                ClearBanNotice();
+            }
+
+            return;
+        }
+
+        IsSecurityLockActive = true;
+        BanNoticeTitle = _languageCode == "en"
+            ? "Launcher lock active"
+            : "Лаунчер заблокирован";
+        BanNoticeMessage = _languageCode == "en"
+            ? "Security violation was detected on this device. Launcher access stays blocked until the violation report is delivered to the server."
+            : "На этом устройстве зафиксировано вмешательство. Доступ к лаунчеру заблокирован, пока отчёт о нарушении не будет доставлен на сервер.";
+        IsBanNoticeVisible = true;
+        AuthStatusText = BanNoticeMessage;
+        StatusText = BanNoticeMessage;
     }
 
     private static string BuildCrashReason(int? exitCode, Exception? launchException)
@@ -2479,6 +2545,12 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private async Task LoginAsync()
     {
+        if (IsSecurityLockActive)
+        {
+            StatusText = BanNoticeMessage;
+            return;
+        }
+
         await RunBusyAsync(async () =>
         {
             ClearBanNotice();
@@ -4308,6 +4380,33 @@ public partial class MainWindowViewModel : ViewModelBase
 
             _knownApiBaseUrls.Add(normalized);
         }
+    }
+
+    partial void OnIsSecurityLockActiveChanged(bool value)
+    {
+        RefreshCommand.NotifyCanExecuteChanged();
+        LoginCommand.NotifyCanExecuteChanged();
+        VerifyFilesCommand.NotifyCanExecuteChanged();
+        LaunchCommand.NotifyCanExecuteChanged();
+        ToggleSettingsCommand.NotifyCanExecuteChanged();
+        SwitchAccountCommand.NotifyCanExecuteChanged();
+        LogoutCommand.NotifyCanExecuteChanged();
+        AddAccountCommand.NotifyCanExecuteChanged();
+        DeleteAccountCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(IsLoginRequired));
+        OnPropertyChanged(nameof(IsLauncherReady));
+        NotifyAccountPresentationChanged();
+        NotifyLauncherHeaderPresentationChanged();
+
+        if (!value)
+        {
+            return;
+        }
+
+        ClearAuthenticatedPlayerSession();
+        IsPlayerLoggedIn = false;
+        IsSettingsOpen = false;
+        ResetTwoFactorState();
     }
 
     private IEnumerable<string> GetRegionalApiBaseUrlCandidates()

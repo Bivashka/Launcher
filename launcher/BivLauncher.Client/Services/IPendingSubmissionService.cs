@@ -21,6 +21,8 @@ public interface IPendingSubmissionService
         PublicSecurityViolationReportRequest request,
         CancellationToken cancellationToken = default);
 
+    Task<bool> HasPendingSecurityViolationAsync(CancellationToken cancellationToken = default);
+
     Task<PendingSubmissionFlushResult> FlushAsync(
         Func<PendingSubmissionItem, CancellationToken, Task<bool>> sender,
         CancellationToken cancellationToken = default);
