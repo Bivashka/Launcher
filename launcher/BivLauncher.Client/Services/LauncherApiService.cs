@@ -11,6 +11,7 @@ public sealed class LauncherApiService : ILauncherApiService
 {
     private const int MaxRetryAttempts = 3;
     private static readonly TimeSpan ApiRequestAttemptTimeout = TimeSpan.FromSeconds(12);
+    private static readonly TimeSpan MetadataRequestAttemptTimeout = TimeSpan.FromSeconds(6);
     private const string LauncherClientHeaderName = "X-BivLauncher-Client";
     private const string LauncherProofHeaderName = "X-BivLauncher-Proof";
     private const string LauncherClientProofMetadataKey = "BivLauncher.ClientProof";
@@ -54,7 +55,9 @@ public sealed class LauncherApiService : ILauncherApiService
         var uri = BuildUri(apiBaseUrl, $"/api/public/bootstrap?v={cacheBust}");
         using var response = await SendWithRetryAsync(
             () => BuildOptionalAuthorizedRequest(HttpMethod.Get, uri, accessToken, tokenType),
-            cancellationToken);
+            cancellationToken,
+            maxAttempts: 1,
+            attemptTimeout: MetadataRequestAttemptTimeout);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
@@ -283,7 +286,9 @@ public sealed class LauncherApiService : ILauncherApiService
         var uri = BuildUri(apiBaseUrl, $"/api/public/manifest/{Uri.EscapeDataString(profileSlug)}");
         using var response = await SendWithRetryAsync(
             () => BuildOptionalAuthorizedRequest(HttpMethod.Get, uri, accessToken, tokenType),
-            cancellationToken);
+            cancellationToken,
+            maxAttempts: 1,
+            attemptTimeout: MetadataRequestAttemptTimeout);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
@@ -524,21 +529,26 @@ public sealed class LauncherApiService : ILauncherApiService
 
     private async Task<HttpResponseMessage> SendWithRetryAsync(
         Func<HttpRequestMessage> requestFactory,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        int maxAttempts = MaxRetryAttempts,
+        TimeSpan? attemptTimeout = null)
     {
-        for (var attempt = 1; attempt <= MaxRetryAttempts; attempt++)
+        var effectiveMaxAttempts = Math.Max(1, maxAttempts);
+        var effectiveAttemptTimeout = attemptTimeout ?? ApiRequestAttemptTimeout;
+
+        for (var attempt = 1; attempt <= effectiveMaxAttempts; attempt++)
         {
             try
             {
                 using var request = requestFactory();
                 using var attemptTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                attemptTimeoutCts.CancelAfter(ApiRequestAttemptTimeout);
+                attemptTimeoutCts.CancelAfter(effectiveAttemptTimeout);
                 var response = await _httpClient.SendAsync(
                     request,
                     HttpCompletionOption.ResponseHeadersRead,
                     attemptTimeoutCts.Token);
 
-                if (attempt >= MaxRetryAttempts || !ShouldRetry(response.StatusCode))
+                if (attempt >= effectiveMaxAttempts || !ShouldRetry(response.StatusCode))
                 {
                     return response;
                 }
@@ -547,7 +557,7 @@ public sealed class LauncherApiService : ILauncherApiService
                 response.Dispose();
                 await Task.Delay(delay, cancellationToken);
             }
-            catch (Exception ex) when (IsTransientSendException(ex, cancellationToken) && attempt < MaxRetryAttempts)
+            catch (Exception ex) when (IsTransientSendException(ex, cancellationToken) && attempt < effectiveMaxAttempts)
             {
                 var delay = ResolveRetryDelay(response: null, attempt);
                 await Task.Delay(delay, cancellationToken);

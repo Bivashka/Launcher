@@ -568,10 +568,10 @@ public partial class MainWindowViewModel : ViewModelBase
         LoadRouteSelections(_settings.ProfileRouteSelections ?? []);
         MergeKnownApiBaseUrls(_settings.KnownApiBaseUrls);
         MergeKnownApiBaseUrls(ResolveBundledFallbackApiBaseUrls());
-        var preferredRegionalApiBaseUrl = ResolvePreferredApiRegionApiBaseUrl();
-        if (!string.IsNullOrWhiteSpace(preferredRegionalApiBaseUrl))
+        var persistedApiBaseUrl = NormalizeBaseUrl(_settings.ApiBaseUrl);
+        if (!string.IsNullOrWhiteSpace(persistedApiBaseUrl))
         {
-            ApiBaseUrl = preferredRegionalApiBaseUrl;
+            ApiBaseUrl = persistedApiBaseUrl;
         }
         else if (!string.IsNullOrWhiteSpace(configuredApiBaseUrl))
         {
@@ -579,7 +579,7 @@ public partial class MainWindowViewModel : ViewModelBase
         }
         else
         {
-            ApiBaseUrl = NormalizeBaseUrl(_settings.ApiBaseUrl);
+            ApiBaseUrl = ResolvePreferredApiRegionApiBaseUrl();
         }
         MergeKnownApiBaseUrls([ApiBaseUrl]);
         InstallDirectory = string.IsNullOrWhiteSpace(_settings.InstallDirectory)
@@ -840,13 +840,6 @@ public partial class MainWindowViewModel : ViewModelBase
     partial void OnPreferredApiRegionChanged(string value)
     {
         PreferredApiRegion = NormalizeApiRegionCode(value);
-        var preferredRegionalApiBaseUrl = ResolvePreferredApiRegionApiBaseUrl();
-        if (!string.IsNullOrWhiteSpace(preferredRegionalApiBaseUrl))
-        {
-            ApiBaseUrl = preferredRegionalApiBaseUrl;
-            MergeKnownApiBaseUrls([preferredRegionalApiBaseUrl]);
-        }
-
         NotifyApiRegionSelectionPresentationChanged();
     }
 
@@ -1578,12 +1571,6 @@ public partial class MainWindowViewModel : ViewModelBase
         _bootstrapApiBaseUrlRu = NormalizeBaseUrlOrEmpty(bootstrap.LauncherApiBaseUrlRu);
         _bootstrapApiBaseUrlEu = NormalizeBaseUrlOrEmpty(bootstrap.LauncherApiBaseUrlEu);
         MergeKnownApiBaseUrls([_bootstrapApiBaseUrlRu, _bootstrapApiBaseUrlEu]);
-        var preferredRegionalApiBaseUrl = ResolvePreferredApiRegionApiBaseUrl();
-        if (!string.IsNullOrWhiteSpace(preferredRegionalApiBaseUrl))
-        {
-            ApiBaseUrl = preferredRegionalApiBaseUrl;
-        }
-
         MergeKnownApiBaseUrls(bootstrap.FallbackApiBaseUrls);
         var assetRefreshVersion = Interlocked.Increment(ref _assetRefreshVersion);
         await FlushPendingSubmissionsAsync();
@@ -2337,7 +2324,6 @@ public partial class MainWindowViewModel : ViewModelBase
         }
 
         PreferredApiRegion = normalizedRegionCode;
-        ApiBaseUrl = preferredApiBaseUrl;
         MergeKnownApiBaseUrls([preferredApiBaseUrl]);
         await PersistSettingsSnapshotAsync();
     }
@@ -4468,11 +4454,18 @@ public partial class MainWindowViewModel : ViewModelBase
         if (!string.IsNullOrWhiteSpace(preferredRegionCode))
         {
             AddRegion(preferredRegionCode);
-            return candidates;
         }
 
-        AddRegion("ru");
-        AddRegion("eu");
+        foreach (var fallbackRegionCode in new[] { "ru", "eu" })
+        {
+            if (string.Equals(fallbackRegionCode, preferredRegionCode, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            AddRegion(fallbackRegionCode);
+        }
+
         return candidates;
     }
 
