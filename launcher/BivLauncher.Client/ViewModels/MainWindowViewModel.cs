@@ -2099,6 +2099,33 @@ public partial class MainWindowViewModel : ViewModelBase
                     return true;
                 }
 
+                if (item.Type.Equals(PendingSubmissionTypes.SecurityViolation, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (item.SecurityViolation is null || string.IsNullOrWhiteSpace(item.AuthToken))
+                    {
+                        return true;
+                    }
+
+                    var response = await _launcherApiService.ReportSecurityViolationAsync(
+                        item.ApiBaseUrl,
+                        item.AuthToken,
+                        item.AuthTokenType,
+                        item.SecurityViolation,
+                        sendToken);
+
+                    if (response.Banned)
+                    {
+                        _logService.LogInfo(
+                            $"Queued security violation report accepted. Ban active until {response.ExpiresAtUtc:O}. Reason: {response.Reason}");
+                    }
+                    else if (response.Exempt)
+                    {
+                        _logService.LogInfo($"Queued security violation report accepted as exempt: {response.Reason}");
+                    }
+
+                    return true;
+                }
+
                 return true;
             }, flushCts.Token);
         }
@@ -3192,25 +3219,51 @@ public partial class MainWindowViewModel : ViewModelBase
             return;
         }
 
-        var response = await ExecuteAgainstApiFailoverAsync(
-            candidate => _launcherApiService.ReportSecurityViolationAsync(
-                candidate,
+        var request = new PublicSecurityViolationReportRequest
+        {
+            Reason = detection.Reason,
+            Evidence = detection.Evidence,
+            HwidFingerprint = ComputeHwidFingerprint(),
+            DeviceUserName = ComputeDeviceUserName()
+        };
+        var preferredApiBaseUrl = ResolvePreferredPlayerApiBaseUrl();
+
+        try
+        {
+            var response = await ExecuteAgainstApiFailoverAsync(
+                candidate => _launcherApiService.ReportSecurityViolationAsync(
+                    candidate,
+                    _playerAuthToken,
+                    _playerAuthTokenType,
+                    request),
+                preferredApiBaseUrl: preferredApiBaseUrl,
+                persistSuccess: false);
+
+            if (response.Banned)
+            {
+                _logService.LogInfo(
+                    $"Security violation report accepted. Ban active until {response.ExpiresAtUtc:O}. Reason: {response.Reason}");
+            }
+
+            return;
+        }
+        catch (Exception ex)
+        {
+            _logService.LogInfo($"Security violation report warning: {ex.Message}");
+        }
+
+        try
+        {
+            await _pendingSubmissionService.EnqueueSecurityViolationAsync(
+                string.IsNullOrWhiteSpace(preferredApiBaseUrl) ? ApiBaseUrl : preferredApiBaseUrl,
                 _playerAuthToken,
                 _playerAuthTokenType,
-                new PublicSecurityViolationReportRequest
-                {
-                    Reason = detection.Reason,
-                    Evidence = detection.Evidence,
-                    HwidFingerprint = ComputeHwidFingerprint(),
-                    DeviceUserName = ComputeDeviceUserName()
-                }),
-            preferredApiBaseUrl: ResolvePreferredPlayerApiBaseUrl(),
-            persistSuccess: false);
-
-        if (response.Banned)
+                request);
+            _logService.LogInfo("Security violation report queued for retry on the next launcher start.");
+        }
+        catch (Exception ex)
         {
-            _logService.LogInfo(
-                $"Security violation report accepted. Ban active until {response.ExpiresAtUtc:O}. Reason: {response.Reason}");
+            _logService.LogError($"Security violation queueing failed: {ex.Message}");
         }
     }
 

@@ -21,6 +21,7 @@ public final class LegacyBridge {
     private static final String DEFAULT_SESSION_BASE = "https://sessionserver.mojang.com";
     private static final String YGGDRASIL_PROPERTY = "biv.auth.yggdrasil";
     private static final String YGGDRASIL_PROPERTY_FALLBACK = "authlibinjector.yggdrasil";
+    private static final String PUBLIC_BASE_URL_PROPERTY = "biv.auth.publicBaseUrl";
 
     private static final Pattern TOKEN_PATTERN = Pattern.compile("(?:^|:)token:([^:]+)(?::([0-9a-fA-F]{32}))?$", Pattern.CASE_INSENSITIVE);
     private static final Pattern UUID_PATTERN = Pattern.compile("[0-9a-fA-F]{32}");
@@ -46,11 +47,11 @@ public final class LegacyBridge {
     }
 
     public static String getSkinURL(String username) {
-        return "";
+        return buildTextureUrl(username, "skins");
     }
 
     public static String getCloakURL(String username) {
-        return "";
+        return buildTextureUrl(username, "capes");
     }
 
     public static String getServerUrl() {
@@ -677,6 +678,68 @@ public final class LegacyBridge {
         return yggdrasilBase + "/sessionserver";
     }
 
+    private static String buildTextureUrl(String username, String collection) {
+        String normalizedUsername = nullToEmpty(username).trim();
+        if (normalizedUsername.isEmpty()) {
+            return "";
+        }
+
+        String publicBaseUrl = resolvePublicBaseUrl();
+        if (publicBaseUrl.isEmpty()) {
+            return "";
+        }
+
+        return publicBaseUrl + "/" + collection + "/" + urlEncodePathSegment(normalizedUsername) + ".png";
+    }
+
+    private static String resolvePublicBaseUrl() {
+        String configured = trimTrailingSlash(getProp(PUBLIC_BASE_URL_PROPERTY));
+        if (!configured.isEmpty()) {
+            return configured;
+        }
+
+        String yggdrasilBase = trimTrailingSlash(resolveYggdrasilBase());
+        if (yggdrasilBase.isEmpty()) {
+            return "";
+        }
+
+        String lower = yggdrasilBase.toLowerCase();
+        int index = lower.indexOf("/api/public/yggdrasil");
+        if (index >= 0) {
+            return trimTrailingSlash(yggdrasilBase.substring(0, index));
+        }
+
+        index = lower.indexOf("/api/yggdrasil");
+        if (index >= 0) {
+            return trimTrailingSlash(yggdrasilBase.substring(0, index));
+        }
+
+        index = lower.indexOf("/yggdrasil");
+        if (index >= 0) {
+            return trimTrailingSlash(yggdrasilBase.substring(0, index));
+        }
+
+        index = lower.indexOf("/authserver");
+        if (index >= 0) {
+            return trimTrailingSlash(yggdrasilBase.substring(0, index));
+        }
+
+        index = lower.indexOf("/sessionserver");
+        if (index >= 0) {
+            return trimTrailingSlash(yggdrasilBase.substring(0, index));
+        }
+
+        return yggdrasilBase;
+    }
+
+    private static String urlEncodePathSegment(String value) {
+        try {
+            return URLEncoder.encode(nullToEmpty(value), "UTF-8").replace("+", "%20");
+        } catch (Exception ex) {
+            return nullToEmpty(value);
+        }
+    }
+
     private static String resolveYggdrasilBase() {
         String fromProperty = normalizeYggdrasilBase(getProp(YGGDRASIL_PROPERTY));
         if (!fromProperty.isEmpty()) {
@@ -813,6 +876,14 @@ public final class LegacyBridge {
         if (!normalized.isEmpty()) {
             values.add(normalized);
         }
+    }
+
+    private static String trimTrailingSlash(String value) {
+        String normalized = nullToEmpty(value);
+        while (normalized.endsWith("/")) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        return normalized;
     }
 
     private static void debug(String message) {

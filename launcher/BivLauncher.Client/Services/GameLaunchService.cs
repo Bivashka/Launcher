@@ -1621,10 +1621,11 @@ public sealed class GameLaunchService(
         insertionIndex = EnsureJvmProperty(jvmArgs, "biv.auth.externalId", externalId, insertionIndex);
         insertionIndex = EnsureJvmProperty(jvmArgs, "biv.auth.token", token, insertionIndex);
         insertionIndex = EnsureJvmProperty(jvmArgs, "biv.auth.session", sessionToken, insertionIndex);
+        insertionIndex = EnsureJvmProperty(jvmArgs, "biv.auth.publicBaseUrl", apiBaseUrl, insertionIndex);
         _ = EnsureJvmProperty(jvmArgs, "biv.auth.yggdrasil", yggdrasilUrl, insertionIndex);
 
         logService.LogInfo(
-            $"Legacy bridge JVM auth properties prepared: username={username}, tokenLength={token.Length}, profileIdLength={profileId.Length}, hasSession={!string.IsNullOrWhiteSpace(sessionToken)}, hasYggdrasil={!string.IsNullOrWhiteSpace(yggdrasilUrl)}.");
+            $"Legacy bridge JVM auth properties prepared: username={username}, tokenLength={token.Length}, profileIdLength={profileId.Length}, hasSession={!string.IsNullOrWhiteSpace(sessionToken)}, hasYggdrasil={!string.IsNullOrWhiteSpace(yggdrasilUrl)}, hasPublicBase={!string.IsNullOrWhiteSpace(apiBaseUrl)}.");
     }
 
     private static int EnsureJvmProperty(IList<string> args, string propertyName, string value, int insertionIndex)

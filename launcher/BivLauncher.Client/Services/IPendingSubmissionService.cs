@@ -14,6 +14,13 @@ public interface IPendingSubmissionService
         PublicInstallTelemetryTrackRequest request,
         CancellationToken cancellationToken = default);
 
+    Task EnqueueSecurityViolationAsync(
+        string apiBaseUrl,
+        string authToken,
+        string authTokenType,
+        PublicSecurityViolationReportRequest request,
+        CancellationToken cancellationToken = default);
+
     Task<PendingSubmissionFlushResult> FlushAsync(
         Func<PendingSubmissionItem, CancellationToken, Task<bool>> sender,
         CancellationToken cancellationToken = default);

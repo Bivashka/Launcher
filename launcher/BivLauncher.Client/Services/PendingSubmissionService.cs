@@ -86,6 +86,37 @@ public sealed class PendingSubmissionService(ISettingsService settingsService) :
         }
     }
 
+    public async Task EnqueueSecurityViolationAsync(
+        string apiBaseUrl,
+        string authToken,
+        string authTokenType,
+        PublicSecurityViolationReportRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var item = new PendingSubmissionItem
+        {
+            Type = PendingSubmissionTypes.SecurityViolation,
+            ApiBaseUrl = NormalizeApiBaseUrl(apiBaseUrl),
+            AuthToken = (authToken ?? string.Empty).Trim(),
+            AuthTokenType = string.IsNullOrWhiteSpace(authTokenType) ? "Bearer" : authTokenType.Trim(),
+            SecurityViolation = CloneSecurityViolation(request),
+            CreatedAtUtc = DateTime.UtcNow
+        };
+
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            var store = await LoadStoreUnsafeAsync(cancellationToken);
+            store.Items.Add(item);
+            TrimToMaxItems(store.Items);
+            await SaveStoreUnsafeAsync(store, cancellationToken);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
     public async Task<PendingSubmissionFlushResult> FlushAsync(
         Func<PendingSubmissionItem, CancellationToken, Task<bool>> sender,
         CancellationToken cancellationToken = default)
@@ -213,16 +244,27 @@ public sealed class PendingSubmissionService(ISettingsService settingsService) :
     {
         var path = GetStorePath();
         var directory = Path.GetDirectoryName(path)!;
-        Directory.CreateDirectory(directory);
-        var persistSnapshot = PreparePersistSnapshot(store);
-
         var tempPath = $"{path}.tmp";
-        await using (var stream = File.Create(tempPath))
+        try
         {
-            await JsonSerializer.SerializeAsync(stream, persistSnapshot, JsonOptions, cancellationToken);
-        }
+            Directory.CreateDirectory(directory);
+            var persistSnapshot = PreparePersistSnapshot(store);
 
-        File.Move(tempPath, path, true);
+            await using (var stream = File.Create(tempPath))
+            {
+                await JsonSerializer.SerializeAsync(stream, persistSnapshot, JsonOptions, cancellationToken);
+            }
+
+            File.Move(tempPath, path, true);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            TryDeleteTempFile(tempPath);
+        }
+        catch (IOException)
+        {
+            TryDeleteTempFile(tempPath);
+        }
     }
 
     private string GetStorePath()
@@ -238,6 +280,8 @@ public sealed class PendingSubmissionService(ISettingsService settingsService) :
         {
             PendingSubmissionTypes.CrashReport => item.CrashReport is not null,
             PendingSubmissionTypes.InstallTelemetry => item.InstallTelemetry is not null,
+            PendingSubmissionTypes.SecurityViolation => item.SecurityViolation is not null &&
+                                                       !string.IsNullOrWhiteSpace(item.AuthToken),
             _ => false
         };
     }
@@ -264,6 +308,7 @@ public sealed class PendingSubmissionService(ISettingsService settingsService) :
                 .Select(item =>
                 {
                     item.ApiBaseUrl = LocalSecretProtector.UnprotectEndpoint(item.ApiBaseUrl);
+                    item.AuthToken = LocalSecretProtector.UnprotectToken(item.AuthToken);
                     return item;
                 })
                 .ToList()
@@ -280,6 +325,7 @@ public sealed class PendingSubmissionService(ISettingsService settingsService) :
                 .Select(item =>
                 {
                     item.ApiBaseUrl = LocalSecretProtector.ProtectEndpoint(item.ApiBaseUrl);
+                    item.AuthToken = LocalSecretProtector.ProtectToken(item.AuthToken);
                     return item;
                 })
                 .ToList()
@@ -296,14 +342,31 @@ public sealed class PendingSubmissionService(ISettingsService settingsService) :
         return (source.Items ?? []).Any(item =>
         {
             var apiBaseUrl = (item.ApiBaseUrl ?? string.Empty).Trim();
-            return !string.IsNullOrWhiteSpace(apiBaseUrl) &&
-                   !LocalSecretProtector.IsProtectedEndpoint(apiBaseUrl);
+            var authToken = (item.AuthToken ?? string.Empty).Trim();
+            return (!string.IsNullOrWhiteSpace(apiBaseUrl) &&
+                    !LocalSecretProtector.IsProtectedEndpoint(apiBaseUrl)) ||
+                   (!string.IsNullOrWhiteSpace(authToken) &&
+                    !LocalSecretProtector.IsProtectedToken(authToken));
         });
     }
 
     private static string NormalizeApiBaseUrl(string? apiBaseUrl)
     {
         return (apiBaseUrl ?? string.Empty).Trim().TrimEnd('/');
+    }
+
+    private static void TryDeleteTempFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch
+        {
+        }
     }
 
     private static PendingSubmissionItem ClonePendingSubmissionItem(PendingSubmissionItem source)
@@ -313,8 +376,11 @@ public sealed class PendingSubmissionService(ISettingsService settingsService) :
             Id = source.Id,
             Type = source.Type,
             ApiBaseUrl = source.ApiBaseUrl,
+            AuthToken = source.AuthToken,
+            AuthTokenType = source.AuthTokenType,
             CrashReport = source.CrashReport is null ? null : CloneCrashReport(source.CrashReport),
             InstallTelemetry = source.InstallTelemetry is null ? null : CloneInstallTelemetry(source.InstallTelemetry),
+            SecurityViolation = source.SecurityViolation is null ? null : CloneSecurityViolation(source.SecurityViolation),
             CreatedAtUtc = source.CreatedAtUtc,
             LastAttemptAtUtc = source.LastAttemptAtUtc,
             AttemptCount = source.AttemptCount
@@ -346,6 +412,17 @@ public sealed class PendingSubmissionService(ISettingsService settingsService) :
         {
             ProjectName = request.ProjectName,
             LauncherVersion = request.LauncherVersion
+        };
+    }
+
+    private static PublicSecurityViolationReportRequest CloneSecurityViolation(PublicSecurityViolationReportRequest request)
+    {
+        return new PublicSecurityViolationReportRequest
+        {
+            Reason = request.Reason,
+            Evidence = request.Evidence,
+            HwidFingerprint = request.HwidFingerprint,
+            DeviceUserName = request.DeviceUserName
         };
     }
 }

@@ -14,6 +14,7 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 
 namespace BivLauncher.Api.Controllers;
 
@@ -567,17 +568,16 @@ public sealed class PublicYggdrasilController(
             .FirstOrDefaultAsync(cancellationToken);
         if (directAccount is not null)
         {
-            return Ok(new
-            {
-                id = normalizedProfileId,
-                name = directAccount.Username,
-                properties = Array.Empty<object>()
-            });
+            return Ok(await BuildProfileResponseAsync(
+                normalizedProfileId,
+                directAccount.Id,
+                directAccount.Username,
+                cancellationToken));
         }
 
         var accountCandidates = await dbContext.AuthAccounts
             .AsNoTracking()
-            .Select(x => new { x.Username, x.ExternalId })
+            .Select(x => new { x.Id, x.Username, x.ExternalId })
             .ToListAsync(cancellationToken);
         var fallbackAccount = accountCandidates.FirstOrDefault(x =>
             string.Equals(
@@ -589,12 +589,90 @@ public sealed class PublicYggdrasilController(
             return NotFound(new { error = "Profile not found." });
         }
 
-        return Ok(new
+        return Ok(await BuildProfileResponseAsync(
+            normalizedProfileId,
+            fallbackAccount.Id,
+            fallbackAccount.Username,
+            cancellationToken));
+    }
+
+    private async Task<object> BuildProfileResponseAsync(
+        string profileId,
+        Guid accountId,
+        string username,
+        CancellationToken cancellationToken)
+    {
+        var publicBaseUrl = ResolvePublicBaseUrl(Request).TrimEnd('/');
+        var hasSkin = await dbContext.SkinAssets
+            .AsNoTracking()
+            .AnyAsync(x => x.AccountId == accountId, cancellationToken);
+        var hasCape = await dbContext.CapeAssets
+            .AsNoTracking()
+            .AnyAsync(x => x.AccountId == accountId, cancellationToken);
+
+        var properties = BuildTextureProperties(
+            publicBaseUrl,
+            profileId,
+            username,
+            hasSkin,
+            hasCape);
+
+        return new
         {
-            id = normalizedProfileId,
-            name = fallbackAccount.Username,
-            properties = Array.Empty<object>()
-        });
+            id = profileId,
+            name = username,
+            properties
+        };
+    }
+
+    private static object[] BuildTextureProperties(
+        string publicBaseUrl,
+        string profileId,
+        string username,
+        bool hasSkin,
+        bool hasCape)
+    {
+        if (string.IsNullOrWhiteSpace(publicBaseUrl) || (!hasSkin && !hasCape))
+        {
+            return Array.Empty<object>();
+        }
+
+        var textures = new Dictionary<string, object>(StringComparer.Ordinal);
+        var encodedUsername = Uri.EscapeDataString(username);
+        if (hasSkin)
+        {
+            textures["SKIN"] = new
+            {
+                url = $"{publicBaseUrl}/skins/{encodedUsername}.png"
+            };
+        }
+
+        if (hasCape)
+        {
+            textures["CAPE"] = new
+            {
+                url = $"{publicBaseUrl}/capes/{encodedUsername}.png"
+            };
+        }
+
+        var payload = new
+        {
+            timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            profileId,
+            profileName = username,
+            textures
+        };
+        var serialized = JsonSerializer.Serialize(payload);
+        var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(serialized));
+
+        return
+        [
+            new
+            {
+                name = "textures",
+                value = encoded
+            }
+        ];
     }
 
     private async Task<TokenValidationResult> ValidatePlayerAccessTokenAsync(
