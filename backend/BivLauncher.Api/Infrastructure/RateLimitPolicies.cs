@@ -5,7 +5,6 @@ namespace BivLauncher.Api.Infrastructure;
 
 public static class RateLimitPolicies
 {
-    public const string PublicLoginPolicy = "PublicLogin";
     public const string PublicIngestPolicy = "PublicIngest";
     public const string PublicYggdrasilPolicy = "PublicYggdrasil";
     public const string AdminAuthPolicy = "AdminAuth";
@@ -26,17 +25,6 @@ public static class RateLimitPolicies
 
             await WriteRateLimitedResponseAsync(context.HttpContext, retryAfter, cancellationToken);
         };
-
-        options.AddPolicy(PublicLoginPolicy, context =>
-            RateLimitPartition.GetFixedWindowLimiter(
-                partitionKey: BuildPartitionKey(context),
-                factory: _ => new FixedWindowRateLimiterOptions
-                {
-                    AutoReplenishment = true,
-                    PermitLimit = 12,
-                    QueueLimit = 0,
-                    Window = TimeSpan.FromMinutes(1)
-                }));
 
         options.AddPolicy(PublicIngestPolicy, context =>
             RateLimitPartition.GetFixedWindowLimiter(
