@@ -10,10 +10,11 @@ namespace BivLauncher.Client.Services;
 public sealed class LauncherApiService : ILauncherApiService
 {
     private const int MaxRetryAttempts = 3;
-    private const int ManifestChunkSizeBytes = 32 * 1024;
+    private const int ManifestChunkSizeBytes = 16 * 1024;
     private static readonly TimeSpan ApiRequestAttemptTimeout = TimeSpan.FromSeconds(12);
     private static readonly TimeSpan MetadataRequestAttemptTimeout = TimeSpan.FromSeconds(6);
     private static readonly TimeSpan ManifestRequestAttemptTimeout = TimeSpan.FromSeconds(90);
+    private static readonly TimeSpan ManifestChunkRequestAttemptTimeout = TimeSpan.FromSeconds(30);
     private const string LauncherClientHeaderName = "X-BivLauncher-Client";
     private const string LauncherProofHeaderName = "X-BivLauncher-Proof";
     private const string LauncherClientProofMetadataKey = "BivLauncher.ClientProof";
@@ -311,12 +312,13 @@ public sealed class LauncherApiService : ILauncherApiService
         string tokenType,
         CancellationToken cancellationToken)
     {
-        using var firstResponse = await SendWithRetryAsync(
-            () => BuildManifestRangeRequest(uri, accessToken, tokenType, 0, ManifestChunkSizeBytes - 1),
-            cancellationToken,
-            maxAttempts: 1,
-            attemptTimeout: ApiRequestAttemptTimeout,
-            completionOption: HttpCompletionOption.ResponseContentRead);
+        using var firstResponse = await SendManifestRangeRequestAsync(
+            uri,
+            accessToken,
+            tokenType,
+            0,
+            ManifestChunkSizeBytes - 1,
+            cancellationToken);
 
         if (!firstResponse.IsSuccessStatusCode)
         {
@@ -326,7 +328,7 @@ public sealed class LauncherApiService : ILauncherApiService
 
         if (firstResponse.StatusCode != HttpStatusCode.PartialContent)
         {
-            return await firstResponse.Content.ReadAsByteArrayAsync(cancellationToken);
+            return await ReadHttpContentBytesAsync(firstResponse.Content, cancellationToken);
         }
 
         var contentRange = firstResponse.Content.Headers.ContentRange;
@@ -335,19 +337,20 @@ public sealed class LauncherApiService : ILauncherApiService
             throw new InvalidOperationException("Manifest range response did not include total length.");
         }
 
-        var firstChunk = await firstResponse.Content.ReadAsByteArrayAsync(cancellationToken);
+        var firstChunk = await ReadHttpContentBytesAsync(firstResponse.Content, cancellationToken);
         using var buffer = new MemoryStream((int)totalLength);
         await buffer.WriteAsync(firstChunk, cancellationToken);
 
         for (long offset = firstChunk.Length; offset < totalLength; offset += ManifestChunkSizeBytes)
         {
             var end = Math.Min(totalLength - 1, offset + ManifestChunkSizeBytes - 1);
-            using var response = await SendWithRetryAsync(
-                () => BuildManifestRangeRequest(uri, accessToken, tokenType, offset, end),
-                cancellationToken,
-                maxAttempts: 1,
-                attemptTimeout: ApiRequestAttemptTimeout,
-                completionOption: HttpCompletionOption.ResponseContentRead);
+            using var response = await SendManifestRangeRequestAsync(
+                uri,
+                accessToken,
+                tokenType,
+                offset,
+                end,
+                cancellationToken);
 
             if (!response.IsSuccessStatusCode)
             {
@@ -360,10 +363,35 @@ public sealed class LauncherApiService : ILauncherApiService
                 throw new InvalidOperationException("Manifest range response lost partial content support.");
             }
 
-            var chunk = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+            var chunk = await ReadHttpContentBytesAsync(response.Content, cancellationToken);
             await buffer.WriteAsync(chunk, cancellationToken);
         }
 
+        return buffer.ToArray();
+    }
+
+    private async Task<HttpResponseMessage> SendManifestRangeRequestAsync(
+        Uri uri,
+        string accessToken,
+        string tokenType,
+        long from,
+        long to,
+        CancellationToken cancellationToken)
+    {
+        using var request = BuildManifestRangeRequest(uri, accessToken, tokenType, from, to);
+        using var attemptTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        attemptTimeoutCts.CancelAfter(ManifestChunkRequestAttemptTimeout);
+        return await _httpClient.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            attemptTimeoutCts.Token);
+    }
+
+    private static async Task<byte[]> ReadHttpContentBytesAsync(HttpContent content, CancellationToken cancellationToken)
+    {
+        await using var stream = await content.ReadAsStreamAsync(cancellationToken);
+        using var buffer = new MemoryStream();
+        await stream.CopyToAsync(buffer, cancellationToken);
         return buffer.ToArray();
     }
 
