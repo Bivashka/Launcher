@@ -272,7 +272,7 @@ public sealed class DeliverySettingsProvider(
             PublicBaseUrlEu: defaultEuLauncherApiBaseUrl,
             AssetBaseUrlRu: configuredPublicBaseUrl,
             AssetBaseUrlEu: defaultEuLauncherApiBaseUrl,
-            FallbackApiBaseUrlsRu: defaultFallbackApiBaseUrls,
+            FallbackApiBaseUrlsRu: [],
             FallbackApiBaseUrlsEu: []);
     }
 
@@ -370,7 +370,7 @@ public sealed class DeliverySettingsProvider(
         }
 
         var normalizedFallbacksRu = NormalizeFallbacks(
-            settings.FallbackApiBaseUrlsRu is { Count: > 0 } ? settings.FallbackApiBaseUrlsRu : settings.FallbackApiBaseUrls,
+            settings.FallbackApiBaseUrlsRu,
             normalizedPublicBaseUrlRu,
             normalizedAssetBaseUrlRu);
         var normalizedFallbacksEu = NormalizeFallbacks(

@@ -1016,6 +1016,7 @@ public sealed class AdminLauncherController(
             "ru" => ResolvePreferredLauncherApiBaseUrl(
                 deliverySettings.LauncherApiBaseUrlRu,
                 configuration["LAUNCHER_API_BASE_URL_RU"],
+                deliverySettings.PublicBaseUrlRu,
                 ResolveLauncherDefaultApiBaseUrl()),
             "eu" => ResolveLauncherEuApiBaseUrl(deliverySettings),
             _ => string.Empty
@@ -1037,9 +1038,13 @@ public sealed class AdminLauncherController(
             return explicitEuUrl.TrimEnd('/');
         }
 
-        var fallbackEuUrl = (deliverySettings.FallbackApiBaseUrlsEu is { Count: > 0 }
-                ? deliverySettings.FallbackApiBaseUrlsEu
-                : deliverySettings.FallbackApiBaseUrls)
+        var configuredEuPublicBaseUrl = (deliverySettings.PublicBaseUrlEu ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(configuredEuPublicBaseUrl))
+        {
+            return configuredEuPublicBaseUrl.TrimEnd('/');
+        }
+
+        var fallbackEuUrl = (deliverySettings.FallbackApiBaseUrlsEu ?? [])
             .Select(x => (x ?? string.Empty).Trim())
             .FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
         return string.IsNullOrWhiteSpace(fallbackEuUrl)
@@ -1080,12 +1085,8 @@ public sealed class AdminLauncherController(
         var deliverySettings = deliverySettingsProvider.GetCachedSettings();
         var rawValues = normalizedRegionCode switch
         {
-            "ru" => deliverySettings.FallbackApiBaseUrlsRu is { Count: > 0 }
-                ? deliverySettings.FallbackApiBaseUrlsRu
-                : deliverySettings.FallbackApiBaseUrls,
-            "eu" => deliverySettings.FallbackApiBaseUrlsEu is { Count: > 0 }
-                ? deliverySettings.FallbackApiBaseUrlsEu
-                : [],
+            "ru" => deliverySettings.FallbackApiBaseUrlsRu ?? [],
+            "eu" => deliverySettings.FallbackApiBaseUrlsEu ?? [],
             _ => deliverySettings.FallbackApiBaseUrls
         };
 

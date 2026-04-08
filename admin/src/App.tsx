@@ -7805,8 +7805,12 @@ function App() {
                 <h3>Delivery / availability</h3>
                 <div className="action-block">
                   <small className="muted">
-                    These addresses are embedded into new launcher builds. RU/EU selector uses the two launcher API fields below.
+                    These addresses are embedded into new launcher builds. New launchers keep RU/EU isolated: RU only uses RU URLs, EU only uses EU URLs.
                   </small>
+                  <small className="muted">
+                    Leave RU/EU fallback fields empty if you do not have a second mirror for that same region. Do not put EU into RU fallback or RU into EU fallback.
+                  </small>
+                  <h4>Global / legacy</h4>
                   <label>
                     Public base URL
                     <input
@@ -7832,6 +7836,7 @@ function App() {
                       onChange={(event) => setDeliveryFallbackApiBaseUrlsText(event.target.value)}
                     />
                   </label>
+                  <h4>RU</h4>
                   <label>
                     RU public base URL
                     <input
@@ -7867,6 +7872,7 @@ function App() {
                       }
                     />
                   </label>
+                  <h4>EU</h4>
                   <label>
                     EU public base URL
                     <input

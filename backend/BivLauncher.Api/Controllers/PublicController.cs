@@ -443,16 +443,14 @@ public sealed class PublicController(
     private IReadOnlyList<string> ResolveFallbackApiBaseUrls(DeliverySettingsConfig settings)
     {
         var requestedRegionCode = ResolveRequestedRegionCode(settings);
-        if (string.Equals(requestedRegionCode, "ru", StringComparison.OrdinalIgnoreCase) &&
-            settings.FallbackApiBaseUrlsRu is { Count: > 0 })
+        if (string.Equals(requestedRegionCode, "ru", StringComparison.OrdinalIgnoreCase))
         {
-            return settings.FallbackApiBaseUrlsRu;
+            return settings.FallbackApiBaseUrlsRu ?? [];
         }
 
-        if (string.Equals(requestedRegionCode, "eu", StringComparison.OrdinalIgnoreCase) &&
-            settings.FallbackApiBaseUrlsEu is { Count: > 0 })
+        if (string.Equals(requestedRegionCode, "eu", StringComparison.OrdinalIgnoreCase))
         {
-            return settings.FallbackApiBaseUrlsEu;
+            return settings.FallbackApiBaseUrlsEu ?? [];
         }
 
         return settings.FallbackApiBaseUrls;
@@ -462,12 +460,16 @@ public sealed class PublicController(
     {
         var requestBaseUrl = ResolveRequestPublicBaseUrl();
         if (BaseUrlsMatch(requestBaseUrl, settings.LauncherApiBaseUrlRu) ||
+            BaseUrlsMatch(requestBaseUrl, settings.PublicBaseUrlRu) ||
+            BaseUrlsMatch(requestBaseUrl, settings.AssetBaseUrlRu) ||
             (settings.FallbackApiBaseUrlsRu?.Any(candidate => BaseUrlsMatch(requestBaseUrl, candidate)) ?? false))
         {
             return "ru";
         }
 
         if (BaseUrlsMatch(requestBaseUrl, settings.LauncherApiBaseUrlEu) ||
+            BaseUrlsMatch(requestBaseUrl, settings.PublicBaseUrlEu) ||
+            BaseUrlsMatch(requestBaseUrl, settings.AssetBaseUrlEu) ||
             (settings.FallbackApiBaseUrlsEu?.Any(candidate => BaseUrlsMatch(requestBaseUrl, candidate)) ?? false))
         {
             return "eu";

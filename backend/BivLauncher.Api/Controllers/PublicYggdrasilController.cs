@@ -892,12 +892,16 @@ public sealed class PublicYggdrasilController(
     {
         var requestBaseUrl = ResolveApiBaseUrl(request);
         if (BaseUrlsMatch(requestBaseUrl, deliverySettings.LauncherApiBaseUrlRu) ||
+            BaseUrlsMatch(requestBaseUrl, deliverySettings.PublicBaseUrlRu) ||
+            BaseUrlsMatch(requestBaseUrl, deliverySettings.AssetBaseUrlRu) ||
             (deliverySettings.FallbackApiBaseUrlsRu?.Any(candidate => BaseUrlsMatch(requestBaseUrl, candidate)) ?? false))
         {
             return "ru";
         }
 
         if (BaseUrlsMatch(requestBaseUrl, deliverySettings.LauncherApiBaseUrlEu) ||
+            BaseUrlsMatch(requestBaseUrl, deliverySettings.PublicBaseUrlEu) ||
+            BaseUrlsMatch(requestBaseUrl, deliverySettings.AssetBaseUrlEu) ||
             (deliverySettings.FallbackApiBaseUrlsEu?.Any(candidate => BaseUrlsMatch(requestBaseUrl, candidate)) ?? false))
         {
             return "eu";

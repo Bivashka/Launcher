@@ -175,6 +175,38 @@ public sealed class PublicControllerTests
     }
 
     [Fact]
+    public async Task Bootstrap_WhenRuRegionSelected_DoesNotInheritGlobalFallbackApiUrls()
+    {
+        await using var fixture = await TestFixture.CreateAsync();
+        await fixture.SeedProfileAsync("public", isPrivate: false, allowedPlayerUsernames: string.Empty);
+
+        var controller = fixture.CreateController(
+            deliverySettingsProvider: new StubDeliverySettingsProvider(new DeliverySettingsConfig(
+                PublicBaseUrl: "http://95.217.99.17:8080",
+                AssetBaseUrl: "http://95.217.99.17:8080",
+                FallbackApiBaseUrls: ["http://95.217.99.17:8080"],
+                UpdatedAtUtc: null,
+                LauncherApiBaseUrlRu: "http://195.43.142.97",
+                LauncherApiBaseUrlEu: "http://95.217.99.17:8080",
+                PublicBaseUrlRu: "http://195.43.142.97",
+                PublicBaseUrlEu: "http://95.217.99.17:8080",
+                AssetBaseUrlRu: "http://195.43.142.97",
+                AssetBaseUrlEu: "http://95.217.99.17:8080",
+                FallbackApiBaseUrlsRu: [],
+                FallbackApiBaseUrlsEu: [])));
+        controller.ControllerContext.HttpContext.Request.Headers.Host = "195.43.142.97";
+        controller.ControllerContext.HttpContext.Request.Headers["X-Forwarded-Proto"] = "http";
+        controller.ControllerContext.HttpContext.Request.Headers["X-Forwarded-Host"] = "195.43.142.97";
+
+        var response = await controller.Bootstrap(CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(response.Result);
+        var payload = Assert.IsType<BootstrapResponse>(ok.Value);
+        Assert.Equal("http://195.43.142.97", payload.PublicBaseUrl);
+        Assert.Empty(payload.FallbackApiBaseUrls);
+    }
+
+    [Fact]
     public async Task Manifest_WhenProfileIsPrivateAndUserIsNotAllowlisted_ReturnsNotFound()
     {
         await using var fixture = await TestFixture.CreateAsync();

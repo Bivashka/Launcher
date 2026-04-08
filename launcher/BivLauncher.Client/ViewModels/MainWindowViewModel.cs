@@ -493,9 +493,9 @@ public partial class MainWindowViewModel : ViewModelBase
     public string ApiRegionHintText => _languageCode == "en"
         ? "Choose which API endpoint the launcher should try first."
         : "Выберите, к какому endpoint лаунчер должен подключаться в первую очередь.";
-    public string ApiRegionRfButtonText => "🇷🇺";
-    public string ApiRegionEuButtonText => "🇪🇺";
-    public string ApiRegionRuToolTipText => _languageCode == "en" ? "RF route" : "Маршрут через РФ";
+    public string ApiRegionRfButtonText => "RU";
+    public string ApiRegionEuButtonText => "EU";
+    public string ApiRegionRuToolTipText => _languageCode == "en" ? "RU route" : "Маршрут RU";
     public string ApiRegionEuToolTipText => _languageCode == "en" ? "EU route" : "Маршрут через EU";
     public bool IsRuApiRegionSelected => string.Equals(PreferredApiRegion, "ru", StringComparison.OrdinalIgnoreCase);
     public bool IsEuApiRegionSelected => string.Equals(PreferredApiRegion, "eu", StringComparison.OrdinalIgnoreCase);
@@ -566,9 +566,20 @@ public partial class MainWindowViewModel : ViewModelBase
     public async Task InitializeAsync()
     {
         _settings = await _settingsService.LoadAsync();
-        PreferredApiRegion = ResolveInitialApiRegion(_settings.PreferredApiRegion);
+        var resolvedInitialApiRegion = ResolveInitialApiRegion(_settings.PreferredApiRegion);
+        PreferredApiRegion = resolvedInitialApiRegion;
         var configuredApiBaseUrl = TryResolveConfiguredApiBaseUrl();
-        if (TrimConfiguredApiBaseUrlReferences(_settings, configuredApiBaseUrl))
+        var shouldPersistResolvedRegion = !string.IsNullOrWhiteSpace(resolvedInitialApiRegion) &&
+                                         !string.Equals(
+                                             NormalizeApiRegionCode(_settings.PreferredApiRegion),
+                                             resolvedInitialApiRegion,
+                                             StringComparison.OrdinalIgnoreCase);
+        if (shouldPersistResolvedRegion)
+        {
+            _settings.PreferredApiRegion = resolvedInitialApiRegion;
+        }
+
+        if (TrimConfiguredApiBaseUrlReferences(_settings, configuredApiBaseUrl) || shouldPersistResolvedRegion)
         {
             await _settingsService.SaveAsync(_settings);
         }

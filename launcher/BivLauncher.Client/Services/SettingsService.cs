@@ -111,7 +111,7 @@ public sealed class SettingsService : ISettingsService
         return new LauncherSettings
         {
             InstallDirectory = GetDefaultInstallDirectory(),
-            PreferredApiRegion = string.Empty,
+            PreferredApiRegion = "ru",
             RamMb = 2048,
             JavaMode = "Auto",
             Language = "ru",
