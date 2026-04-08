@@ -3293,6 +3293,7 @@ public partial class MainWindowViewModel : ViewModelBase
             return;
         }
 
+        var monitoredProcessIds = GetTamperMonitoredProcessIds();
         _tamperViolationInProgress = true;
         UpdateTamperMonitorState();
         ClearBanNotice();
@@ -3303,7 +3304,7 @@ public partial class MainWindowViewModel : ViewModelBase
         _logService.LogInfo($"Security violation detected: {detection.Reason} Evidence: {detection.Evidence}");
 
         await HideLauncherWindowAsync();
-        CloseMonitoredGameProcesses();
+        CloseMonitoredGameProcesses(monitoredProcessIds);
 
         try
         {
@@ -3378,7 +3379,14 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private void CloseMonitoredGameProcesses()
     {
-        foreach (var processId in GetTamperMonitoredProcessIds())
+        CloseMonitoredGameProcesses(GetTamperMonitoredProcessIds());
+    }
+
+    private static void CloseMonitoredGameProcesses(IEnumerable<int> processIds)
+    {
+        foreach (var processId in processIds
+                     .Where(x => x > 0)
+                     .Distinct())
         {
             try
             {
