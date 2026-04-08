@@ -10,6 +10,7 @@ namespace BivLauncher.Client.Services;
 public sealed class LauncherApiService : ILauncherApiService
 {
     private const int MaxRetryAttempts = 3;
+    private const int ManifestChunkSizeBytes = 32 * 1024;
     private static readonly TimeSpan ApiRequestAttemptTimeout = TimeSpan.FromSeconds(12);
     private static readonly TimeSpan MetadataRequestAttemptTimeout = TimeSpan.FromSeconds(6);
     private static readonly TimeSpan ManifestRequestAttemptTimeout = TimeSpan.FromSeconds(90);
@@ -298,20 +299,100 @@ public sealed class LauncherApiService : ILauncherApiService
         CancellationToken cancellationToken = default)
     {
         var uri = BuildUri(apiBaseUrl, $"/api/public/manifest/{Uri.EscapeDataString(profileSlug)}");
-        using var response = await SendWithRetryAsync(
-            () => BuildOptionalAuthorizedRequest(HttpMethod.Get, uri, accessToken, tokenType),
-            cancellationToken,
-            maxAttempts: 1,
-            attemptTimeout: ManifestRequestAttemptTimeout,
-            completionOption: HttpCompletionOption.ResponseContentRead);
-        var body = await response.Content.ReadAsStringAsync(cancellationToken);
-        if (!response.IsSuccessStatusCode)
-        {
-            throw CreateApiException("Manifest", response, body);
-        }
-
+        var body = await DownloadManifestBodyAsync(uri, accessToken, tokenType, cancellationToken);
         var payload = JsonSerializer.Deserialize<LauncherManifest>(body, JsonOptions);
         return payload ?? throw new InvalidOperationException("Manifest response is empty.");
+    }
+
+    private async Task<string> DownloadManifestBodyAsync(
+        Uri uri,
+        string accessToken,
+        string tokenType,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var bytes = await DownloadManifestByRangesAsync(uri, accessToken, tokenType, cancellationToken);
+            return Encoding.UTF8.GetString(bytes);
+        }
+        catch (Exception ex) when (ex is TaskCanceledException or HttpRequestException or InvalidOperationException)
+        {
+            using var response = await SendWithRetryAsync(
+                () => BuildOptionalAuthorizedRequest(HttpMethod.Get, uri, accessToken, tokenType),
+                cancellationToken,
+                maxAttempts: 1,
+                attemptTimeout: ManifestRequestAttemptTimeout,
+                completionOption: HttpCompletionOption.ResponseContentRead);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                throw CreateApiException("Manifest", response, body);
+            }
+
+            return body;
+        }
+    }
+
+    private async Task<byte[]> DownloadManifestByRangesAsync(
+        Uri uri,
+        string accessToken,
+        string tokenType,
+        CancellationToken cancellationToken)
+    {
+        using var firstResponse = await SendWithRetryAsync(
+            () => BuildManifestRangeRequest(uri, accessToken, tokenType, 0, ManifestChunkSizeBytes - 1),
+            cancellationToken,
+            maxAttempts: 1,
+            attemptTimeout: ApiRequestAttemptTimeout,
+            completionOption: HttpCompletionOption.ResponseContentRead);
+
+        if (!firstResponse.IsSuccessStatusCode)
+        {
+            var errorBody = await firstResponse.Content.ReadAsStringAsync(cancellationToken);
+            throw CreateApiException("Manifest", firstResponse, errorBody);
+        }
+
+        if (firstResponse.StatusCode != HttpStatusCode.PartialContent)
+        {
+            return await firstResponse.Content.ReadAsByteArrayAsync(cancellationToken);
+        }
+
+        var contentRange = firstResponse.Content.Headers.ContentRange;
+        if (contentRange?.Length is not long totalLength || totalLength <= 0)
+        {
+            throw new InvalidOperationException("Manifest range response did not include total length.");
+        }
+
+        var firstChunk = await firstResponse.Content.ReadAsByteArrayAsync(cancellationToken);
+        using var buffer = new MemoryStream((int)totalLength);
+        await buffer.WriteAsync(firstChunk, cancellationToken);
+
+        for (long offset = firstChunk.Length; offset < totalLength; offset += ManifestChunkSizeBytes)
+        {
+            var end = Math.Min(totalLength - 1, offset + ManifestChunkSizeBytes - 1);
+            using var response = await SendWithRetryAsync(
+                () => BuildManifestRangeRequest(uri, accessToken, tokenType, offset, end),
+                cancellationToken,
+                maxAttempts: 1,
+                attemptTimeout: ApiRequestAttemptTimeout,
+                completionOption: HttpCompletionOption.ResponseContentRead);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+                throw CreateApiException("Manifest", response, errorBody);
+            }
+
+            if (response.StatusCode != HttpStatusCode.PartialContent)
+            {
+                throw new InvalidOperationException("Manifest range response lost partial content support.");
+            }
+
+            var chunk = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+            await buffer.WriteAsync(chunk, cancellationToken);
+        }
+
+        return buffer.ToArray();
     }
 
     public async Task<Stream> OpenAssetReadStreamAsync(string apiBaseUrl, string s3Key, CancellationToken cancellationToken = default)
@@ -661,6 +742,20 @@ public sealed class LauncherApiService : ILauncherApiService
         return string.IsNullOrWhiteSpace(token)
             ? new HttpRequestMessage(method, uri)
             : BuildAuthorizedRequest(method, uri, token, tokenType);
+    }
+
+    private static HttpRequestMessage BuildManifestRangeRequest(
+        Uri uri,
+        string? accessToken,
+        string tokenType,
+        long from,
+        long to)
+    {
+        var request = BuildOptionalAuthorizedRequest(HttpMethod.Get, uri, accessToken, tokenType);
+        request.Headers.Range = new RangeHeaderValue(from, to);
+        request.Headers.AcceptEncoding.Clear();
+        request.Headers.TryAddWithoutValidation("Accept-Encoding", "identity");
+        return request;
     }
 
     private static bool ShouldRetry(HttpStatusCode statusCode)

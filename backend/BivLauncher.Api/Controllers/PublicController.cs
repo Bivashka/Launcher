@@ -247,7 +247,7 @@ public sealed class PublicController(
             });
         }
 
-        var storedObject = await objectStorageService.GetAsync(manifestKey, cancellationToken);
+        var storedObject = await objectStorageService.OpenReadAsync(manifestKey, cancellationToken);
         if (storedObject is null)
         {
             return NotFound(new { error = "Manifest file not found in object storage." });
@@ -264,7 +264,14 @@ public sealed class PublicController(
         var contentType = string.IsNullOrWhiteSpace(storedObject.ContentType)
             ? "application/json"
             : storedObject.ContentType;
-        return File(storedObject.Data, contentType);
+        if (storedObject.SizeBytes is long sizeBytes)
+        {
+            Response.ContentLength = sizeBytes;
+        }
+
+        var result = File(storedObject.Stream, contentType);
+        result.EnableRangeProcessing = true;
+        return result;
     }
 
     private async Task<string> ResolvePublishedManifestKeyAsync(
