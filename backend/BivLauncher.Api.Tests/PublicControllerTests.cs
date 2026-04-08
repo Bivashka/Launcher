@@ -539,9 +539,35 @@ public sealed class PublicControllerTests
                     storedObject.Data.LongLength));
         }
 
+        public Task<StoredObjectRangeStream?> OpenReadRangeAsync(string key, long from, long to, CancellationToken cancellationToken = default)
+        {
+            if (!_objects.TryGetValue(key, out var storedObject) || from < 0 || to < from || from >= storedObject.Data.LongLength)
+            {
+                return Task.FromResult<StoredObjectRangeStream?>(null);
+            }
+
+            var boundedTo = Math.Min(to, storedObject.Data.LongLength - 1);
+            var length = (int)(boundedTo - from + 1);
+            var slice = new byte[length];
+            Array.Copy(storedObject.Data, from, slice, 0, length);
+            return Task.FromResult<StoredObjectRangeStream?>(
+                new StoredObjectRangeStream(
+                    new MemoryStream(slice, writable: false),
+                    storedObject.ContentType,
+                    storedObject.Data.LongLength,
+                    from,
+                    boundedTo));
+        }
+
         public Task<StoredObjectMetadata?> GetMetadataAsync(string key, CancellationToken cancellationToken = default)
         {
-            return Task.FromResult<StoredObjectMetadata?>(null);
+            if (!_objects.TryGetValue(key, out var storedObject))
+            {
+                return Task.FromResult<StoredObjectMetadata?>(null);
+            }
+
+            return Task.FromResult<StoredObjectMetadata?>(
+                new StoredObjectMetadata(storedObject.Data.LongLength, storedObject.ContentType, string.Empty));
         }
 
         public Task<IReadOnlyList<StoredObjectListItem>> ListByPrefixAsync(string prefix, CancellationToken cancellationToken = default)

@@ -173,6 +173,26 @@ public sealed class BuildPipelineServiceTests
                     value.Data.LongLength));
         }
 
+        public Task<StoredObjectRangeStream?> OpenReadRangeAsync(string key, long from, long to, CancellationToken cancellationToken = default)
+        {
+            if (!_objects.TryGetValue(key, out var value) || from < 0 || to < from || from >= value.Data.LongLength)
+            {
+                return Task.FromResult<StoredObjectRangeStream?>(null);
+            }
+
+            var boundedTo = Math.Min(to, value.Data.LongLength - 1);
+            var length = (int)(boundedTo - from + 1);
+            var slice = new byte[length];
+            Array.Copy(value.Data, from, slice, 0, length);
+            return Task.FromResult<StoredObjectRangeStream?>(
+                new StoredObjectRangeStream(
+                    new MemoryStream(slice, writable: false),
+                    value.ContentType,
+                    value.Data.LongLength,
+                    from,
+                    boundedTo));
+        }
+
         public Task<StoredObjectMetadata?> GetMetadataAsync(string key, CancellationToken cancellationToken = default)
         {
             _objects.TryGetValue(key, out var value);

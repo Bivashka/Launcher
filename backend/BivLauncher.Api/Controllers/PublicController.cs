@@ -8,6 +8,7 @@ using BivLauncher.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Microsoft.Net.Http.Headers;
 using System.Collections.Concurrent;
 using System.Security.Claims;
 using System.Text.Json;
@@ -253,6 +254,12 @@ public sealed class PublicController(
             return NotFound(new { error = "Manifest file not found in object storage." });
         }
 
+        if (await TryServeRangeAsync(manifestKey, storedObject.ContentType, cancellationToken) is IActionResult rangeResult)
+        {
+            await storedObject.Stream.DisposeAsync();
+            return rangeResult;
+        }
+
         Response.Headers.CacheControl = "no-store, no-cache, must-revalidate";
         Response.Headers.Pragma = "no-cache";
         Response.Headers.Expires = "0";
@@ -370,6 +377,12 @@ public sealed class PublicController(
             return NotFound();
         }
 
+        if (await TryServeRangeAsync(normalizedKey, storedObject.ContentType, cancellationToken) is IActionResult rangeResult)
+        {
+            await storedObject.Stream.DisposeAsync();
+            return rangeResult;
+        }
+
         if (storedObject.SizeBytes is long sizeBytes)
         {
             Response.ContentLength = sizeBytes;
@@ -378,6 +391,100 @@ public sealed class PublicController(
         var result = File(storedObject.Stream, storedObject.ContentType);
         result.EnableRangeProcessing = true;
         return result;
+    }
+
+    private async Task<IActionResult?> TryServeRangeAsync(
+        string storageKey,
+        string? fallbackContentType,
+        CancellationToken cancellationToken)
+    {
+        if (!TryResolveSingleByteRangeHeader(out var requestedFrom, out var requestedTo))
+        {
+            return null;
+        }
+
+        var metadata = await objectStorageService.GetMetadataAsync(storageKey, cancellationToken);
+        if (metadata is null || metadata.SizeBytes <= 0)
+        {
+            return NotFound();
+        }
+
+        if (!TryNormalizeRange(metadata.SizeBytes, requestedFrom, requestedTo, out var from, out var to))
+        {
+            Response.Headers.ContentRange = $"bytes */{metadata.SizeBytes}";
+            return StatusCode(StatusCodes.Status416RangeNotSatisfiable);
+        }
+
+        var rangedObject = await objectStorageService.OpenReadRangeAsync(storageKey, from, to, cancellationToken);
+        if (rangedObject is null)
+        {
+            Response.Headers.ContentRange = $"bytes */{metadata.SizeBytes}";
+            return StatusCode(StatusCodes.Status416RangeNotSatisfiable);
+        }
+
+        Response.StatusCode = StatusCodes.Status206PartialContent;
+        Response.Headers.AcceptRanges = "bytes";
+        Response.Headers.ContentRange = $"bytes {rangedObject.From}-{rangedObject.To}/{rangedObject.TotalSizeBytes}";
+        Response.ContentLength = rangedObject.To - rangedObject.From + 1;
+
+        var contentType = string.IsNullOrWhiteSpace(rangedObject.ContentType)
+            ? (string.IsNullOrWhiteSpace(fallbackContentType) ? "application/octet-stream" : fallbackContentType)
+            : rangedObject.ContentType;
+        return File(rangedObject.Stream, contentType);
+    }
+
+    private bool TryResolveSingleByteRangeHeader(out long? from, out long? to)
+    {
+        from = null;
+        to = null;
+
+        var rangeHeader = Request.GetTypedHeaders().Range;
+        if (rangeHeader is null ||
+            !string.Equals(rangeHeader.Unit.Value, "bytes", StringComparison.OrdinalIgnoreCase) ||
+            rangeHeader.Ranges.Count != 1)
+        {
+            return false;
+        }
+
+        var range = rangeHeader.Ranges.First();
+        from = range.From;
+        to = range.To;
+        return from.HasValue || to.HasValue;
+    }
+
+    private static bool TryNormalizeRange(
+        long totalSize,
+        long? requestedFrom,
+        long? requestedTo,
+        out long from,
+        out long to)
+    {
+        from = 0;
+        to = 0;
+
+        if (totalSize <= 0)
+        {
+            return false;
+        }
+
+        if (requestedFrom.HasValue)
+        {
+            from = requestedFrom.Value;
+            to = requestedTo.HasValue
+                ? Math.Min(requestedTo.Value, totalSize - 1)
+                : totalSize - 1;
+            return from >= 0 && from < totalSize && to >= from;
+        }
+
+        if (!requestedTo.HasValue || requestedTo.Value <= 0)
+        {
+            return false;
+        }
+
+        var suffixLength = Math.Min(requestedTo.Value, totalSize);
+        from = totalSize - suffixLength;
+        to = totalSize - 1;
+        return from >= 0 && to >= from;
     }
 
     private static int ResolvePositiveInt(string? rawValue, int fallback)

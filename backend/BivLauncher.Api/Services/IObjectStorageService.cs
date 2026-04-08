@@ -10,6 +10,7 @@ public interface IObjectStorageService
         CancellationToken cancellationToken = default);
     Task<StoredObject?> GetAsync(string key, CancellationToken cancellationToken = default);
     Task<StoredObjectStream?> OpenReadAsync(string key, CancellationToken cancellationToken = default);
+    Task<StoredObjectRangeStream?> OpenReadRangeAsync(string key, long from, long to, CancellationToken cancellationToken = default);
     Task<StoredObjectMetadata?> GetMetadataAsync(string key, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<StoredObjectListItem>> ListByPrefixAsync(string prefix, CancellationToken cancellationToken = default);
     Task DeleteAsync(string key, CancellationToken cancellationToken = default);
@@ -17,5 +18,6 @@ public interface IObjectStorageService
 
 public sealed record StoredObject(byte[] Data, string ContentType);
 public sealed record StoredObjectStream(Stream Stream, string ContentType, long? SizeBytes);
+public sealed record StoredObjectRangeStream(Stream Stream, string ContentType, long TotalSizeBytes, long From, long To);
 public sealed record StoredObjectMetadata(long SizeBytes, string ContentType, string Sha256);
 public sealed record StoredObjectListItem(string Key, long SizeBytes, DateTime LastModifiedUtc);

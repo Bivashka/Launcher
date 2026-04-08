@@ -72,6 +72,14 @@ public sealed class S3ObjectStorageService(
             : await OpenLocalReadAsync(settings, key, cancellationToken);
     }
 
+    public async Task<StoredObjectRangeStream?> OpenReadRangeAsync(string key, long from, long to, CancellationToken cancellationToken = default)
+    {
+        var settings = await ResolveSettingsAsync(cancellationToken);
+        return settings.UseS3
+            ? await OpenS3ReadRangeAsync(settings, key, from, to, cancellationToken)
+            : await OpenLocalReadRangeAsync(settings, key, from, to, cancellationToken);
+    }
+
     public async Task<StoredObjectMetadata?> GetMetadataAsync(string key, CancellationToken cancellationToken = default)
     {
         var settings = await ResolveSettingsAsync(cancellationToken);
@@ -357,6 +365,50 @@ public sealed class S3ObjectStorageService(
         }
     }
 
+    private async Task<StoredObjectRangeStream?> OpenS3ReadRangeAsync(
+        ResolvedStorageSettings settings,
+        string key,
+        long from,
+        long to,
+        CancellationToken cancellationToken)
+    {
+        var client = await GetClientAsync(settings, cancellationToken);
+        await EnsureBucketExistsAsync(client, settings, cancellationToken);
+
+        try
+        {
+            var normalizedKey = NormalizeStorageKey(key);
+            var metadata = await GetS3MetadataAsync(settings, key, cancellationToken);
+            if (metadata is null || metadata.SizeBytes <= 0 || from < 0 || to < from || from >= metadata.SizeBytes)
+            {
+                return null;
+            }
+
+            var boundedTo = Math.Min(to, metadata.SizeBytes - 1);
+            var request = new GetObjectRequest
+            {
+                BucketName = settings.Bucket,
+                Key = normalizedKey,
+                ByteRange = new ByteRange(from, boundedTo)
+            };
+            var response = await client.GetObjectAsync(request, cancellationToken);
+            var contentType = string.IsNullOrWhiteSpace(response.Headers.ContentType)
+                ? metadata.ContentType
+                : response.Headers.ContentType;
+            var ownedStream = new OwnedStream(response.ResponseStream, response);
+            return new StoredObjectRangeStream(
+                ownedStream,
+                contentType,
+                metadata.SizeBytes,
+                from,
+                boundedTo);
+        }
+        catch (AmazonS3Exception ex) when (ex.StatusCode == HttpStatusCode.NotFound || ex.ErrorCode == "NoSuchKey" || ex.StatusCode == HttpStatusCode.RequestedRangeNotSatisfiable)
+        {
+            return null;
+        }
+    }
+
     private async Task<IReadOnlyList<StoredObjectListItem>> ListS3ByPrefixAsync(
         ResolvedStorageSettings settings,
         string prefix,
@@ -509,6 +561,47 @@ public sealed class S3ObjectStorageService(
             options: FileOptions.Asynchronous | FileOptions.SequentialScan);
 
         return new StoredObjectStream(stream, contentType, fileInfo.Length);
+    }
+
+    private async Task<StoredObjectRangeStream?> OpenLocalReadRangeAsync(
+        ResolvedStorageSettings settings,
+        string key,
+        long from,
+        long to,
+        CancellationToken cancellationToken)
+    {
+        var objectPath = ResolveLocalObjectPath(settings, key, createParentDirectory: false);
+        if (!File.Exists(objectPath))
+        {
+            return null;
+        }
+
+        var metadata = await TryReadLocalMetadataAsync(objectPath, cancellationToken);
+        var contentType = string.IsNullOrWhiteSpace(metadata?.ContentType)
+            ? InferContentTypeFromKey(key)
+            : metadata.ContentType!.Trim();
+        var fileInfo = new FileInfo(objectPath);
+        if (fileInfo.Length <= 0 || from < 0 || to < from || from >= fileInfo.Length)
+        {
+            return null;
+        }
+
+        var boundedTo = Math.Min(to, fileInfo.Length - 1);
+        var stream = new FileStream(
+            objectPath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            bufferSize: 131072,
+            options: FileOptions.Asynchronous | FileOptions.SequentialScan);
+        stream.Seek(from, SeekOrigin.Begin);
+
+        return new StoredObjectRangeStream(
+            new BoundedReadStream(stream, boundedTo - from + 1),
+            contentType,
+            fileInfo.Length,
+            from,
+            boundedTo);
     }
 
     private IReadOnlyList<StoredObjectListItem> ListLocalByPrefix(ResolvedStorageSettings settings, string prefix)
@@ -933,6 +1026,98 @@ public sealed class S3ObjectStorageService(
                 _owner.Dispose();
                 await base.DisposeAsync();
             }
+        }
+    }
+
+    private sealed class BoundedReadStream(Stream inner, long remainingBytes) : Stream
+    {
+        private readonly Stream _inner = inner;
+        private long _remainingBytes = remainingBytes;
+
+        public override bool CanRead => _inner.CanRead;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => _remainingBytes;
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override void Flush()
+        {
+        }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            if (_remainingBytes <= 0)
+            {
+                return 0;
+            }
+
+            var boundedCount = (int)Math.Min(count, _remainingBytes);
+            var read = _inner.Read(buffer, offset, boundedCount);
+            _remainingBytes -= read;
+            return read;
+        }
+
+        public override int Read(Span<byte> buffer)
+        {
+            if (_remainingBytes <= 0)
+            {
+                return 0;
+            }
+
+            var boundedBuffer = buffer[..(int)Math.Min(buffer.Length, _remainingBytes)];
+            var read = _inner.Read(boundedBuffer);
+            _remainingBytes -= read;
+            return read;
+        }
+
+        public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            if (_remainingBytes <= 0)
+            {
+                return 0;
+            }
+
+            var boundedCount = (int)Math.Min(count, _remainingBytes);
+            var read = await _inner.ReadAsync(buffer, offset, boundedCount, cancellationToken);
+            _remainingBytes -= read;
+            return read;
+        }
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (_remainingBytes <= 0)
+            {
+                return 0;
+            }
+
+            var boundedBuffer = buffer[..(int)Math.Min(buffer.Length, _remainingBytes)];
+            var read = await _inner.ReadAsync(boundedBuffer, cancellationToken);
+            _remainingBytes -= read;
+            return read;
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                _inner.Dispose();
+            }
+
+            base.Dispose(disposing);
+        }
+
+        public override async ValueTask DisposeAsync()
+        {
+            await _inner.DisposeAsync();
+            await base.DisposeAsync();
         }
     }
 }
