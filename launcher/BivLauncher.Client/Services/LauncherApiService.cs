@@ -725,6 +725,7 @@ public sealed class LauncherApiService : ILauncherApiService
     {
         var request = BuildOptionalAuthorizedRequest(HttpMethod.Get, uri, accessToken, tokenType);
         request.Headers.Range = new RangeHeaderValue(from, to);
+        request.Headers.ConnectionClose = true;
         request.Headers.AcceptEncoding.Clear();
         request.Headers.TryAddWithoutValidation("Accept-Encoding", "identity");
         return request;
