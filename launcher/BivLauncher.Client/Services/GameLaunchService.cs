@@ -1752,13 +1752,12 @@ public sealed class GameLaunchService(
 
         try
         {
-            await using var remoteStream = await _launcherApiService.OpenAssetReadStreamAsync(
+            EnsureWritableFile(targetPath);
+            await _launcherApiService.DownloadAssetToFileAsync(
                 apiBaseUrl,
                 DefaultClientAuthlibAssetPath,
+                targetPath,
                 cancellationToken);
-            EnsureWritableFile(targetPath);
-            await using var localStream = new FileStream(targetPath, FileMode.Create, FileAccess.Write, FileShare.None);
-            await remoteStream.CopyToAsync(localStream, cancellationToken);
         }
         catch (UnauthorizedAccessException ex)
         {

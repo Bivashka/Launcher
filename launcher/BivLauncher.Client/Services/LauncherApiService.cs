@@ -11,10 +11,12 @@ public sealed class LauncherApiService : ILauncherApiService
 {
     private const int MaxRetryAttempts = 3;
     private const int ManifestChunkSizeBytes = 16 * 1024;
+    private const int AssetChunkSizeBytes = 256 * 1024;
     private static readonly TimeSpan ApiRequestAttemptTimeout = TimeSpan.FromSeconds(12);
     private static readonly TimeSpan MetadataRequestAttemptTimeout = TimeSpan.FromSeconds(6);
     private static readonly TimeSpan ManifestRequestAttemptTimeout = TimeSpan.FromSeconds(90);
     private static readonly TimeSpan ManifestChunkRequestAttemptTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan AssetChunkRequestAttemptTimeout = TimeSpan.FromSeconds(30);
     private const string LauncherClientHeaderName = "X-BivLauncher-Client";
     private const string LauncherProofHeaderName = "X-BivLauncher-Proof";
     private const string LauncherClientProofMetadataKey = "BivLauncher.ClientProof";
@@ -409,6 +411,256 @@ public sealed class LauncherApiService : ILauncherApiService
         return buffer.ToArray();
     }
 
+    public async Task DownloadAssetToFileAsync(
+        string apiBaseUrl,
+        string s3Key,
+        string destinationPath,
+        CancellationToken cancellationToken = default)
+    {
+        var candidateUris = BuildAssetCandidateUris(apiBaseUrl, s3Key);
+        Exception? lastError = null;
+
+        foreach (var candidateUri in candidateUris)
+        {
+            try
+            {
+                await DownloadAssetCandidateToFileAsync(candidateUri, destinationPath, cancellationToken);
+                return;
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException or InvalidOperationException)
+            {
+                lastError = ex;
+                TryDeleteFile(destinationPath);
+            }
+        }
+
+        throw lastError ?? new InvalidOperationException("No reachable asset endpoints are configured.");
+    }
+
+    private async Task DownloadAssetCandidateToFileAsync(
+        Uri candidateUri,
+        string destinationPath,
+        CancellationToken cancellationToken)
+    {
+        Exception? lastError = null;
+        for (var attempt = 1; attempt <= MaxRetryAttempts; attempt++)
+        {
+            TryDeleteFile(destinationPath);
+            try
+            {
+                await DownloadAssetCandidateToFileCoreAsync(candidateUri, destinationPath, cancellationToken);
+                return;
+            }
+            catch (Exception ex) when (IsTransientAssetDownloadException(ex, cancellationToken) && attempt < MaxRetryAttempts)
+            {
+                lastError = ex;
+                await Task.Delay(ResolveRetryDelay(response: null, attempt), cancellationToken);
+            }
+        }
+
+        throw lastError ?? new IOException($"Asset download failed for '{candidateUri}'.");
+    }
+
+    private async Task DownloadAssetCandidateToFileCoreAsync(
+        Uri candidateUri,
+        string destinationPath,
+        CancellationToken cancellationToken)
+    {
+        EnsureParentDirectory(destinationPath);
+
+        using var firstResponse = await SendAssetRangeRequestAsync(
+            candidateUri,
+            0,
+            AssetChunkSizeBytes - 1,
+            cancellationToken);
+
+        if (!firstResponse.IsSuccessStatusCode)
+        {
+            var errorBody = await firstResponse.Content.ReadAsStringAsync(cancellationToken);
+            throw CreateApiException("Asset", firstResponse, errorBody);
+        }
+
+        if (firstResponse.StatusCode != HttpStatusCode.PartialContent)
+        {
+            await DownloadAssetWholeResponseToFileAsync(candidateUri, destinationPath, cancellationToken);
+            return;
+        }
+
+        var contentRange = firstResponse.Content.Headers.ContentRange;
+        if (contentRange?.Length is not long totalLength || totalLength <= 0)
+        {
+            throw new InvalidOperationException("Asset range response did not include total length.");
+        }
+
+        await using var targetStream = new FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None);
+        await CopyHttpContentToStreamAsync(
+            firstResponse.Content,
+            targetStream,
+            AssetChunkRequestAttemptTimeout,
+            cancellationToken);
+
+        for (long offset = targetStream.Length; offset < totalLength; offset += AssetChunkSizeBytes)
+        {
+            var end = Math.Min(totalLength - 1, offset + AssetChunkSizeBytes - 1);
+            Exception? lastChunkError = null;
+            var chunkCompleted = false;
+
+            for (var attempt = 1; attempt <= MaxRetryAttempts; attempt++)
+            {
+                targetStream.Position = offset;
+                targetStream.SetLength(offset);
+
+                try
+                {
+                    using var response = await SendAssetRangeRequestAsync(
+                        candidateUri,
+                        offset,
+                        end,
+                        cancellationToken);
+
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+                        throw CreateApiException("Asset", response, errorBody);
+                    }
+
+                    if (response.StatusCode != HttpStatusCode.PartialContent)
+                    {
+                        throw new InvalidOperationException("Asset range response lost partial content support.");
+                    }
+
+                    await CopyHttpContentToStreamAsync(
+                        response.Content,
+                        targetStream,
+                        AssetChunkRequestAttemptTimeout,
+                        cancellationToken);
+                    chunkCompleted = true;
+                    break;
+                }
+                catch (Exception ex) when (IsTransientAssetDownloadException(ex, cancellationToken) && attempt < MaxRetryAttempts)
+                {
+                    lastChunkError = ex;
+                    await Task.Delay(ResolveRetryDelay(response: null, attempt), cancellationToken);
+                }
+            }
+
+            if (!chunkCompleted)
+            {
+                throw lastChunkError ?? new IOException($"Asset chunk download failed for '{candidateUri}'.");
+            }
+        }
+
+        await targetStream.FlushAsync(cancellationToken);
+        if (targetStream.Length != totalLength)
+        {
+            throw new IOException(
+                $"Asset download size mismatch for '{candidateUri}'. Expected {totalLength} bytes, received {targetStream.Length}.");
+        }
+    }
+
+    private async Task DownloadAssetWholeResponseToFileAsync(
+        Uri candidateUri,
+        string destinationPath,
+        CancellationToken cancellationToken)
+    {
+        Exception? lastError = null;
+        for (var attempt = 1; attempt <= MaxRetryAttempts; attempt++)
+        {
+            TryDeleteFile(destinationPath);
+            try
+            {
+                using var attemptTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                attemptTimeoutCts.CancelAfter(ManifestRequestAttemptTimeout);
+                using var response = await _httpClient.GetAsync(
+                    candidateUri,
+                    HttpCompletionOption.ResponseHeadersRead,
+                    attemptTimeoutCts.Token);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+                    throw CreateApiException("Asset", response, errorBody);
+                }
+
+                await using var targetStream = new FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None);
+                await CopyHttpContentToStreamAsync(
+                    response.Content,
+                    targetStream,
+                    ManifestRequestAttemptTimeout,
+                    cancellationToken);
+                await targetStream.FlushAsync(cancellationToken);
+                return;
+            }
+            catch (Exception ex) when (IsTransientAssetDownloadException(ex, cancellationToken) && attempt < MaxRetryAttempts)
+            {
+                lastError = ex;
+                await Task.Delay(ResolveRetryDelay(response: null, attempt), cancellationToken);
+            }
+        }
+
+        throw lastError ?? new IOException($"Asset download failed for '{candidateUri}'.");
+    }
+
+    private async Task<HttpResponseMessage> SendAssetRangeRequestAsync(
+        Uri uri,
+        long from,
+        long to,
+        CancellationToken cancellationToken)
+    {
+        using var request = BuildAssetRangeRequest(uri, from, to);
+        using var attemptTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        attemptTimeoutCts.CancelAfter(AssetChunkRequestAttemptTimeout);
+        return await _httpClient.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            attemptTimeoutCts.Token);
+    }
+
+    private static async Task CopyHttpContentToStreamAsync(
+        HttpContent content,
+        Stream target,
+        TimeSpan readTimeout,
+        CancellationToken cancellationToken)
+    {
+        using var readTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        readTimeoutCts.CancelAfter(readTimeout);
+        await using var source = await content.ReadAsStreamAsync(readTimeoutCts.Token);
+        await source.CopyToAsync(target, 81920, readTimeoutCts.Token);
+    }
+
+    private static bool IsTransientAssetDownloadException(Exception ex, CancellationToken cancellationToken)
+    {
+        if (ex is TaskCanceledException)
+        {
+            return !cancellationToken.IsCancellationRequested;
+        }
+
+        return ex is HttpRequestException or IOException;
+    }
+
+    private static void EnsureParentDirectory(string destinationPath)
+    {
+        var directory = Path.GetDirectoryName(destinationPath);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch
+        {
+        }
+    }
+
     public async Task<Stream> OpenAssetReadStreamAsync(string apiBaseUrl, string s3Key, CancellationToken cancellationToken = default)
     {
         var candidateUris = BuildAssetCandidateUris(apiBaseUrl, s3Key);
@@ -766,6 +1018,16 @@ public sealed class LauncherApiService : ILauncherApiService
         long to)
     {
         var request = BuildOptionalAuthorizedRequest(HttpMethod.Get, uri, accessToken, tokenType);
+        request.Headers.Range = new RangeHeaderValue(from, to);
+        request.Headers.ConnectionClose = true;
+        request.Headers.AcceptEncoding.Clear();
+        request.Headers.TryAddWithoutValidation("Accept-Encoding", "identity");
+        return request;
+    }
+
+    private static HttpRequestMessage BuildAssetRangeRequest(Uri uri, long from, long to)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, uri);
         request.Headers.Range = new RangeHeaderValue(from, to);
         request.Headers.ConnectionClose = true;
         request.Headers.AcceptEncoding.Clear();

@@ -81,11 +81,11 @@ public sealed class ManifestInstallerService(
                     }
 
                     var assetReference = string.IsNullOrWhiteSpace(file.DownloadUrl) ? file.S3Key : file.DownloadUrl;
-                    await using (var sourceStream = await launcherApiService.OpenAssetReadStreamAsync(apiBaseUrl, assetReference, cancellationToken))
-                    await using (var targetStream = File.Create(tempPath))
-                    {
-                        await sourceStream.CopyToAsync(targetStream, cancellationToken);
-                    }
+                    await launcherApiService.DownloadAssetToFileAsync(
+                        apiBaseUrl,
+                        assetReference,
+                        tempPath,
+                        cancellationToken);
 
                     await using (var downloadedStream = File.OpenRead(tempPath))
                     {
@@ -320,11 +320,11 @@ public sealed class ManifestInstallerService(
             : manifest.JavaRuntimeArtifactUrl;
         try
         {
-            await using (var sourceStream = await launcherApiService.OpenAssetReadStreamAsync(apiBaseUrl, runtimeArtifactReference, cancellationToken))
-            await using (var targetStream = File.Create(runtimeArtifactPath))
-            {
-                await sourceStream.CopyToAsync(targetStream, cancellationToken);
-            }
+            await launcherApiService.DownloadAssetToFileAsync(
+                apiBaseUrl,
+                runtimeArtifactReference,
+                runtimeArtifactPath,
+                cancellationToken);
         }
         catch (UnauthorizedAccessException ex)
         {

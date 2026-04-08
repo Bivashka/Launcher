@@ -55,6 +55,11 @@ public interface ILauncherApiService
         string accessToken = "",
         string tokenType = "Bearer",
         CancellationToken cancellationToken = default);
+    Task DownloadAssetToFileAsync(
+        string apiBaseUrl,
+        string s3Key,
+        string destinationPath,
+        CancellationToken cancellationToken = default);
     Task<Stream> OpenAssetReadStreamAsync(string apiBaseUrl, string s3Key, CancellationToken cancellationToken = default);
     Task<PublicCrashReportCreateResponse> SubmitCrashReportAsync(
         string apiBaseUrl,
