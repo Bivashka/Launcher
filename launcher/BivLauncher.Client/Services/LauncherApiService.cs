@@ -1,4 +1,5 @@
 using BivLauncher.Client.Models;
+using System.Buffers;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Reflection;
@@ -403,11 +404,9 @@ public sealed class LauncherApiService : ILauncherApiService
         TimeSpan readTimeout,
         CancellationToken cancellationToken)
     {
-        using var readTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        readTimeoutCts.CancelAfter(readTimeout);
-        await using var stream = await content.ReadAsStreamAsync(readTimeoutCts.Token);
+        await using var stream = await content.ReadAsStreamAsync(cancellationToken);
         using var buffer = new MemoryStream();
-        await stream.CopyToAsync(buffer, readTimeoutCts.Token);
+        await CopyStreamWithIdleTimeoutAsync(stream, buffer, readTimeout, cancellationToken);
         return buffer.ToArray();
     }
 
@@ -622,10 +621,36 @@ public sealed class LauncherApiService : ILauncherApiService
         TimeSpan readTimeout,
         CancellationToken cancellationToken)
     {
-        using var readTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        readTimeoutCts.CancelAfter(readTimeout);
-        await using var source = await content.ReadAsStreamAsync(readTimeoutCts.Token);
-        await source.CopyToAsync(target, 81920, readTimeoutCts.Token);
+        await using var source = await content.ReadAsStreamAsync(cancellationToken);
+        await CopyStreamWithIdleTimeoutAsync(source, target, readTimeout, cancellationToken);
+    }
+
+    private static async Task CopyStreamWithIdleTimeoutAsync(
+        Stream source,
+        Stream target,
+        TimeSpan idleReadTimeout,
+        CancellationToken cancellationToken)
+    {
+        var buffer = ArrayPool<byte>.Shared.Rent(81920);
+        try
+        {
+            while (true)
+            {
+                using var readTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                readTimeoutCts.CancelAfter(idleReadTimeout);
+                var read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), readTimeoutCts.Token);
+                if (read == 0)
+                {
+                    break;
+                }
+
+                await target.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
     }
 
     private static bool IsTransientAssetDownloadException(Exception ex, CancellationToken cancellationToken)
