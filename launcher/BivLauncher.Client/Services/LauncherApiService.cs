@@ -12,6 +12,7 @@ public sealed class LauncherApiService : ILauncherApiService
     private const int MaxRetryAttempts = 3;
     private static readonly TimeSpan ApiRequestAttemptTimeout = TimeSpan.FromSeconds(12);
     private static readonly TimeSpan MetadataRequestAttemptTimeout = TimeSpan.FromSeconds(6);
+    private static readonly TimeSpan ManifestRequestAttemptTimeout = TimeSpan.FromSeconds(90);
     private const string LauncherClientHeaderName = "X-BivLauncher-Client";
     private const string LauncherProofHeaderName = "X-BivLauncher-Proof";
     private const string LauncherClientProofMetadataKey = "BivLauncher.ClientProof";
@@ -59,7 +60,7 @@ public sealed class LauncherApiService : ILauncherApiService
             () => BuildOptionalAuthorizedRequest(HttpMethod.Get, uri, accessToken, tokenType),
             cancellationToken,
             maxAttempts: 1,
-            attemptTimeout: MetadataRequestAttemptTimeout,
+            attemptTimeout: ManifestRequestAttemptTimeout,
             completionOption: HttpCompletionOption.ResponseContentRead);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         if (!response.IsSuccessStatusCode)
