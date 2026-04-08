@@ -302,7 +302,7 @@ public sealed class LauncherApiService : ILauncherApiService
             () => BuildOptionalAuthorizedRequest(HttpMethod.Get, uri, accessToken, tokenType),
             cancellationToken,
             maxAttempts: 1,
-            attemptTimeout: MetadataRequestAttemptTimeout,
+            attemptTimeout: ManifestRequestAttemptTimeout,
             completionOption: HttpCompletionOption.ResponseContentRead);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         if (!response.IsSuccessStatusCode)
