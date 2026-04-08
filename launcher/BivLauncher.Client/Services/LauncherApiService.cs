@@ -391,12 +391,7 @@ public sealed class LauncherApiService : ILauncherApiService
         CancellationToken cancellationToken)
     {
         using var request = BuildManifestRangeRequest(uri, accessToken, tokenType, from, to);
-        using var attemptTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        attemptTimeoutCts.CancelAfter(ManifestChunkRequestAttemptTimeout);
-        return await _httpClient.SendAsync(
-            request,
-            HttpCompletionOption.ResponseHeadersRead,
-            attemptTimeoutCts.Token);
+        return await SendWithHeaderTimeoutAsync(request, ManifestChunkRequestAttemptTimeout, cancellationToken);
     }
 
     private static async Task<byte[]> ReadHttpContentBytesAsync(
@@ -607,12 +602,24 @@ public sealed class LauncherApiService : ILauncherApiService
         CancellationToken cancellationToken)
     {
         using var request = BuildAssetRangeRequest(uri, from, to);
-        using var attemptTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        attemptTimeoutCts.CancelAfter(AssetChunkRequestAttemptTimeout);
-        return await _httpClient.SendAsync(
-            request,
-            HttpCompletionOption.ResponseHeadersRead,
-            attemptTimeoutCts.Token);
+        return await SendWithHeaderTimeoutAsync(request, AssetChunkRequestAttemptTimeout, cancellationToken);
+    }
+
+    private async Task<HttpResponseMessage> SendWithHeaderTimeoutAsync(
+        HttpRequestMessage request,
+        TimeSpan headerTimeout,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _httpClient
+                .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+                .WaitAsync(headerTimeout, cancellationToken);
+        }
+        catch (TimeoutException ex)
+        {
+            throw new TaskCanceledException("The operation was canceled.", ex, cancellationToken);
+        }
     }
 
     private static async Task CopyHttpContentToStreamAsync(
