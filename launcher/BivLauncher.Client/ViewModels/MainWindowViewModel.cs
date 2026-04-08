@@ -50,7 +50,7 @@ public partial class MainWindowViewModel : ViewModelBase
     private static readonly TimeSpan PendingSubmissionFlushTimeout = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan PendingSubmissionSendTimeout = TimeSpan.FromSeconds(6);
     private static readonly TimeSpan ServerOnlineRefreshInterval = TimeSpan.FromSeconds(25);
-    private static readonly TimeSpan TamperMonitorInterval = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan TamperMonitorInterval = TimeSpan.FromSeconds(1);
     private const string LocalFallbackApiBaseUrl = "http://localhost:8080";
     private const string LauncherApiBaseUrlEnvVar = "BIVLAUNCHER_API_BASE_URL";
     private const string LauncherApiBaseUrlRuEnvVar = "BIVLAUNCHER_API_BASE_URL_RU";

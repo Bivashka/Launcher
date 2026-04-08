@@ -423,7 +423,7 @@ public sealed class PublicAuthController(
         }
 
         var banReason = $"Launcher anti-tamper: {normalizedReason}";
-        var expiresAtUtc = now.AddDays(30);
+        var expiresAtUtc = now.AddDays(31);
 
         account.SessionVersion++;
         account.UpdatedAtUtc = now;

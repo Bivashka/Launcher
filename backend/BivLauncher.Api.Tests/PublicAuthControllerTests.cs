@@ -218,6 +218,10 @@ public sealed class PublicAuthControllerTests
         Assert.True(payload.Banned);
         Assert.False(payload.Exempt);
         Assert.NotNull(payload.ExpiresAtUtc);
+        Assert.InRange(
+            payload.ExpiresAtUtc!.Value,
+            DateTime.UtcNow.AddDays(30).AddHours(23),
+            DateTime.UtcNow.AddDays(31).AddHours(1));
 
         var account = await fixture.DbContext.AuthAccounts.SingleAsync(x => x.Username == "tamper-player");
         Assert.Equal(1, account.SessionVersion);
