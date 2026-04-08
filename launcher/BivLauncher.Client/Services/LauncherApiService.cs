@@ -299,38 +299,10 @@ public sealed class LauncherApiService : ILauncherApiService
         CancellationToken cancellationToken = default)
     {
         var uri = BuildUri(apiBaseUrl, $"/api/public/manifest/{Uri.EscapeDataString(profileSlug)}");
-        var body = await DownloadManifestBodyAsync(uri, accessToken, tokenType, cancellationToken);
+        var body = Encoding.UTF8.GetString(
+            await DownloadManifestByRangesAsync(uri, accessToken, tokenType, cancellationToken));
         var payload = JsonSerializer.Deserialize<LauncherManifest>(body, JsonOptions);
         return payload ?? throw new InvalidOperationException("Manifest response is empty.");
-    }
-
-    private async Task<string> DownloadManifestBodyAsync(
-        Uri uri,
-        string accessToken,
-        string tokenType,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            var bytes = await DownloadManifestByRangesAsync(uri, accessToken, tokenType, cancellationToken);
-            return Encoding.UTF8.GetString(bytes);
-        }
-        catch (Exception ex) when (ex is TaskCanceledException or HttpRequestException or InvalidOperationException)
-        {
-            using var response = await SendWithRetryAsync(
-                () => BuildOptionalAuthorizedRequest(HttpMethod.Get, uri, accessToken, tokenType),
-                cancellationToken,
-                maxAttempts: 1,
-                attemptTimeout: ManifestRequestAttemptTimeout,
-                completionOption: HttpCompletionOption.ResponseContentRead);
-            var body = await response.Content.ReadAsStringAsync(cancellationToken);
-            if (!response.IsSuccessStatusCode)
-            {
-                throw CreateApiException("Manifest", response, body);
-            }
-
-            return body;
-        }
     }
 
     private async Task<byte[]> DownloadManifestByRangesAsync(
