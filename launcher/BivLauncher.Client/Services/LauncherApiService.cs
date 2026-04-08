@@ -328,7 +328,10 @@ public sealed class LauncherApiService : ILauncherApiService
 
         if (firstResponse.StatusCode != HttpStatusCode.PartialContent)
         {
-            return await ReadHttpContentBytesAsync(firstResponse.Content, cancellationToken);
+            return await ReadHttpContentBytesAsync(
+                firstResponse.Content,
+                ManifestRequestAttemptTimeout,
+                cancellationToken);
         }
 
         var contentRange = firstResponse.Content.Headers.ContentRange;
@@ -337,7 +340,10 @@ public sealed class LauncherApiService : ILauncherApiService
             throw new InvalidOperationException("Manifest range response did not include total length.");
         }
 
-        var firstChunk = await ReadHttpContentBytesAsync(firstResponse.Content, cancellationToken);
+        var firstChunk = await ReadHttpContentBytesAsync(
+            firstResponse.Content,
+            ManifestChunkRequestAttemptTimeout,
+            cancellationToken);
         using var buffer = new MemoryStream((int)totalLength);
         await buffer.WriteAsync(firstChunk, cancellationToken);
 
@@ -363,7 +369,10 @@ public sealed class LauncherApiService : ILauncherApiService
                 throw new InvalidOperationException("Manifest range response lost partial content support.");
             }
 
-            var chunk = await ReadHttpContentBytesAsync(response.Content, cancellationToken);
+            var chunk = await ReadHttpContentBytesAsync(
+                response.Content,
+                ManifestChunkRequestAttemptTimeout,
+                cancellationToken);
             await buffer.WriteAsync(chunk, cancellationToken);
         }
 
@@ -387,11 +396,16 @@ public sealed class LauncherApiService : ILauncherApiService
             attemptTimeoutCts.Token);
     }
 
-    private static async Task<byte[]> ReadHttpContentBytesAsync(HttpContent content, CancellationToken cancellationToken)
+    private static async Task<byte[]> ReadHttpContentBytesAsync(
+        HttpContent content,
+        TimeSpan readTimeout,
+        CancellationToken cancellationToken)
     {
-        await using var stream = await content.ReadAsStreamAsync(cancellationToken);
+        using var readTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        readTimeoutCts.CancelAfter(readTimeout);
+        await using var stream = await content.ReadAsStreamAsync(readTimeoutCts.Token);
         using var buffer = new MemoryStream();
-        await stream.CopyToAsync(buffer, cancellationToken);
+        await stream.CopyToAsync(buffer, readTimeoutCts.Token);
         return buffer.ToArray();
     }
 
