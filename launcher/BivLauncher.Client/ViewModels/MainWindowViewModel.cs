@@ -12,6 +12,7 @@ using System.Buffers.Binary;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
+using System.Management;
 using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
@@ -52,6 +53,15 @@ public partial class MainWindowViewModel : ViewModelBase
     private static readonly TimeSpan ServerOnlineRefreshInterval = TimeSpan.FromSeconds(25);
     private static readonly TimeSpan TamperMonitorInterval = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan TamperShutdownReportBudget = TimeSpan.FromSeconds(3);
+    private static readonly string[] GameJvmCommandLineTokens =
+    [
+        "-Dbiv.auth.username=",
+        "-Dbiv.auth.externalId=",
+        "-Dbiv.auth.token=",
+        "-Dbiv.auth.yggdrasil=",
+        "authlib-injector.jar=",
+        "--gameDir "
+    ];
     private const string LocalFallbackApiBaseUrl = "http://localhost:8080";
     private const string LauncherApiBaseUrlEnvVar = "BIVLAUNCHER_API_BASE_URL";
     private const string LauncherApiBaseUrlRuEnvVar = "BIVLAUNCHER_API_BASE_URL_RU";
@@ -3305,6 +3315,7 @@ public partial class MainWindowViewModel : ViewModelBase
 
         await HideLauncherWindowAsync();
         CloseMonitoredGameProcesses(monitoredProcessIds);
+        CloseLikelyGameJvmProcesses();
 
         try
         {
@@ -3399,6 +3410,53 @@ public partial class MainWindowViewModel : ViewModelBase
             catch
             {
             }
+        }
+    }
+
+    private void CloseLikelyGameJvmProcesses()
+    {
+        try
+        {
+            using var searcher = new ManagementObjectSearcher(
+                "SELECT ProcessId, Name, CommandLine FROM Win32_Process WHERE Name = 'java.exe' OR Name = 'javaw.exe'");
+            using var objects = searcher.Get();
+            foreach (ManagementObject processObject in objects)
+            {
+                using (processObject)
+                {
+                    var processIdValue = processObject["ProcessId"];
+                    var commandLine = processObject["CommandLine"] as string;
+                    if (processIdValue is null ||
+                        !int.TryParse(processIdValue.ToString(), out var processId) ||
+                        processId <= 0 ||
+                        string.IsNullOrWhiteSpace(commandLine) ||
+                        !GameJvmCommandLineTokens.Any(token =>
+                            commandLine.Contains(token, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        using var process = Process.GetProcessById(processId);
+                        if (process.HasExited)
+                        {
+                            continue;
+                        }
+
+                        _logService.LogInfo($"Force-killing game JVM process {processId} ({process.ProcessName}) after tamper detection.");
+                        process.Kill(entireProcessTree: true);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logService.LogInfo($"Game JVM process kill warning for {processId}: {ex.Message}");
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logService.LogInfo($"Game JVM scan warning: {ex.Message}");
         }
     }
 
