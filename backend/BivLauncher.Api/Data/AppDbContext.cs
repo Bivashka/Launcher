@@ -11,6 +11,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<ActiveGameSession> ActiveGameSessions => Set<ActiveGameSession>();
     public DbSet<TwoFactorConfig> TwoFactorConfigs => Set<TwoFactorConfig>();
     public DbSet<AuthProviderConfig> AuthProviderConfigs => Set<AuthProviderConfig>();
+    public DbSet<DeliverySettingsState> DeliverySettingsStates => Set<DeliverySettingsState>();
     public DbSet<SecuritySettingsState> SecuritySettingsStates => Set<SecuritySettingsState>();
     public DbSet<NewsSourceConfig> NewsSourceConfigs => Set<NewsSourceConfig>();
     public DbSet<NewsSyncConfig> NewsSyncConfigs => Set<NewsSyncConfig>();
@@ -99,6 +100,23 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.Property(x => x.LoginUrl).HasMaxLength(512);
             entity.Property(x => x.LoginFieldKey).HasMaxLength(64);
             entity.Property(x => x.PasswordFieldKey).HasMaxLength(64);
+        });
+
+        modelBuilder.Entity<DeliverySettingsState>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).ValueGeneratedNever();
+            entity.Property(x => x.PublicBaseUrl).HasMaxLength(1024);
+            entity.Property(x => x.AssetBaseUrl).HasMaxLength(1024);
+            entity.Property(x => x.FallbackApiBaseUrlsJson).HasMaxLength(16384);
+            entity.Property(x => x.LauncherApiBaseUrlRu).HasMaxLength(1024);
+            entity.Property(x => x.LauncherApiBaseUrlEu).HasMaxLength(1024);
+            entity.Property(x => x.PublicBaseUrlRu).HasMaxLength(1024);
+            entity.Property(x => x.PublicBaseUrlEu).HasMaxLength(1024);
+            entity.Property(x => x.AssetBaseUrlRu).HasMaxLength(1024);
+            entity.Property(x => x.AssetBaseUrlEu).HasMaxLength(1024);
+            entity.Property(x => x.FallbackApiBaseUrlsRuJson).HasMaxLength(16384);
+            entity.Property(x => x.FallbackApiBaseUrlsEuJson).HasMaxLength(16384);
         });
 
         modelBuilder.Entity<SecuritySettingsState>(entity =>

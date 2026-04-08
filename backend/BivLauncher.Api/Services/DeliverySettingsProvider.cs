@@ -1,4 +1,7 @@
+using BivLauncher.Api.Data;
+using BivLauncher.Api.Data.Entities;
 using BivLauncher.Api.Options;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using System.Text.Json;
 
@@ -8,8 +11,11 @@ public sealed class DeliverySettingsProvider(
     IWebHostEnvironment environment,
     IConfiguration configuration,
     IOptions<DeliverySettingsOptions> options,
+    IServiceScopeFactory scopeFactory,
     ILogger<DeliverySettingsProvider> logger) : IDeliverySettingsProvider
 {
+    private const int SettingsRowId = 1;
+
     private static readonly JsonSerializerOptions ReadJsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
@@ -27,14 +33,18 @@ public sealed class DeliverySettingsProvider(
     {
         lock (_sync)
         {
-            _cached ??= LoadFromDiskOrDefault();
-            return _cached;
+            if (_cached is not null)
+            {
+                return _cached;
+            }
         }
+
+        return LoadAndCacheAsync(CancellationToken.None).GetAwaiter().GetResult();
     }
 
     public Task<DeliverySettingsConfig> GetSettingsAsync(CancellationToken cancellationToken = default)
     {
-        return Task.FromResult(GetCachedSettings());
+        return LoadAndCacheAsync(cancellationToken);
     }
 
     public async Task<DeliverySettingsConfig> SaveSettingsAsync(
@@ -42,18 +52,8 @@ public sealed class DeliverySettingsProvider(
         CancellationToken cancellationToken = default)
     {
         var normalized = NormalizeSettings(settings);
-        var settingsPath = GetSettingsPath();
-        var directory = Path.GetDirectoryName(settingsPath);
-        if (!string.IsNullOrWhiteSpace(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
-
-        await using (var stream = File.Create(settingsPath))
-        {
-            await JsonSerializer.SerializeAsync(stream, normalized, WriteJsonOptions, cancellationToken);
-            await stream.FlushAsync(cancellationToken);
-        }
+        await SaveToDatabaseAsync(normalized, cancellationToken);
+        await TrySaveToDiskBackupAsync(normalized, cancellationToken);
 
         lock (_sync)
         {
@@ -61,6 +61,99 @@ public sealed class DeliverySettingsProvider(
         }
 
         return normalized;
+    }
+
+    private async Task<DeliverySettingsConfig> LoadAndCacheAsync(CancellationToken cancellationToken)
+    {
+        lock (_sync)
+        {
+            if (_cached is not null)
+            {
+                return _cached;
+            }
+        }
+
+        var loaded = await LoadSettingsAsync(cancellationToken);
+        lock (_sync)
+        {
+            _cached ??= loaded;
+            return _cached;
+        }
+    }
+
+    private async Task<DeliverySettingsConfig> LoadSettingsAsync(CancellationToken cancellationToken)
+    {
+        var persisted = await TryLoadFromDatabaseAsync(cancellationToken);
+        if (persisted is not null)
+        {
+            await TrySaveToDiskBackupAsync(persisted, cancellationToken);
+            return persisted;
+        }
+
+        var fileSettings = LoadFromDiskOrDefault();
+        await TrySaveToDatabaseAsync(fileSettings, cancellationToken);
+        return fileSettings;
+    }
+
+    private async Task<DeliverySettingsConfig?> TryLoadFromDatabaseAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var scope = scopeFactory.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var state = await dbContext.DeliverySettingsStates
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.Id == SettingsRowId, cancellationToken);
+            return state is null ? null : Map(state);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not load delivery settings from database. Falling back to disk.");
+            return null;
+        }
+    }
+
+    private async Task SaveToDatabaseAsync(DeliverySettingsConfig settings, CancellationToken cancellationToken)
+    {
+        using var scope = scopeFactory.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var state = await dbContext.DeliverySettingsStates
+            .FirstOrDefaultAsync(x => x.Id == SettingsRowId, cancellationToken);
+        if (state is null)
+        {
+            state = new DeliverySettingsState
+            {
+                Id = SettingsRowId
+            };
+            dbContext.DeliverySettingsStates.Add(state);
+        }
+
+        state.PublicBaseUrl = settings.PublicBaseUrl;
+        state.AssetBaseUrl = settings.AssetBaseUrl;
+        state.FallbackApiBaseUrlsJson = JsonSerializer.Serialize(settings.FallbackApiBaseUrls ?? [], WriteJsonOptions);
+        state.LauncherApiBaseUrlRu = settings.LauncherApiBaseUrlRu;
+        state.LauncherApiBaseUrlEu = settings.LauncherApiBaseUrlEu;
+        state.PublicBaseUrlRu = settings.PublicBaseUrlRu;
+        state.PublicBaseUrlEu = settings.PublicBaseUrlEu;
+        state.AssetBaseUrlRu = settings.AssetBaseUrlRu;
+        state.AssetBaseUrlEu = settings.AssetBaseUrlEu;
+        state.FallbackApiBaseUrlsRuJson = JsonSerializer.Serialize(settings.FallbackApiBaseUrlsRu ?? [], WriteJsonOptions);
+        state.FallbackApiBaseUrlsEuJson = JsonSerializer.Serialize(settings.FallbackApiBaseUrlsEu ?? [], WriteJsonOptions);
+        state.UpdatedAtUtc = settings.UpdatedAtUtc;
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task TrySaveToDatabaseAsync(DeliverySettingsConfig settings, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await SaveToDatabaseAsync(settings, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not persist delivery settings into database during fallback migration.");
+        }
     }
 
     private DeliverySettingsConfig LoadFromDiskOrDefault()
@@ -83,6 +176,27 @@ public sealed class DeliverySettingsProvider(
         {
             logger.LogWarning(ex, "Could not load delivery settings from {Path}. Falling back to defaults.", settingsPath);
             return BuildDefaultSettings();
+        }
+    }
+
+    private async Task TrySaveToDiskBackupAsync(DeliverySettingsConfig settings, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var settingsPath = GetSettingsPath();
+            var directory = Path.GetDirectoryName(settingsPath);
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            await using var stream = File.Create(settingsPath);
+            await JsonSerializer.SerializeAsync(stream, settings, WriteJsonOptions, cancellationToken);
+            await stream.FlushAsync(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not write delivery settings backup to disk.");
         }
     }
 
@@ -160,6 +274,57 @@ public sealed class DeliverySettingsProvider(
             AssetBaseUrlEu: defaultEuLauncherApiBaseUrl,
             FallbackApiBaseUrlsRu: defaultFallbackApiBaseUrls,
             FallbackApiBaseUrlsEu: []);
+    }
+
+    private static DeliverySettingsConfig Map(DeliverySettingsState state)
+    {
+        IReadOnlyList<string> fallbackApiBaseUrls = [];
+        IReadOnlyList<string> fallbackApiBaseUrlsRu = [];
+        IReadOnlyList<string> fallbackApiBaseUrlsEu = [];
+
+        try
+        {
+            fallbackApiBaseUrls = JsonSerializer.Deserialize<List<string>>(state.FallbackApiBaseUrlsJson ?? "[]", ReadJsonOptions)
+                ?? [];
+        }
+        catch
+        {
+            fallbackApiBaseUrls = [];
+        }
+
+        try
+        {
+            fallbackApiBaseUrlsRu = JsonSerializer.Deserialize<List<string>>(state.FallbackApiBaseUrlsRuJson ?? "[]", ReadJsonOptions)
+                ?? [];
+        }
+        catch
+        {
+            fallbackApiBaseUrlsRu = [];
+        }
+
+        try
+        {
+            fallbackApiBaseUrlsEu = JsonSerializer.Deserialize<List<string>>(state.FallbackApiBaseUrlsEuJson ?? "[]", ReadJsonOptions)
+                ?? [];
+        }
+        catch
+        {
+            fallbackApiBaseUrlsEu = [];
+        }
+
+        return NormalizeSettings(new DeliverySettingsConfig(
+            PublicBaseUrl: state.PublicBaseUrl,
+            AssetBaseUrl: state.AssetBaseUrl,
+            FallbackApiBaseUrls: fallbackApiBaseUrls,
+            UpdatedAtUtc: state.UpdatedAtUtc,
+            LauncherApiBaseUrlRu: state.LauncherApiBaseUrlRu,
+            LauncherApiBaseUrlEu: state.LauncherApiBaseUrlEu,
+            PublicBaseUrlRu: state.PublicBaseUrlRu,
+            PublicBaseUrlEu: state.PublicBaseUrlEu,
+            AssetBaseUrlRu: state.AssetBaseUrlRu,
+            AssetBaseUrlEu: state.AssetBaseUrlEu,
+            FallbackApiBaseUrlsRu: fallbackApiBaseUrlsRu,
+            FallbackApiBaseUrlsEu: fallbackApiBaseUrlsEu));
     }
 
     private static DeliverySettingsConfig NormalizeSettings(DeliverySettingsConfig settings)

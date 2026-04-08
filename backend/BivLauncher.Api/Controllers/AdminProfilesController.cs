@@ -394,6 +394,25 @@ public sealed class AdminProfilesController(
                 cancellationToken: cancellationToken);
             return BadRequest(new { error = ex.Message });
         }
+        catch (Exception ex)
+        {
+            var actor = User.Identity?.Name ?? "admin";
+            await auditService.WriteAsync(
+                action: "profile.rebuild.failed",
+                actor: actor,
+                entityType: "profile",
+                entityId: id.ToString(),
+                details: new
+                {
+                    profileId = id,
+                    error = ex.Message
+                },
+                cancellationToken: cancellationToken);
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                error = "Profile rebuild failed. See API logs for details."
+            });
+        }
     }
 
     private static ProfileDto MapProfile(Profile profile)
