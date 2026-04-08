@@ -11,6 +11,7 @@ public sealed class LauncherUpdateService(
     ILogService logService) : ILauncherUpdateService
 {
     private static readonly TimeSpan DownloadCandidateHeaderTimeout = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan DownloadCandidateReadTimeout = TimeSpan.FromSeconds(20);
     private const string LauncherApiBaseUrlEnvVar = "BIVLAUNCHER_API_BASE_URL";
     private const string LauncherApiBaseUrlRuEnvVar = "BIVLAUNCHER_API_BASE_URL_RU";
     private const string LauncherApiBaseUrlEuEnvVar = "BIVLAUNCHER_API_BASE_URL_EU";
@@ -41,26 +42,118 @@ public sealed class LauncherUpdateService(
         var version = string.IsNullOrWhiteSpace(latestVersion) ? "unknown" : SanitizePathPart(latestVersion);
         var versionDirectory = Path.Combine(settingsService.GetUpdatesDirectory(), version);
         Directory.CreateDirectory(versionDirectory);
+        Exception? lastError = null;
+        var packagePath = Path.Combine(versionDirectory, $"launcher-update-{version}.zip");
 
-        using var response = await SendDownloadRequestAsync(normalizedUrl, cancellationToken);
-
-        var resolvedDownloadUrl = response.RequestMessage?.RequestUri?.ToString() ?? normalizedUrl;
-        var extension = ResolvePackageExtension(resolvedDownloadUrl, response.Content.Headers);
-        if (!string.Equals(extension, ".zip", StringComparison.OrdinalIgnoreCase))
+        foreach (var candidateUrl in await ResolveDownloadCandidatesAsync(normalizedUrl, cancellationToken))
         {
-            throw new InvalidOperationException("Update package must be a .zip archive.");
+            Exception? candidateError = null;
+            try
+            {
+                using var response = await OpenDownloadResponseAsync(candidateUrl, cancellationToken);
+                var resolvedDownloadUrl = response.RequestMessage?.RequestUri?.ToString() ?? candidateUrl;
+                var extension = ResolvePackageExtension(resolvedDownloadUrl, response.Content.Headers);
+                if (!string.Equals(extension, ".zip", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException("Update package must be a .zip archive.");
+                }
+
+                if (File.Exists(packagePath))
+                {
+                    File.Delete(packagePath);
+                }
+
+                await using var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken);
+                await using var fileStream = new FileStream(packagePath, FileMode.Create, FileAccess.Write, FileShare.None);
+                await CopyDownloadStreamAsync(contentStream, fileStream, response.Content.Headers.ContentLength, progress, cancellationToken);
+                await fileStream.FlushAsync(cancellationToken);
+
+                if (!string.Equals(candidateUrl, normalizedUrl, StringComparison.OrdinalIgnoreCase))
+                {
+                    logService.LogInfo($"Launcher update download switched to fallback URL: {candidateUrl}");
+                }
+
+                logService.LogInfo($"Launcher update package downloaded: {packagePath}");
+                return packagePath;
+            }
+            catch (HttpRequestException ex)
+            {
+                candidateError = ex;
+                lastError = ex;
+                logService.LogInfo($"Launcher update download candidate failed and will be skipped: {candidateUrl} ({ex.Message})");
+            }
+            catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                candidateError = ex;
+                lastError = ex;
+                logService.LogInfo($"Launcher update download candidate timed out and will be skipped: {candidateUrl} ({ex.Message})");
+            }
+            catch (InvalidOperationException ex)
+            {
+                candidateError = ex;
+                lastError = ex;
+                logService.LogInfo($"Launcher update download candidate failed and will be skipped: {candidateUrl} ({ex.Message})");
+            }
+            finally
+            {
+                if (candidateError is not null && File.Exists(packagePath))
+                {
+                    try
+                    {
+                        File.Delete(packagePath);
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
         }
 
-        var packagePath = Path.Combine(versionDirectory, $"launcher-update-{version}{extension}");
-        await using var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        await using var fileStream = new FileStream(packagePath, FileMode.Create, FileAccess.Write, FileShare.None);
+        throw lastError ?? new InvalidOperationException("No reachable launcher update download URL is available.");
+    }
 
+    private async Task<HttpResponseMessage> OpenDownloadResponseAsync(string candidateUrl, CancellationToken cancellationToken)
+    {
+        using var requestCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        requestCts.CancelAfter(DownloadCandidateHeaderTimeout);
+        var response = await _httpClient.GetAsync(
+            candidateUrl,
+            HttpCompletionOption.ResponseHeadersRead,
+            requestCts.Token);
+        if (response.IsSuccessStatusCode)
+        {
+            return response;
+        }
+
+        if (!ShouldTryNextDownloadLocation(response.StatusCode))
+        {
+            response.EnsureSuccessStatusCode();
+        }
+
+        var statusCode = response.StatusCode;
+        var reasonPhrase = response.ReasonPhrase;
+        response.Dispose();
+        throw new HttpRequestException(
+            $"Response status code does not indicate success: {(int)statusCode} ({reasonPhrase}).",
+            null,
+            statusCode);
+    }
+
+    private async Task CopyDownloadStreamAsync(
+        Stream contentStream,
+        FileStream fileStream,
+        long? totalBytes,
+        IProgress<LauncherUpdateDownloadProgress>? progress,
+        CancellationToken cancellationToken)
+    {
         var buffer = new byte[1024 * 128];
         long downloadedBytes = 0;
-        var totalBytes = response.Content.Headers.ContentLength;
+
         while (true)
         {
-            var read = await contentStream.ReadAsync(buffer, cancellationToken);
+            using var readCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            readCts.CancelAfter(DownloadCandidateReadTimeout);
+            var read = await contentStream.ReadAsync(buffer.AsMemory(0, buffer.Length), readCts.Token);
             if (read <= 0)
             {
                 break;
@@ -70,61 +163,6 @@ public sealed class LauncherUpdateService(
             downloadedBytes += read;
             progress?.Report(new LauncherUpdateDownloadProgress(downloadedBytes, totalBytes));
         }
-
-        await fileStream.FlushAsync(cancellationToken);
-        logService.LogInfo($"Launcher update package downloaded: {packagePath}");
-        return packagePath;
-    }
-
-    private async Task<HttpResponseMessage> SendDownloadRequestAsync(string downloadUrl, CancellationToken cancellationToken)
-    {
-        Exception? lastError = null;
-
-        foreach (var candidateUrl in await ResolveDownloadCandidatesAsync(downloadUrl, cancellationToken))
-        {
-            try
-            {
-                using var requestCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                requestCts.CancelAfter(DownloadCandidateHeaderTimeout);
-                var response = await _httpClient.GetAsync(
-                    candidateUrl,
-                    HttpCompletionOption.ResponseHeadersRead,
-                    requestCts.Token);
-                if (response.IsSuccessStatusCode)
-                {
-                    if (!string.Equals(candidateUrl, downloadUrl, StringComparison.OrdinalIgnoreCase))
-                    {
-                        logService.LogInfo($"Launcher update download switched to fallback URL: {candidateUrl}");
-                    }
-
-                    return response;
-                }
-
-                if (!ShouldTryNextDownloadLocation(response.StatusCode))
-                {
-                    response.EnsureSuccessStatusCode();
-                }
-
-                lastError = new HttpRequestException(
-                    $"Response status code does not indicate success: {(int)response.StatusCode} ({response.ReasonPhrase}).",
-                    null,
-                    response.StatusCode);
-                response.Dispose();
-                logService.LogInfo($"Launcher update download candidate failed and will be skipped: {candidateUrl} ({(int)response.StatusCode})");
-            }
-            catch (HttpRequestException ex)
-            {
-                lastError = ex;
-                logService.LogInfo($"Launcher update download candidate failed and will be skipped: {candidateUrl} ({ex.Message})");
-            }
-            catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
-            {
-                lastError = ex;
-                logService.LogInfo($"Launcher update download candidate timed out and will be skipped: {candidateUrl} ({ex.Message})");
-            }
-        }
-
-        throw lastError ?? new InvalidOperationException("No reachable launcher update download URL is available.");
     }
 
     public void ScheduleInstallAndRestart(string packagePath, string executablePath)
