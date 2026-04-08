@@ -31,7 +31,10 @@ public sealed class LauncherApiService : ILauncherApiService
         PropertyNameCaseInsensitive = true
     };
 
-    private readonly HttpClient _httpClient = new()
+    private readonly HttpClient _httpClient = new(new HttpClientHandler
+    {
+        AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli
+    })
     {
         Timeout = TimeSpan.FromMinutes(5)
     };
