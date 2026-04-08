@@ -1923,6 +1923,14 @@ public partial class MainWindowViewModel : ViewModelBase
             }
         }
 
+        if (launchResult is null && IsRecoverablePreLaunchException(launchException))
+        {
+            HasCrash = false;
+            CrashSummary = string.Empty;
+            StatusText = BuildStatusErrorText(launchException!);
+            return;
+        }
+
         HasCrash = true;
         var fullLogExcerpt = string.Join(Environment.NewLine, _logService.GetRecentLines(120));
         var crashLines = _logService.GetRecentLines(60);
@@ -4945,6 +4953,20 @@ public partial class MainWindowViewModel : ViewModelBase
                 : "Сервер временно недоступен. Повторите попытку.";
         }
 
+        if (ex is TaskCanceledException or HttpRequestException ||
+            ex.InnerException is TaskCanceledException or HttpRequestException ||
+            ex is LauncherApiException timeoutApiException &&
+            timeoutApiException.StatusCode is
+                HttpStatusCode.RequestTimeout or
+                HttpStatusCode.BadGateway or
+                HttpStatusCode.ServiceUnavailable or
+                HttpStatusCode.GatewayTimeout)
+        {
+            return _languageCode == "en"
+                ? "The launcher could not get a response from the server in time. Check the selected region or try again later."
+                : "Лаунчер не дождался ответа от сервера. Проверь выбранный регион или повтори попытку позже.";
+        }
+
         if (ex is UnauthorizedAccessException || ex.InnerException is UnauthorizedAccessException)
         {
             return _languageCode == "en"
@@ -4953,6 +4975,11 @@ public partial class MainWindowViewModel : ViewModelBase
         }
 
         return F("status.error", ex.Message);
+    }
+
+    private static bool IsRecoverablePreLaunchException(Exception? ex)
+    {
+        return ex is LauncherApiException or HttpRequestException or TaskCanceledException;
     }
 
     private static string BuildNewsPreview(string body)
