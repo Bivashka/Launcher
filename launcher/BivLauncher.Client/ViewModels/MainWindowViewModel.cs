@@ -51,6 +51,7 @@ public partial class MainWindowViewModel : ViewModelBase
     private static readonly TimeSpan PendingSubmissionSendTimeout = TimeSpan.FromSeconds(6);
     private static readonly TimeSpan ServerOnlineRefreshInterval = TimeSpan.FromSeconds(25);
     private static readonly TimeSpan TamperMonitorInterval = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan TamperShutdownReportBudget = TimeSpan.FromSeconds(3);
     private const string LocalFallbackApiBaseUrl = "http://localhost:8080";
     private const string LauncherApiBaseUrlEnvVar = "BIVLAUNCHER_API_BASE_URL";
     private const string LauncherApiBaseUrlRuEnvVar = "BIVLAUNCHER_API_BASE_URL_RU";
@@ -3301,17 +3302,23 @@ public partial class MainWindowViewModel : ViewModelBase
             : "Обнаружено вмешательство в лаунчер. Лаунчер будет закрыт.";
         _logService.LogInfo($"Security violation detected: {detection.Reason} Evidence: {detection.Evidence}");
 
+        await HideLauncherWindowAsync();
+        CloseMonitoredGameProcesses();
+
         try
         {
-            await ReportSecurityViolationAsync(detection);
+            await ReportSecurityViolationAsync(detection).WaitAsync(TamperShutdownReportBudget);
+        }
+        catch (TimeoutException)
+        {
+            _logService.LogInfo("Security violation report timed out during forced shutdown.");
         }
         catch (Exception ex)
         {
             _logService.LogInfo($"Security violation report warning: {ex.Message}");
         }
 
-        CloseMonitoredGameProcesses();
-        await ShutdownLauncherAsync();
+        ForceTerminateLauncherProcess();
     }
 
     private async Task ReportSecurityViolationAsync(TamperDetectionResult detection)
@@ -3385,6 +3392,34 @@ public partial class MainWindowViewModel : ViewModelBase
             {
             }
         }
+    }
+
+    private async Task HideLauncherWindowAsync()
+    {
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop &&
+                desktop.MainWindow is not null)
+            {
+                desktop.MainWindow.ShowInTaskbar = false;
+                desktop.MainWindow.Hide();
+            }
+        });
+    }
+
+    private void ForceTerminateLauncherProcess()
+    {
+        try
+        {
+            using var currentProcess = Process.GetCurrentProcess();
+            currentProcess.Kill(entireProcessTree: true);
+            return;
+        }
+        catch
+        {
+        }
+
+        Environment.Exit(0);
     }
 
     private async Task ShutdownLauncherAsync()
