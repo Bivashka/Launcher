@@ -39,6 +39,16 @@ public sealed class ManifestInstallerService(
         {
             cancellationToken.ThrowIfCancellationRequested();
 
+            progress.Report(new InstallProgressInfo
+            {
+                Message = file.Path,
+                ProcessedFiles = processed,
+                TotalFiles = totalFiles,
+                DownloadedFiles = downloaded,
+                VerifiedFiles = verified,
+                CurrentFilePath = file.Path
+            });
+
             var relativePath = file.Path.Replace('/', Path.DirectorySeparatorChar);
             var destinationPath = Path.Combine(instanceDirectory, relativePath);
             var destinationDirectory = Path.GetDirectoryName(destinationPath);
@@ -81,6 +91,7 @@ public sealed class ManifestInstallerService(
                     }
 
                     var assetReference = string.IsNullOrWhiteSpace(file.DownloadUrl) ? file.S3Key : file.DownloadUrl;
+                    logService.LogInfo($"Downloading started: {file.Path}");
                     await launcherApiService.DownloadAssetToFileAsync(
                         apiBaseUrl,
                         assetReference,
