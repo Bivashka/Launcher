@@ -12,6 +12,8 @@ public sealed class LauncherTamperMonitor : ILauncherTamperMonitor
 {
     private const int HookProbeByteCount = 16;
     private const int MinimumSuspiciousTimerHookCount = 2;
+    private const int SystemExtendedHandleInformationClass = 64;
+    private const int NtStatusInfoLengthMismatch = unchecked((int)0xC0000004);
     private static readonly object ExportProbeCacheSyncRoot = new();
     private static readonly HashSet<string> SuspiciousProcessNames = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -144,6 +146,12 @@ public sealed class LauncherTamperMonitor : ILauncherTamperMonitor
         if (timerHookDetection is not null)
         {
             return timerHookDetection;
+        }
+
+        var externalHandleDetection = InspectExternalProcessHandles(monitoredProcesses);
+        if (externalHandleDetection is not null)
+        {
+            return externalHandleDetection;
         }
 
         var targetProcessIds = monitoredProcesses
@@ -432,6 +440,43 @@ public sealed class LauncherTamperMonitor : ILauncherTamperMonitor
         return null;
     }
 
+    private static TamperDetectionResult? InspectExternalProcessHandles(IReadOnlyList<ProcessSnapshot> monitoredProcesses)
+    {
+        if (monitoredProcesses.Count == 0 ||
+            !TryQuerySystemHandles(out var handles))
+        {
+            return null;
+        }
+
+        var currentProcessId = Environment.ProcessId;
+        foreach (var process in monitoredProcesses)
+        {
+            if (!TryResolveProcessObjectAddress(process.ProcessId, currentProcessId, handles, out var objectAddress))
+            {
+                continue;
+            }
+
+            foreach (var handle in handles)
+            {
+                if (handle.ObjectAddress != objectAddress ||
+                    handle.OwnerProcessId == currentProcessId ||
+                    handle.OwnerProcessId == process.ProcessId ||
+                    handle.OwnerProcessId <= 0 ||
+                    !HasDangerousExternalProcessAccess(handle.GrantedAccess))
+                {
+                    continue;
+                }
+
+                var ownerProcessName = TryGetProcessName(handle.OwnerProcessId);
+                return new TamperDetectionResult(
+                    $"External process opened a dangerous handle to monitored process {process.ProcessId}.",
+                    $"handle:{ownerProcessName}:{handle.OwnerProcessId}:0x{handle.GrantedAccess:X8}->{process.ProcessName}:{process.ProcessId}");
+            }
+        }
+
+        return null;
+    }
+
     private static TamperDetectionResult? InspectTimerApiHooks(int processId)
     {
         Process? process = null;
@@ -506,6 +551,147 @@ public sealed class LauncherTamperMonitor : ILauncherTamperMonitor
         }
 
         return null;
+    }
+
+    private static bool TryQuerySystemHandles(out List<SystemHandleSnapshot> handles)
+    {
+        handles = [];
+        var bufferLength = 0x10000;
+        var buffer = IntPtr.Zero;
+        try
+        {
+            while (true)
+            {
+                buffer = Marshal.AllocHGlobal(bufferLength);
+                var ntstatus = NtQuerySystemInformation(
+                    SystemExtendedHandleInformationClass,
+                    buffer,
+                    bufferLength,
+                    out var returnLength);
+                if (ntstatus == 0)
+                {
+                    break;
+                }
+
+                Marshal.FreeHGlobal(buffer);
+                buffer = IntPtr.Zero;
+                if (ntstatus != NtStatusInfoLengthMismatch)
+                {
+                    return false;
+                }
+
+                bufferLength = Math.Max(bufferLength * 2, returnLength.ToInt32() + 4096);
+            }
+
+            var handleCount = Marshal.ReadIntPtr(buffer);
+            var count = checked((int)handleCount.ToInt64());
+            var entryOffset = IntPtr.Size * 2;
+            var entrySize = Marshal.SizeOf<SystemHandleTableEntryInfoEx>();
+            for (var index = 0; index < count; index++)
+            {
+                var entryPtr = IntPtr.Add(buffer, entryOffset + (index * entrySize));
+                var entry = Marshal.PtrToStructure<SystemHandleTableEntryInfoEx>(entryPtr);
+                var ownerProcessId = unchecked((int)entry.UniqueProcessId.ToInt64());
+                if (ownerProcessId <= 0 || entry.Object == IntPtr.Zero)
+                {
+                    continue;
+                }
+
+                handles.Add(new SystemHandleSnapshot(
+                    ownerProcessId,
+                    entry.HandleValue,
+                    entry.Object,
+                    entry.GrantedAccess));
+            }
+
+            return true;
+        }
+        catch
+        {
+            handles.Clear();
+            return false;
+        }
+        finally
+        {
+            if (buffer != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(buffer);
+            }
+        }
+    }
+
+    private static bool TryResolveProcessObjectAddress(
+        int targetProcessId,
+        int currentProcessId,
+        IReadOnlyList<SystemHandleSnapshot> handles,
+        out IntPtr objectAddress)
+    {
+        objectAddress = IntPtr.Zero;
+        IntPtr processHandle = IntPtr.Zero;
+        try
+        {
+            processHandle = OpenProcess(
+                ProcessAccessRights.QueryInformation,
+                false,
+                targetProcessId);
+            if (processHandle == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            var rawHandleValue = processHandle.ToInt64();
+            foreach (var handle in handles)
+            {
+                if (handle.OwnerProcessId == currentProcessId &&
+                    handle.HandleValue.ToInt64() == rawHandleValue)
+                {
+                    objectAddress = handle.ObjectAddress;
+                    return objectAddress != IntPtr.Zero;
+                }
+            }
+
+            return false;
+        }
+        finally
+        {
+            if (processHandle != IntPtr.Zero)
+            {
+                CloseHandle(processHandle);
+            }
+        }
+    }
+
+    private static bool HasDangerousExternalProcessAccess(uint grantedAccess)
+    {
+        const uint dangerousMask =
+            (uint)ProcessAccessRights.CreateThread |
+            (uint)ProcessAccessRights.VirtualMemoryOperation |
+            (uint)ProcessAccessRights.VirtualMemoryWrite |
+            (uint)ProcessAccessRights.DuplicateHandle |
+            (uint)ProcessAccessRights.SetInformation |
+            (uint)ProcessAccessRights.SuspendResume;
+
+        return (grantedAccess & dangerousMask) != 0;
+    }
+
+    private static string TryGetProcessName(int processId)
+    {
+        Process? process = null;
+        try
+        {
+            process = Process.GetProcessById(processId);
+            return string.IsNullOrWhiteSpace(process.ProcessName)
+                ? $"pid-{processId}"
+                : process.ProcessName;
+        }
+        catch
+        {
+            return $"pid-{processId}";
+        }
+        finally
+        {
+            process?.Dispose();
+        }
     }
 
     private static bool TryResolveTimerExportProbe(string moduleName, string exportName, out TimerExportProbe probe)
@@ -688,13 +874,36 @@ public sealed class LauncherTamperMonitor : ILauncherTamperMonitor
 
     private readonly record struct ProcessSnapshot(int ProcessId, string ProcessName, DateTime StartedAtUtc);
     private readonly record struct RemoteModuleSnapshot(string ModuleName, IntPtr BaseAddress);
+    private readonly record struct SystemHandleSnapshot(
+        int OwnerProcessId,
+        IntPtr HandleValue,
+        IntPtr ObjectAddress,
+        uint GrantedAccess);
     private readonly record struct TimeApiHookProbe(string ModuleName, string ExportName);
     private readonly record struct TimerExportProbe(string ModuleName, string ExportName, long Offset, byte[] BaselineBytes);
+    [StructLayout(LayoutKind.Sequential)]
+    private readonly struct SystemHandleTableEntryInfoEx
+    {
+        public readonly IntPtr Object;
+        public readonly IntPtr UniqueProcessId;
+        public readonly IntPtr HandleValue;
+        public readonly uint GrantedAccess;
+        public readonly ushort CreatorBackTraceIndex;
+        public readonly ushort ObjectTypeIndex;
+        public readonly uint HandleAttributes;
+        public readonly uint Reserved;
+    }
 
     [Flags]
     private enum ProcessAccessRights : uint
     {
+        CreateThread = 0x0002,
+        DuplicateHandle = 0x0040,
+        SetInformation = 0x0200,
+        SuspendResume = 0x0800,
+        VirtualMemoryOperation = 0x0008,
         VirtualMemoryRead = 0x0010,
+        VirtualMemoryWrite = 0x0020,
         QueryInformation = 0x0400
     }
 
@@ -728,6 +937,13 @@ public sealed class LauncherTamperMonitor : ILauncherTamperMonitor
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool IsWow64Process(IntPtr hProcess, out bool wow64Process);
+
+    [DllImport("ntdll.dll")]
+    private static extern int NtQuerySystemInformation(
+        int systemInformationClass,
+        IntPtr systemInformation,
+        int systemInformationLength,
+        out IntPtr returnLength);
 
     [DllImport("user32.dll")]
     private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
