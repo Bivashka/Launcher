@@ -1589,7 +1589,8 @@ public partial class MainWindowViewModel : ViewModelBase
             candidate => _launcherApiService.GetBootstrapAsync(
                 candidate,
                 _playerAuthToken,
-                _playerAuthTokenType));
+                _playerAuthTokenType),
+            operationName: "Bootstrap");
         _bootstrapPublicBaseUrl = NormalizeBaseUrlOrEmpty(bootstrap.PublicBaseUrl);
         _bootstrapApiBaseUrlRu = NormalizeBaseUrlOrEmpty(bootstrap.LauncherApiBaseUrlRu);
         _bootstrapApiBaseUrlEu = NormalizeBaseUrlOrEmpty(bootstrap.LauncherApiBaseUrlEu);
@@ -2649,7 +2650,8 @@ public partial class MainWindowViewModel : ViewModelBase
                     HwidFingerprint = ComputeHwidFingerprint(),
                     DeviceUserName = ComputeDeviceUserName(),
                     TwoFactorCode = IsTwoFactorStepActive ? normalizedTwoFactorCode : string.Empty
-                }));
+                }),
+                operationName: "Login");
 
             if (response.RequiresTwoFactor)
             {
@@ -3085,7 +3087,15 @@ public partial class MainWindowViewModel : ViewModelBase
             await PersistSettingsSnapshotAsync();
             if (refreshLauncherContent)
             {
-                await RefreshCoreAsync();
+                try
+                {
+                    await RefreshCoreAsync();
+                }
+                catch (Exception ex) when (ShouldSkipBootstrapRefreshDuringAccountActivation(ex))
+                {
+                    _logService.LogInfo(
+                        $"Launcher content refresh during account activation was skipped due to a temporary API failure: {ex.Message}");
+                }
             }
 
             return string.Empty;
@@ -3397,7 +3407,8 @@ public partial class MainWindowViewModel : ViewModelBase
                     _playerAuthTokenType,
                     request),
                 preferredApiBaseUrl: preferredApiBaseUrl,
-                persistSuccess: false);
+                persistSuccess: false,
+                operationName: "Security report");
 
             if (response.Banned)
             {
@@ -3601,10 +3612,12 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             HasSkin = await ExecuteAgainstApiFailoverAsync(
                 candidate => _launcherApiService.HasSkinAsync(candidate, normalized),
-                persistSuccess: false);
+                persistSuccess: false,
+                operationName: "Skin");
             HasCape = await ExecuteAgainstApiFailoverAsync(
                 candidate => _launcherApiService.HasCapeAsync(candidate, normalized),
-                persistSuccess: false);
+                persistSuccess: false,
+                operationName: "Cape");
         }
         catch (Exception ex)
         {
@@ -5126,23 +5139,20 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private static bool ShouldSkipPreLaunchSessionValidation(Exception ex)
     {
-        if (ex is TaskCanceledException or HttpRequestException)
-        {
-            return true;
-        }
-
-        return ex is LauncherApiException apiException &&
-               apiException.StatusCode is
-                   HttpStatusCode.NotFound or
-                   HttpStatusCode.RequestTimeout or
-                   HttpStatusCode.TooManyRequests or
-                   HttpStatusCode.InternalServerError or
-                   HttpStatusCode.BadGateway or
-                   HttpStatusCode.ServiceUnavailable or
-                   HttpStatusCode.GatewayTimeout;
+        return IsTransientApiFailure(ex);
     }
 
     private static bool ShouldBypassGameSessionStart(Exception ex)
+    {
+        return IsTransientApiFailure(ex);
+    }
+
+    private static bool ShouldSkipBootstrapRefreshDuringAccountActivation(Exception ex)
+    {
+        return IsTransientApiFailure(ex);
+    }
+
+    private static bool IsTransientApiFailure(Exception ex)
     {
         if (ex is TaskCanceledException or HttpRequestException)
         {
