@@ -3258,8 +3258,7 @@ public partial class MainWindowViewModel : ViewModelBase
     private async Task MonitorTamperStateAsync()
     {
         if (_tamperViolationInProgress ||
-            !IsPlayerLoggedIn ||
-            HasAdministrativeRole(_playerAuthRoles))
+            !IsPlayerLoggedIn)
         {
             return;
         }
@@ -3324,7 +3323,7 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private void UpdateTamperMonitorState()
     {
-        if (IsPlayerLoggedIn && !HasAdministrativeRole(_playerAuthRoles) && !_tamperViolationInProgress)
+        if (IsPlayerLoggedIn && !_tamperViolationInProgress)
         {
             if (!_tamperMonitorTimer.IsEnabled)
             {

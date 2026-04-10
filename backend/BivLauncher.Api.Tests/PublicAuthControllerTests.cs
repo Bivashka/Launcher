@@ -233,7 +233,7 @@ public sealed class PublicAuthControllerTests
     }
 
     [Fact]
-    public async Task ReportSecurityViolation_WhenAdminSessionIsValid_ReturnsExemptWithoutBan()
+    public async Task ReportSecurityViolation_WhenAdminSessionIsValid_CreatesTimedHardwareBan()
     {
         await using var fixture = await TestFixture.CreateAsync();
         var securitySettings = new StubSecuritySettingsProvider(new SecuritySettingsConfig(
@@ -284,10 +284,19 @@ public sealed class PublicAuthControllerTests
 
         var ok = Assert.IsType<OkObjectResult>(response.Result);
         var payload = Assert.IsType<PublicSecurityViolationReportResponse>(ok.Value);
-        Assert.False(payload.Banned);
-        Assert.True(payload.Exempt);
-        Assert.Null(payload.ExpiresAtUtc);
-        Assert.Equal(0, await fixture.DbContext.HardwareBans.CountAsync());
+        Assert.True(payload.Banned);
+        Assert.False(payload.Exempt);
+        Assert.NotNull(payload.ExpiresAtUtc);
+        Assert.InRange(
+            payload.ExpiresAtUtc!.Value,
+            DateTime.UtcNow.AddDays(30).AddHours(23),
+            DateTime.UtcNow.AddDays(31).AddHours(1));
+
+        var account = await fixture.DbContext.AuthAccounts.SingleAsync(x => x.Username == "admin-player");
+        var ban = await fixture.DbContext.HardwareBans.SingleAsync(x => x.AccountId == account.Id);
+        Assert.Equal("admin-hwid", ban.HwidHash);
+        Assert.Equal("admin-pc", ban.DeviceUserName);
+        Assert.Equal(payload.ExpiresAtUtc, ban.ExpiresAtUtc);
     }
 
     [Fact]

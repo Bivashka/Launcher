@@ -371,15 +371,6 @@ public sealed class PublicAuthController(
             return errorResult;
         }
 
-        if (User.IsInRole("admin") || User.IsInRole("administrator"))
-        {
-            return Ok(new PublicSecurityViolationReportResponse(
-                Banned: false,
-                Exempt: true,
-                ExpiresAtUtc: null,
-                Reason: "Administrative accounts are exempt from launcher anti-tamper auto-ban."));
-        }
-
         var normalizedReason = NormalizeSecurityViolationReason(request.Reason);
         var normalizedEvidence = NormalizeSecurityViolationEvidence(request.Evidence);
         var normalizedDeviceUserName = NormalizeDeviceUserName(
