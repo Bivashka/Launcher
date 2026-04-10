@@ -15,8 +15,8 @@ public sealed class LauncherApiService : ILauncherApiService
     private const int AssetChunkSizeBytes = 32 * 1024;
     private static readonly TimeSpan ApiRequestAttemptTimeout = TimeSpan.FromSeconds(12);
     private static readonly TimeSpan MetadataRequestAttemptTimeout = TimeSpan.FromSeconds(6);
-    private static readonly TimeSpan ManifestRequestAttemptTimeout = TimeSpan.FromSeconds(90);
-    private static readonly TimeSpan ManifestChunkRequestAttemptTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan ManifestRequestAttemptTimeout = TimeSpan.FromSeconds(180);
+    private static readonly TimeSpan ManifestChunkRequestAttemptTimeout = TimeSpan.FromSeconds(120);
     private static readonly TimeSpan AssetChunkRequestAttemptTimeout = TimeSpan.FromSeconds(45);
     private const string LauncherClientHeaderName = "X-BivLauncher-Client";
     private const string LauncherProofHeaderName = "X-BivLauncher-Proof";

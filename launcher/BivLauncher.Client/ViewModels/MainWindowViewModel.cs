@@ -1755,7 +1755,8 @@ public partial class MainWindowViewModel : ViewModelBase
                         candidate,
                         SelectedServer.ProfileSlug,
                         _playerAuthToken,
-                        _playerAuthTokenType));
+                        _playerAuthTokenType),
+                    operationName: "Manifest");
                 ApplyProfileRuntimeFallback(manifest, SelectedServer.ProfileSlug);
                 StatusText = _languageCode == "en" ? "Preparing files..." : "Подготовка файлов...";
 
@@ -1841,7 +1842,8 @@ public partial class MainWindowViewModel : ViewModelBase
                     candidate,
                     selectedServer.ProfileSlug,
                     _playerAuthToken,
-                    _playerAuthTokenType));
+                    _playerAuthTokenType),
+                operationName: "Manifest");
             ApplyProfileRuntimeFallback(manifest, selectedServer.ProfileSlug);
             StatusText = _languageCode == "en" ? "Preparing files..." : "Подготовка файлов...";
 
@@ -4752,13 +4754,15 @@ public partial class MainWindowViewModel : ViewModelBase
     private async Task<T> ExecuteAgainstApiFailoverAsync<T>(
         Func<string, Task<T>> operation,
         string? preferredApiBaseUrl = null,
-        bool persistSuccess = true)
+        bool persistSuccess = true,
+        string operationName = "API")
     {
         Exception? lastError = null;
         foreach (var candidate in GetApiBaseUrlCandidates(preferredApiBaseUrl))
         {
             try
             {
+                _logService.LogInfo($"{operationName} candidate started: {candidate}");
                 var result = await operation(candidate);
                 MergeKnownApiBaseUrls([candidate]);
                 if (persistSuccess)
@@ -4771,17 +4775,17 @@ public partial class MainWindowViewModel : ViewModelBase
             catch (LauncherApiException apiException) when (ShouldTryNextApiBaseUrl(apiException))
             {
                 lastError = apiException;
-                _logService.LogInfo($"API candidate failed and will be skipped: {candidate} ({(int)apiException.StatusCode}) {apiException.Message}");
+                _logService.LogInfo($"{operationName} candidate failed and will be skipped: {candidate} ({(int)apiException.StatusCode}) {apiException.Message}");
             }
             catch (HttpRequestException httpException)
             {
                 lastError = httpException;
-                _logService.LogInfo($"API candidate failed and will be skipped: {candidate} ({httpException.Message})");
+                _logService.LogInfo($"{operationName} candidate failed and will be skipped: {candidate} ({httpException.Message})");
             }
             catch (TaskCanceledException canceledException)
             {
                 lastError = canceledException;
-                _logService.LogInfo($"API candidate timed out and will be skipped: {candidate} ({canceledException.Message})");
+                _logService.LogInfo($"{operationName} candidate timed out and will be skipped: {candidate} ({canceledException.Message})");
             }
         }
 
