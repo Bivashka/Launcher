@@ -2851,7 +2851,8 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             var session = await ExecuteAgainstApiFailoverAsync(
                 candidate => _launcherApiService.GetSessionAsync(candidate, _playerAuthToken, _playerAuthTokenType),
-                preferredApiBaseUrl: ResolvePreferredPlayerApiBaseUrl());
+                preferredApiBaseUrl: ResolvePreferredPlayerApiBaseUrl(),
+                operationName: "Session");
             SetAuthenticatedPlayerSession(
                 _playerAuthToken,
                 _playerAuthTokenType,
@@ -2920,7 +2921,8 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             var session = await ExecuteAgainstApiFailoverAsync(
                 candidate => _launcherApiService.GetSessionAsync(candidate, _playerAuthToken, _playerAuthTokenType),
-                preferredApiBaseUrl: ResolvePreferredPlayerApiBaseUrl());
+                preferredApiBaseUrl: ResolvePreferredPlayerApiBaseUrl(),
+                operationName: "Session");
             SetAuthenticatedPlayerSession(
                 _playerAuthToken,
                 _playerAuthTokenType,
@@ -2946,6 +2948,12 @@ public partial class MainWindowViewModel : ViewModelBase
                 ? BanNoticeMessage
                 : "Player session rejected by server (possibly banned). Login is required.";
         }
+        catch (Exception ex) when (ShouldSkipPreLaunchSessionValidation(ex))
+        {
+            _logService.LogInfo(
+                $"Pre-launch session validation was skipped due to a temporary API failure: {ex.Message}");
+            return string.Empty;
+        }
         catch (Exception ex)
         {
             return $"Failed to validate player session before launch: {ex.Message}";
@@ -2958,7 +2966,8 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             var session = await ExecuteAgainstApiFailoverAsync(
                 candidate => _launcherApiService.GetSessionAsync(candidate, _playerAuthToken, _playerAuthTokenType),
-                preferredApiBaseUrl: ResolvePreferredPlayerApiBaseUrl());
+                preferredApiBaseUrl: ResolvePreferredPlayerApiBaseUrl(),
+                operationName: "Session");
             SetAuthenticatedPlayerSession(
                 _playerAuthToken,
                 _playerAuthTokenType,
@@ -3030,7 +3039,8 @@ public partial class MainWindowViewModel : ViewModelBase
                     candidate,
                     token,
                     string.IsNullOrWhiteSpace(account.AuthTokenType) ? "Bearer" : account.AuthTokenType),
-                preferredApiBaseUrl: ResolvePreferredPlayerApiBaseUrl(accountApiBaseUrl));
+                preferredApiBaseUrl: ResolvePreferredPlayerApiBaseUrl(accountApiBaseUrl),
+                operationName: "Session");
 
             var sessionUsername = (session.Username ?? string.Empty).Trim();
             var sessionExternalId = (session.ExternalId ?? string.Empty).Trim();
@@ -5096,6 +5106,24 @@ public partial class MainWindowViewModel : ViewModelBase
     private static bool IsRecoverablePreLaunchException(Exception? ex)
     {
         return ex is LauncherApiException or HttpRequestException or TaskCanceledException;
+    }
+
+    private static bool ShouldSkipPreLaunchSessionValidation(Exception ex)
+    {
+        if (ex is TaskCanceledException or HttpRequestException)
+        {
+            return true;
+        }
+
+        return ex is LauncherApiException apiException &&
+               apiException.StatusCode is
+                   HttpStatusCode.NotFound or
+                   HttpStatusCode.RequestTimeout or
+                   HttpStatusCode.TooManyRequests or
+                   HttpStatusCode.InternalServerError or
+                   HttpStatusCode.BadGateway or
+                   HttpStatusCode.ServiceUnavailable or
+                   HttpStatusCode.GatewayTimeout;
     }
 
     private static string BuildNewsPreview(string body)
