@@ -1877,8 +1877,12 @@ public partial class MainWindowViewModel : ViewModelBase
                 return;
             }
 
+            var trackGameSession = gameSession.SessionId != Guid.Empty;
+
             using var gameSessionHeartbeatCts = new CancellationTokenSource();
-            var heartbeatTask = RunGameSessionHeartbeatLoopAsync(gameSession, gameSessionHeartbeatCts.Token);
+            var heartbeatTask = trackGameSession
+                ? RunGameSessionHeartbeatLoopAsync(gameSession, gameSessionHeartbeatCts.Token)
+                : Task.CompletedTask;
             _discordRpcService.SetLaunchingPresence(selectedServer);
 
             IsGameSessionActive = true;
@@ -1909,20 +1913,23 @@ public partial class MainWindowViewModel : ViewModelBase
                 {
                     UnregisterMonitoredGameProcess(launchedProcessId);
                 }
-                gameSessionHeartbeatCts.Cancel();
-                try
+                if (trackGameSession)
                 {
-                    await heartbeatTask;
-                }
-                catch (OperationCanceledException)
-                {
-                }
-                catch (Exception ex)
-                {
-                    _logService.LogInfo($"Game session heartbeat stopped with warning: {ex.Message}");
-                }
+                    gameSessionHeartbeatCts.Cancel();
+                    try
+                    {
+                        await heartbeatTask;
+                    }
+                    catch (OperationCanceledException)
+                    {
+                    }
+                    catch (Exception ex)
+                    {
+                        _logService.LogInfo($"Game session heartbeat stopped with warning: {ex.Message}");
+                    }
 
-                await TryStopGameSessionAsync(gameSession.SessionId);
+                    await TryStopGameSessionAsync(gameSession.SessionId);
+                }
                 _discordRpcService.UpdateIdlePresence(selectedServer);
             }
 
@@ -3131,7 +3138,8 @@ public partial class MainWindowViewModel : ViewModelBase
                         ServerId = server.ServerId,
                         ServerName = server.DisplayName
                     }),
-                preferredApiBaseUrl: ResolvePreferredPlayerApiBaseUrl());
+                preferredApiBaseUrl: ResolvePreferredPlayerApiBaseUrl(),
+                operationName: "Game session");
 
             if (session.Limit > 0)
             {
@@ -3152,6 +3160,12 @@ public partial class MainWindowViewModel : ViewModelBase
             }
 
             throw;
+        }
+        catch (Exception ex) when (ShouldBypassGameSessionStart(ex))
+        {
+            _logService.LogInfo(
+                $"Game session start was skipped due to a temporary API failure: {ex.Message}");
+            return new PublicGameSessionStartResponse();
         }
     }
 
@@ -3180,6 +3194,7 @@ public partial class MainWindowViewModel : ViewModelBase
                         return true;
                     },
                     preferredApiBaseUrl: ResolvePreferredPlayerApiBaseUrl(),
+                    operationName: "Game session heartbeat",
                     persistSuccess: false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -3221,6 +3236,7 @@ public partial class MainWindowViewModel : ViewModelBase
                     return true;
                 },
                 preferredApiBaseUrl: ResolvePreferredPlayerApiBaseUrl(),
+                operationName: "Game session stop",
                 persistSuccess: false);
         }
         catch (Exception ex)
@@ -5109,6 +5125,24 @@ public partial class MainWindowViewModel : ViewModelBase
     }
 
     private static bool ShouldSkipPreLaunchSessionValidation(Exception ex)
+    {
+        if (ex is TaskCanceledException or HttpRequestException)
+        {
+            return true;
+        }
+
+        return ex is LauncherApiException apiException &&
+               apiException.StatusCode is
+                   HttpStatusCode.NotFound or
+                   HttpStatusCode.RequestTimeout or
+                   HttpStatusCode.TooManyRequests or
+                   HttpStatusCode.InternalServerError or
+                   HttpStatusCode.BadGateway or
+                   HttpStatusCode.ServiceUnavailable or
+                   HttpStatusCode.GatewayTimeout;
+    }
+
+    private static bool ShouldBypassGameSessionStart(Exception ex)
     {
         if (ex is TaskCanceledException or HttpRequestException)
         {
