@@ -10,11 +10,20 @@ namespace BivLauncher.Client.Services;
 [SupportedOSPlatform("windows")]
 public sealed class LauncherTamperMonitor : ILauncherTamperMonitor
 {
+    private const int HookProbeByteCount = 16;
+    private const int MinimumSuspiciousTimerHookCount = 2;
+    private static readonly object ExportProbeCacheSyncRoot = new();
     private static readonly HashSet<string> SuspiciousProcessNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "cheatengine",
         "cheatengine-x86_64",
         "cheatengine-i386",
+        "ceserver",
+        "dbk32",
+        "dbk64",
+        "vehdebug-x86_64",
+        "vehdebug-i386",
+        "luaclient",
         "x64dbg",
         "x32dbg",
         "ollydbg",
@@ -38,6 +47,15 @@ public sealed class LauncherTamperMonitor : ILauncherTamperMonitor
     [
         "cheatengine",
         "speedhack",
+        "speedhack-x86_64",
+        "speedhack-i386",
+        "ceserver",
+        "dbk32",
+        "dbk64",
+        "vehdebug",
+        "luaclient",
+        "lua53",
+        "lua54",
         "x64dbg",
         "x32dbg",
         "ollydbg",
@@ -77,6 +95,17 @@ public sealed class LauncherTamperMonitor : ILauncherTamperMonitor
     private static readonly string CheatArtifactPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         ".mc_cache_data");
+    private static readonly TimeApiHookProbe[] SuspiciousTimerHookProbes =
+    [
+        new("kernelbase.dll", "QueryPerformanceCounter"),
+        new("kernelbase.dll", "GetTickCount"),
+        new("kernelbase.dll", "GetTickCount64"),
+        new("kernelbase.dll", "GetSystemTimeAsFileTime"),
+        new("winmm.dll", "timeGetTime"),
+        new("ntdll.dll", "NtQueryPerformanceCounter"),
+        new("ntdll.dll", "NtQuerySystemTime")
+    ];
+    private static readonly Dictionary<string, TimerExportProbe> TimerExportProbeCache = new(StringComparer.OrdinalIgnoreCase);
 
     public TamperDetectionResult? Inspect(IEnumerable<int> processIds)
     {
@@ -109,6 +138,12 @@ public sealed class LauncherTamperMonitor : ILauncherTamperMonitor
         if (artifactDetection is not null)
         {
             return artifactDetection;
+        }
+
+        var timerHookDetection = InspectTimerApiHooks(monitoredProcesses);
+        if (timerHookDetection is not null)
+        {
+            return timerHookDetection;
         }
 
         var targetProcessIds = monitoredProcesses
@@ -383,6 +418,260 @@ public sealed class LauncherTamperMonitor : ILauncherTamperMonitor
         return null;
     }
 
+    private static TamperDetectionResult? InspectTimerApiHooks(IReadOnlyList<ProcessSnapshot> monitoredProcesses)
+    {
+        foreach (var process in monitoredProcesses)
+        {
+            var detection = InspectTimerApiHooks(process.ProcessId);
+            if (detection is not null)
+            {
+                return detection;
+            }
+        }
+
+        return null;
+    }
+
+    private static TamperDetectionResult? InspectTimerApiHooks(int processId)
+    {
+        Process? process = null;
+        IntPtr processHandle = IntPtr.Zero;
+        try
+        {
+            process = Process.GetProcessById(processId);
+            var remoteModules = GetRemoteModuleSnapshots(process);
+            if (remoteModules.Count == 0)
+            {
+                return null;
+            }
+
+            processHandle = OpenProcess(
+                ProcessAccessRights.QueryInformation | ProcessAccessRights.VirtualMemoryRead,
+                false,
+                processId);
+            if (processHandle == IntPtr.Zero)
+            {
+                return null;
+            }
+
+            if (ShouldSkipTimerHookInspection(processHandle))
+            {
+                return null;
+            }
+
+            List<string>? suspiciousHooks = null;
+            foreach (var probe in SuspiciousTimerHookProbes)
+            {
+                if (!remoteModules.TryGetValue(probe.ModuleName, out var remoteModule) ||
+                    !TryResolveTimerExportProbe(probe.ModuleName, probe.ExportName, out var exportProbe))
+                {
+                    continue;
+                }
+
+                var remoteAddress = new IntPtr(remoteModule.BaseAddress.ToInt64() + exportProbe.Offset);
+                if (!TryReadProcessBytes(processHandle, remoteAddress, HookProbeByteCount, out var remoteBytes) ||
+                    remoteBytes.SequenceEqual(exportProbe.BaselineBytes) ||
+                    !LooksLikeHookStub(remoteBytes))
+                {
+                    continue;
+                }
+
+                suspiciousHooks ??= [];
+                suspiciousHooks.Add($"{probe.ModuleName}!{probe.ExportName}");
+                if (suspiciousHooks.Count >= MinimumSuspiciousTimerHookCount)
+                {
+                    return new TamperDetectionResult(
+                        $"Timer API hook detected in process {processId}.",
+                        $"timerhook:{process.ProcessName}:{string.Join(",", suspiciousHooks)}");
+                }
+            }
+        }
+        catch (ArgumentException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+        catch (Win32Exception)
+        {
+        }
+        finally
+        {
+            if (processHandle != IntPtr.Zero)
+            {
+                CloseHandle(processHandle);
+            }
+
+            process?.Dispose();
+        }
+
+        return null;
+    }
+
+    private static bool TryResolveTimerExportProbe(string moduleName, string exportName, out TimerExportProbe probe)
+    {
+        var cacheKey = $"{moduleName}!{exportName}";
+        lock (ExportProbeCacheSyncRoot)
+        {
+            if (TimerExportProbeCache.TryGetValue(cacheKey, out probe))
+            {
+                return true;
+            }
+        }
+
+        var moduleHandle = GetModuleHandleW(moduleName);
+        var loadedForProbe = false;
+        if (moduleHandle == IntPtr.Zero)
+        {
+            moduleHandle = LoadLibraryW(moduleName);
+            loadedForProbe = moduleHandle != IntPtr.Zero;
+        }
+
+        if (moduleHandle == IntPtr.Zero)
+        {
+            probe = default;
+            return false;
+        }
+
+        try
+        {
+            var exportAddress = GetProcAddress(moduleHandle, exportName);
+            if (exportAddress == IntPtr.Zero ||
+                !TryGetLocalModuleRange(moduleName, out var localModuleBase, out var localModuleSize))
+            {
+                probe = default;
+                return false;
+            }
+
+            var moduleStart = localModuleBase.ToInt64();
+            var moduleEnd = moduleStart + localModuleSize;
+            var exportStart = exportAddress.ToInt64();
+            if (exportStart < moduleStart || exportStart + HookProbeByteCount > moduleEnd)
+            {
+                probe = default;
+                return false;
+            }
+
+            var baselineBytes = new byte[HookProbeByteCount];
+            Marshal.Copy(exportAddress, baselineBytes, 0, baselineBytes.Length);
+
+            probe = new TimerExportProbe(
+                moduleName,
+                exportName,
+                exportStart - moduleStart,
+                baselineBytes);
+
+            lock (ExportProbeCacheSyncRoot)
+            {
+                TimerExportProbeCache[cacheKey] = probe;
+            }
+
+            return true;
+        }
+        finally
+        {
+            if (loadedForProbe)
+            {
+                FreeLibrary(moduleHandle);
+            }
+        }
+    }
+
+    private static bool TryGetLocalModuleRange(string moduleName, out IntPtr moduleBase, out int moduleSize)
+    {
+        using var currentProcess = Process.GetCurrentProcess();
+        foreach (ProcessModule module in currentProcess.Modules)
+        {
+            if (!string.Equals(module.ModuleName, moduleName, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            moduleBase = module.BaseAddress;
+            moduleSize = module.ModuleMemorySize;
+            return true;
+        }
+
+        moduleBase = IntPtr.Zero;
+        moduleSize = 0;
+        return false;
+    }
+
+    private static IReadOnlyDictionary<string, RemoteModuleSnapshot> GetRemoteModuleSnapshots(Process process)
+    {
+        var result = new Dictionary<string, RemoteModuleSnapshot>(StringComparer.OrdinalIgnoreCase);
+        foreach (ProcessModule module in process.Modules)
+        {
+            var moduleName = module.ModuleName ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(moduleName) || result.ContainsKey(moduleName))
+            {
+                continue;
+            }
+
+            result[moduleName] = new RemoteModuleSnapshot(moduleName, module.BaseAddress);
+        }
+
+        return result;
+    }
+
+    private static bool ShouldSkipTimerHookInspection(IntPtr processHandle)
+    {
+        if (!Environment.Is64BitProcess)
+        {
+            return false;
+        }
+
+        return IsWow64Process(processHandle, out var isWow64) && isWow64;
+    }
+
+    private static bool TryReadProcessBytes(IntPtr processHandle, IntPtr address, int count, out byte[] buffer)
+    {
+        buffer = new byte[count];
+        return ReadProcessMemory(processHandle, address, buffer, buffer.Length, out var bytesRead) &&
+               bytesRead.ToInt64() == buffer.Length;
+    }
+
+    private static bool LooksLikeHookStub(ReadOnlySpan<byte> bytes)
+    {
+        if (bytes.Length < 2)
+        {
+            return false;
+        }
+
+        if (bytes[0] is 0xE9 or 0xE8 or 0xEB or 0xEA)
+        {
+            return true;
+        }
+
+        if (bytes[0] == 0xFF && bytes[1] is 0x25 or 0x15)
+        {
+            return true;
+        }
+
+        if (bytes.Length >= 12 &&
+            bytes[0] == 0x48 &&
+            bytes[1] == 0xB8 &&
+            bytes[10] == 0xFF &&
+            bytes[11] == 0xE0)
+        {
+            return true;
+        }
+
+        if (bytes.Length >= 13 &&
+            bytes[0] == 0x49 &&
+            bytes[1] == 0xBB &&
+            bytes[10] == 0x41 &&
+            bytes[11] == 0xFF &&
+            bytes[12] == 0xE3)
+        {
+            return true;
+        }
+
+        return bytes.Length >= 6 &&
+               bytes[0] == 0x68 &&
+               bytes[5] == 0xC3;
+    }
+
     private static string GetWindowText(IntPtr windowHandle)
     {
         var length = GetWindowTextLengthW(windowHandle);
@@ -397,9 +686,48 @@ public sealed class LauncherTamperMonitor : ILauncherTamperMonitor
             : string.Empty;
     }
 
-    private sealed record ProcessSnapshot(int ProcessId, string ProcessName, DateTime StartedAtUtc);
+    private readonly record struct ProcessSnapshot(int ProcessId, string ProcessName, DateTime StartedAtUtc);
+    private readonly record struct RemoteModuleSnapshot(string ModuleName, IntPtr BaseAddress);
+    private readonly record struct TimeApiHookProbe(string ModuleName, string ExportName);
+    private readonly record struct TimerExportProbe(string ModuleName, string ExportName, long Offset, byte[] BaselineBytes);
+
+    [Flags]
+    private enum ProcessAccessRights : uint
+    {
+        VirtualMemoryRead = 0x0010,
+        QueryInformation = 0x0400
+    }
 
     private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern IntPtr GetModuleHandleW(string lpModuleName);
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern IntPtr LoadLibraryW(string lpLibFileName);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool FreeLibrary(IntPtr hModule);
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Ansi)]
+    private static extern IntPtr GetProcAddress(IntPtr hModule, string lpProcName);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr OpenProcess(ProcessAccessRights dwDesiredAccess, bool bInheritHandle, int dwProcessId);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool CloseHandle(IntPtr hObject);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool ReadProcessMemory(
+        IntPtr hProcess,
+        IntPtr lpBaseAddress,
+        [Out] byte[] lpBuffer,
+        int dwSize,
+        out IntPtr lpNumberOfBytesRead);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool IsWow64Process(IntPtr hProcess, out bool wow64Process);
 
     [DllImport("user32.dll")]
     private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
