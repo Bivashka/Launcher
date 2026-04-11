@@ -4844,7 +4844,18 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         Exception? lastError = null;
         var attemptedCandidates = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var candidate in GetApiBaseUrlCandidates(preferredApiBaseUrl))
+        var preferredRegionCode = NormalizeApiRegionCode(PreferredApiRegion);
+        var candidates = GetApiBaseUrlCandidates(preferredApiBaseUrl).ToList();
+        if (candidates.Count == 0)
+        {
+            _logService.LogInfo($"{operationName} candidates resolved to empty list (preferredRegion='{preferredRegionCode}', preferredApi='{preferredApiBaseUrl ?? string.Empty}').");
+        }
+        else
+        {
+            _logService.LogInfo($"{operationName} candidates resolved ({candidates.Count}) [region='{preferredRegionCode}', preferredApi='{preferredApiBaseUrl ?? string.Empty}']: {string.Join(", ", candidates)}");
+        }
+
+        foreach (var candidate in candidates)
         {
             try
             {
@@ -4879,9 +4890,19 @@ public partial class MainWindowViewModel : ViewModelBase
             }
         }
 
-        if (allowCrossRegionFallback && !string.IsNullOrWhiteSpace(NormalizeApiRegionCode(PreferredApiRegion)))
+        if (allowCrossRegionFallback && !string.IsNullOrWhiteSpace(preferredRegionCode))
         {
-            foreach (var candidate in GetApiBaseUrlCandidatesIgnoringRegion(preferredApiBaseUrl))
+            var crossRegionCandidates = GetApiBaseUrlCandidatesIgnoringRegion(preferredApiBaseUrl).ToList();
+            if (crossRegionCandidates.Count == 0)
+            {
+                _logService.LogInfo($"{operationName} cross-region candidates resolved to empty list.");
+            }
+            else
+            {
+                _logService.LogInfo($"{operationName} cross-region candidates resolved ({crossRegionCandidates.Count}): {string.Join(", ", crossRegionCandidates)}");
+            }
+
+            foreach (var candidate in crossRegionCandidates)
             {
                 if (attemptedCandidates.Contains(candidate))
                 {
