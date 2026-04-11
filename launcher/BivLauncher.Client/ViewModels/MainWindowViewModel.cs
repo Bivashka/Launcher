@@ -4699,7 +4699,7 @@ public partial class MainWindowViewModel : ViewModelBase
         ResetTwoFactorState();
     }
 
-    private IEnumerable<string> GetRegionalApiBaseUrlCandidates()
+    private IEnumerable<string> GetRegionalApiBaseUrlCandidates(bool includeAllRegions = false)
     {
         var candidates = new List<string>();
 
@@ -4719,6 +4719,12 @@ public partial class MainWindowViewModel : ViewModelBase
         if (!string.IsNullOrWhiteSpace(preferredRegionCode))
         {
             AddRegion(preferredRegionCode);
+        }
+
+        if (includeAllRegions)
+        {
+            AddRegion("ru");
+            AddRegion("eu");
         }
 
         return candidates;
@@ -4811,7 +4817,7 @@ public partial class MainWindowViewModel : ViewModelBase
         }
 
         Add(preferredApiBaseUrl);
-        foreach (var regionalApiBaseUrl in GetRegionalApiBaseUrlCandidates())
+        foreach (var regionalApiBaseUrl in GetRegionalApiBaseUrlCandidates(includeAllRegions: true))
         {
             Add(regionalApiBaseUrl);
         }
@@ -4905,13 +4911,16 @@ public partial class MainWindowViewModel : ViewModelBase
                 _logService.LogInfo($"{operationName} cross-region candidates resolved ({crossRegionCandidates.Count}): {string.Join(", ", crossRegionCandidates)}");
             }
 
-            foreach (var candidate in crossRegionCandidates)
+            var unattemptedCrossRegionCandidates = crossRegionCandidates
+                .Where(candidate => !attemptedCandidates.Contains(candidate))
+                .ToList();
+            if (unattemptedCrossRegionCandidates.Count == 0 && crossRegionCandidates.Count > 0)
             {
-                if (attemptedCandidates.Contains(candidate))
-                {
-                    continue;
-                }
+                _logService.LogInfo($"{operationName} cross-region candidates were already attempted; no extra endpoint is available.");
+            }
 
+            foreach (var candidate in unattemptedCrossRegionCandidates)
+            {
                 try
                 {
                     _logService.LogInfo($"{operationName} cross-region candidate started: {candidate}");
