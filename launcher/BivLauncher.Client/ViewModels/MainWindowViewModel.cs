@@ -1757,7 +1757,8 @@ public partial class MainWindowViewModel : ViewModelBase
                         SelectedServer.ProfileSlug,
                         _playerAuthToken,
                         _playerAuthTokenType),
-                    operationName: "Manifest");
+                    operationName: "Manifest",
+                    allowCrossRegionFallback: true);
                 ApplyProfileRuntimeFallback(manifest, SelectedServer.ProfileSlug);
                 StatusText = _languageCode == "en" ? "Preparing files..." : "Подготовка файлов...";
 
@@ -1844,7 +1845,8 @@ public partial class MainWindowViewModel : ViewModelBase
                     selectedServer.ProfileSlug,
                     _playerAuthToken,
                     _playerAuthTokenType),
-                operationName: "Manifest");
+                operationName: "Manifest",
+                allowCrossRegionFallback: true);
             ApplyProfileRuntimeFallback(manifest, selectedServer.ProfileSlug);
             StatusText = _languageCode == "en" ? "Preparing files..." : "Подготовка файлов...";
 
@@ -4789,13 +4791,59 @@ public partial class MainWindowViewModel : ViewModelBase
         return candidates;
     }
 
+    private IEnumerable<string> GetApiBaseUrlCandidatesIgnoringRegion(string? preferredApiBaseUrl = null)
+    {
+        var candidates = new List<string>();
+
+        void Add(string? value)
+        {
+            var normalized = NormalizeBaseUrlOrEmpty(value);
+            if (string.IsNullOrWhiteSpace(normalized) ||
+                candidates.Contains(normalized, StringComparer.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            candidates.Add(normalized);
+        }
+
+        Add(preferredApiBaseUrl);
+        foreach (var regionalApiBaseUrl in GetRegionalApiBaseUrlCandidates())
+        {
+            Add(regionalApiBaseUrl);
+        }
+
+        Add(ApiBaseUrl);
+        Add(_playerAuthApiBaseUrl);
+        Add(TryResolveConfiguredApiBaseUrl());
+
+        foreach (var knownApiBaseUrl in _knownApiBaseUrls)
+        {
+            Add(knownApiBaseUrl);
+        }
+
+        foreach (var bootstrapFallback in _bootstrapFallbackApiBaseUrls)
+        {
+            Add(bootstrapFallback);
+        }
+
+        foreach (var bundledFallback in ResolveBundledFallbackApiBaseUrls())
+        {
+            Add(bundledFallback);
+        }
+
+        return candidates;
+    }
+
     private async Task<T> ExecuteAgainstApiFailoverAsync<T>(
         Func<string, Task<T>> operation,
         string? preferredApiBaseUrl = null,
         bool persistSuccess = true,
-        string operationName = "API")
+        string operationName = "API",
+        bool allowCrossRegionFallback = false)
     {
         Exception? lastError = null;
+        var attemptedCandidates = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var candidate in GetApiBaseUrlCandidates(preferredApiBaseUrl))
         {
             try
@@ -4824,6 +4872,49 @@ public partial class MainWindowViewModel : ViewModelBase
             {
                 lastError = canceledException;
                 _logService.LogInfo($"{operationName} candidate timed out and will be skipped: {candidate} ({canceledException.Message})");
+            }
+            finally
+            {
+                attemptedCandidates.Add(candidate);
+            }
+        }
+
+        if (allowCrossRegionFallback && !string.IsNullOrWhiteSpace(NormalizeApiRegionCode(PreferredApiRegion)))
+        {
+            foreach (var candidate in GetApiBaseUrlCandidatesIgnoringRegion(preferredApiBaseUrl))
+            {
+                if (attemptedCandidates.Contains(candidate))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    _logService.LogInfo($"{operationName} cross-region candidate started: {candidate}");
+                    var result = await operation(candidate);
+                    MergeKnownApiBaseUrls([candidate]);
+                    if (persistSuccess)
+                    {
+                        ApiBaseUrl = candidate;
+                    }
+
+                    return result;
+                }
+                catch (LauncherApiException apiException) when (ShouldTryNextApiBaseUrl(apiException))
+                {
+                    lastError = apiException;
+                    _logService.LogInfo($"{operationName} cross-region candidate failed and will be skipped: {candidate} ({(int)apiException.StatusCode}) {apiException.Message}");
+                }
+                catch (HttpRequestException httpException)
+                {
+                    lastError = httpException;
+                    _logService.LogInfo($"{operationName} cross-region candidate failed and will be skipped: {candidate} ({httpException.Message})");
+                }
+                catch (TaskCanceledException canceledException)
+                {
+                    lastError = canceledException;
+                    _logService.LogInfo($"{operationName} cross-region candidate timed out and will be skipped: {candidate} ({canceledException.Message})");
+                }
             }
         }
 
