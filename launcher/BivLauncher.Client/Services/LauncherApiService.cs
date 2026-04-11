@@ -423,7 +423,9 @@ public sealed class LauncherApiService : ILauncherApiService
             }
             catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException or InvalidOperationException)
             {
-                lastError = ex;
+                lastError = new IOException(
+                    $"Asset '{s3Key}' failed from '{candidateUri}': {ex.Message}",
+                    ex);
                 TryDeleteFile(destinationPath);
             }
         }

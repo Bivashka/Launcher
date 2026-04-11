@@ -11,14 +11,16 @@ namespace BivLauncher.Client.Services;
 public sealed class LauncherTamperMonitor : ILauncherTamperMonitor
 {
     private const int HookProbeByteCount = 16;
-    private const int MinimumSuspiciousTimerHookCount = 2;
+    private const int MinimumSuspiciousTimerHookCount = 1;
     private const int SystemExtendedHandleInformationClass = 64;
     private const int NtStatusInfoLengthMismatch = unchecked((int)0xC0000004);
     private static readonly object ExportProbeCacheSyncRoot = new();
-    private static readonly HashSet<string> SuspiciousProcessNames = new(StringComparer.OrdinalIgnoreCase)
-    {
+    private static readonly string[] SuspiciousProcessNameTokens =
+    [
+        "cheat engine",
         "cheatengine",
         "cheatengine-x86_64",
+        "cheatengine-x86_64-sse4-avx2",
         "cheatengine-i386",
         "ceserver",
         "dbk32",
@@ -43,15 +45,18 @@ public sealed class LauncherTamperMonitor : ILauncherTamperMonitor
         "scylla",
         "megadumper",
         "ksdumperclient"
-    };
+    ];
 
     private static readonly string[] SuspiciousModuleNameTokens =
     [
+        "allochook",
+        "ced3d",
         "cheatengine",
         "speedhack",
         "speedhack-x86_64",
         "speedhack-i386",
         "ceserver",
+        "d3dhook",
         "dbk32",
         "dbk64",
         "vehdebug",
@@ -67,7 +72,8 @@ public sealed class LauncherTamperMonitor : ILauncherTamperMonitor
         "frida",
         "scylla",
         "megadumper",
-        "ksdumper"
+        "ksdumper",
+        "winhook"
     ];
 
     private static readonly string[] SuspiciousCommandLineTokens =
@@ -82,7 +88,13 @@ public sealed class LauncherTamperMonitor : ILauncherTamperMonitor
         "perf-lib-v21-jar-with-dependencies.jar",
         "perf-lib-v20-jar-with-dependencies.jar",
         "perf-lib-v15-jar-with-dependencies.jar",
-        ".mc_cache_data"
+        ".mc_cache_data",
+        "cheat engine",
+        "cheatengine",
+        "cheatengine-x86_64-sse4-avx2",
+        "dbk32.cepack",
+        "dbk64.cepack",
+        "speedhackv3.lua"
     ];
 
     private static readonly string[] SuspiciousWindowTitleTokens =
@@ -99,6 +111,10 @@ public sealed class LauncherTamperMonitor : ILauncherTamperMonitor
         ".mc_cache_data");
     private static readonly TimeApiHookProbe[] SuspiciousTimerHookProbes =
     [
+        new("kernel32.dll", "QueryPerformanceCounter"),
+        new("kernel32.dll", "GetTickCount"),
+        new("kernel32.dll", "GetTickCount64"),
+        new("kernel32.dll", "GetSystemTimeAsFileTime"),
         new("kernelbase.dll", "QueryPerformanceCounter"),
         new("kernelbase.dll", "GetTickCount"),
         new("kernelbase.dll", "GetTickCount64"),
@@ -254,11 +270,11 @@ public sealed class LauncherTamperMonitor : ILauncherTamperMonitor
                     continue;
                 }
 
-                if (SuspiciousProcessNames.Contains(processName))
+                if (ContainsSuspiciousProcessNameToken(processName, out var processNameToken))
                 {
                     return new TamperDetectionResult(
                         $"Suspicious process detected: {processName}.",
-                        $"process:{processName}");
+                        $"process:{processName}:{processNameToken}");
                 }
 
                 if (commandLineMap.TryGetValue(process.Id, out var commandLine) &&
@@ -368,6 +384,42 @@ public sealed class LauncherTamperMonitor : ILauncherTamperMonitor
 
         matchedToken = string.Empty;
         return false;
+    }
+
+    private static bool ContainsSuspiciousProcessNameToken(string processName, out string matchedToken)
+    {
+        var normalizedProcessName = NormalizeProcessToken(processName);
+        foreach (var token in SuspiciousProcessNameTokens)
+        {
+            if (processName.Contains(token, StringComparison.OrdinalIgnoreCase) ||
+                normalizedProcessName.Contains(NormalizeProcessToken(token), StringComparison.OrdinalIgnoreCase))
+            {
+                matchedToken = token;
+                return true;
+            }
+        }
+
+        matchedToken = string.Empty;
+        return false;
+    }
+
+    private static string NormalizeProcessToken(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var builder = new StringBuilder(value.Length);
+        foreach (var character in value)
+        {
+            if (char.IsLetterOrDigit(character))
+            {
+                builder.Append(char.ToLowerInvariant(character));
+            }
+        }
+
+        return builder.ToString();
     }
 
     private static bool ContainsSuspiciousWindowTitle(string title, out string matchedToken)

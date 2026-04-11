@@ -91,7 +91,7 @@ public sealed class ManifestInstallerService(
                     }
 
                     var assetReference = string.IsNullOrWhiteSpace(file.DownloadUrl) ? file.S3Key : file.DownloadUrl;
-                    logService.LogInfo($"Downloading started: {file.Path}");
+                    logService.LogInfo($"Downloading started: {file.Path} ({assetReference})");
                     await launcherApiService.DownloadAssetToFileAsync(
                         apiBaseUrl,
                         assetReference,
