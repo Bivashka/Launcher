@@ -569,6 +569,8 @@ public partial class MainWindowViewModel : ViewModelBase
         var resolvedInitialApiRegion = ResolveInitialApiRegion(_settings.PreferredApiRegion);
         PreferredApiRegion = resolvedInitialApiRegion;
         var configuredApiBaseUrl = TryResolveConfiguredApiBaseUrl();
+        _logService.LogInfo(
+            $"Launcher init: version={_currentLauncherVersion}, preferredRegion(raw='{_settings.PreferredApiRegion}', resolved='{resolvedInitialApiRegion}'), configuredApi='{configuredApiBaseUrl ?? string.Empty}', persistedApi='{_settings.ApiBaseUrl ?? string.Empty}'.");
         var shouldPersistResolvedRegion = !string.IsNullOrWhiteSpace(resolvedInitialApiRegion) &&
                                          !string.Equals(
                                              NormalizeApiRegionCode(_settings.PreferredApiRegion),
@@ -604,6 +606,7 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             ApiBaseUrl = ResolvePreferredApiRegionApiBaseUrl();
         }
+        _logService.LogInfo($"Launcher init: apiBaseUrl='{ApiBaseUrl}', publicBaseUrl='{_bootstrapPublicBaseUrl}', knownApiCount={_settings.KnownApiBaseUrls?.Count ?? 0}.");
         ResetKnownApiBaseUrlsForCurrentRegion(_settings.KnownApiBaseUrls);
         InstallDirectory = string.IsNullOrWhiteSpace(_settings.InstallDirectory)
             ? _settingsService.GetDefaultInstallDirectory()
