@@ -3362,8 +3362,8 @@ public partial class MainWindowViewModel : ViewModelBase
         ClearBanNotice();
 
         StatusText = _languageCode == "en"
-            ? "Security violation detected. Launcher is closing."
-            : "Обнаружено вмешательство в лаунчер. Лаунчер будет закрыт.";
+            ? "Security violation detected. Access will be blocked and the launcher will close."
+            : "Обнаружено вмешательство в игру или лаунчер. Доступ будет заблокирован, лаунчер закроется.";
         _logService.LogInfo($"Security violation detected: {detection.Reason} Evidence: {detection.Evidence}");
 
         await HideLauncherWindowAsync();
@@ -5198,7 +5198,7 @@ public partial class MainWindowViewModel : ViewModelBase
         return false;
     }
 
-    private static string BuildBanNoticeMessage(string rawMessage, string prefix, string fallback)
+    private string BuildBanNoticeMessage(string rawMessage, string prefix, string fallback)
     {
         if (!string.IsNullOrWhiteSpace(rawMessage) &&
             rawMessage.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
@@ -5206,7 +5206,7 @@ public partial class MainWindowViewModel : ViewModelBase
             var detail = rawMessage[prefix.Length..].Trim();
             if (!string.IsNullOrWhiteSpace(detail))
             {
-                return detail;
+                return LocalizeBanReasonDetail(detail, fallback);
             }
         }
 
@@ -5215,10 +5215,192 @@ public partial class MainWindowViewModel : ViewModelBase
             !string.Equals(rawMessage, prefix.TrimEnd(':'), StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(rawMessage, "Account is banned.", StringComparison.OrdinalIgnoreCase))
         {
-            return rawMessage;
+            return LocalizeBanReasonDetail(rawMessage, fallback);
         }
 
         return fallback;
+    }
+
+    private string LocalizeBanReasonDetail(string detail, string fallback)
+    {
+        if (string.IsNullOrWhiteSpace(detail))
+        {
+            return fallback;
+        }
+
+        var normalized = detail.Trim();
+        if (_languageCode == "en")
+        {
+            var translatedEnglish = TranslateSecurityReasonToEnglish(normalized);
+            return string.IsNullOrWhiteSpace(translatedEnglish) ? normalized : translatedEnglish;
+        }
+
+        var translatedRussian = TranslateSecurityReasonToRussian(normalized);
+        return string.IsNullOrWhiteSpace(translatedRussian) ? normalized : translatedRussian;
+    }
+
+    private static string TranslateSecurityReasonToRussian(string detail)
+    {
+        if (LooksLikeSpeedhackReason(detail))
+        {
+            return "Хард-бан по HWID: обнаружено ускорение клиента или подмена игровых таймеров.";
+        }
+
+        if (LooksLikeDebuggerReason(detail))
+        {
+            return "Хард-бан по HWID: обнаружен отладчик или инструмент анализа памяти.";
+        }
+
+        if (LooksLikeInjectorReason(detail))
+        {
+            return "Хард-бан по HWID: обнаружено внедрение в процесс игры или лаунчера.";
+        }
+
+        if (LooksLikeCheatToolReason(detail) ||
+            detail.Equals("temp-later", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Хард-бан по HWID: обнаружен запрещённый инструмент вмешательства в память.";
+        }
+
+        if (detail.Equals("This device is blocked from signing in.", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Это устройство заблокировано для входа.";
+        }
+
+        if (detail.Equals("This OS user is blocked from signing in.", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Для этой системной учётной записи вход заблокирован.";
+        }
+
+        if (detail.Equals("This account cannot sign in.", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Для этого аккаунта вход запрещён.";
+        }
+
+        return string.Empty;
+    }
+
+    private static string TranslateSecurityReasonToEnglish(string detail)
+    {
+        if (LooksLikeSpeedhackReason(detail))
+        {
+            return "HWID ban: client speed manipulation or timer tampering was detected.";
+        }
+
+        if (LooksLikeDebuggerReason(detail))
+        {
+            return "HWID ban: a debugger or memory analysis tool was detected.";
+        }
+
+        if (LooksLikeInjectorReason(detail))
+        {
+            return "HWID ban: code injection into the launcher or game process was detected.";
+        }
+
+        if (LooksLikeCheatToolReason(detail) ||
+            detail.Equals("temp-later", StringComparison.OrdinalIgnoreCase))
+        {
+            return "HWID ban: a prohibited memory tampering tool was detected.";
+        }
+
+        if (detail.Contains("Это устройство заблокировано для входа.", StringComparison.OrdinalIgnoreCase))
+        {
+            return "This device is blocked from signing in.";
+        }
+
+        if (detail.Contains("Для этой системной учётной записи вход заблокирован.", StringComparison.OrdinalIgnoreCase))
+        {
+            return "This OS user is blocked from signing in.";
+        }
+
+        if (detail.Contains("Для этого аккаунта вход запрещён.", StringComparison.OrdinalIgnoreCase))
+        {
+            return "This account cannot sign in.";
+        }
+
+        return string.Empty;
+    }
+
+    private static bool LooksLikeSpeedhackReason(string detail)
+    {
+        return ContainsAny(detail,
+            "speedhack",
+            "ускорение клиента",
+            "подмена игровых таймеров",
+            "timer api hook",
+            "timerhook",
+            "queryperformancecounter",
+            "gettickcount",
+            "timegettime",
+            "ntqueryperformancecounter");
+    }
+
+    private static bool LooksLikeDebuggerReason(string detail)
+    {
+        return ContainsAny(detail,
+            "debugger",
+            "отладчик",
+            "x64dbg",
+            "x32dbg",
+            "ollydbg",
+            "ida",
+            "dnspy",
+            "ilspy",
+            "frida");
+    }
+
+    private static bool LooksLikeInjectorReason(string detail)
+    {
+        return ContainsAny(detail,
+            "вмешательство в процесс",
+            "вмешательство в игру",
+            "inject",
+            "injected",
+            "manualmap",
+            "manual map",
+            "dll injector",
+            "hook detected",
+            "dangerous handle",
+            "suspicious module",
+            "внедрение в процесс",
+            "код внедрён");
+    }
+
+    private static bool LooksLikeCheatToolReason(string detail)
+    {
+        return ContainsAny(detail,
+            "cheat engine",
+            "cheatengine",
+            "artmoney",
+            "process hacker",
+            "xenos",
+            "extreme injector",
+            "gh injector",
+            "ghinjector",
+            "dbk",
+            "vehdebug",
+            "allochook",
+            "luaclient",
+            "winhook",
+            "ced3d",
+            "d3dhook",
+            "suspicious process detected",
+            "known cheat",
+            "prohibited memory tampering tool",
+            "запрещённый инструмент");
+    }
+
+    private static bool ContainsAny(string value, params string[] tokens)
+    {
+        foreach (var token in tokens)
+        {
+            if (value.Contains(token, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private string BuildStatusErrorText(Exception ex)

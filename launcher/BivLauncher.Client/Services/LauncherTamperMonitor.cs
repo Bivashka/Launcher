@@ -18,6 +18,7 @@ public sealed class LauncherTamperMonitor : ILauncherTamperMonitor
     private static readonly string[] SuspiciousProcessNameTokens =
     [
         "cheat engine",
+        "cheat engine.exe",
         "cheatengine",
         "cheatengine-x86_64",
         "cheatengine-x86_64-sse4-avx2",
@@ -37,8 +38,20 @@ public sealed class LauncherTamperMonitor : ILauncherTamperMonitor
         "idag",
         "dnspy",
         "ilspy",
+        "artmoney",
+        "process hacker",
         "processhacker",
         "procexp",
+        "xenos",
+        "extreme injector",
+        "gh injector",
+        "ghinjector",
+        "blackbone",
+        "injector",
+        "dllinjector",
+        "speedhack",
+        "reclass",
+        "reclass.net",
         "frida",
         "frida-helper",
         "frida-server",
@@ -51,12 +64,17 @@ public sealed class LauncherTamperMonitor : ILauncherTamperMonitor
     [
         "allochook",
         "ced3d",
+        "ced3d10hook",
+        "ced3d11hook",
+        "ced3d9hook",
         "cheatengine",
         "speedhack",
+        "speedhackv3",
         "speedhack-x86_64",
         "speedhack-i386",
         "ceserver",
         "d3dhook",
+        "d3dhook64",
         "dbk32",
         "dbk64",
         "vehdebug",
@@ -69,6 +87,12 @@ public sealed class LauncherTamperMonitor : ILauncherTamperMonitor
         "easyhook",
         "detours",
         "minhook",
+        "artmoney",
+        "xenos",
+        "extremeinjector",
+        "ghinjector",
+        "blackbone",
+        "injector",
         "frida",
         "scylla",
         "megadumper",
@@ -90,11 +114,22 @@ public sealed class LauncherTamperMonitor : ILauncherTamperMonitor
         "perf-lib-v15-jar-with-dependencies.jar",
         ".mc_cache_data",
         "cheat engine",
+        "cheat engine.exe",
         "cheatengine",
         "cheatengine-x86_64-sse4-avx2",
         "dbk32.cepack",
         "dbk64.cepack",
-        "speedhackv3.lua"
+        "speedhackv3.lua",
+        "speedhack",
+        "extreme injector",
+        "gh injector",
+        "ghinjector",
+        "xenos",
+        "blackbone",
+        "manualmap",
+        "manual map",
+        "dll injector",
+        "artmoney"
     ];
 
     private static readonly string[] SuspiciousWindowTitleTokens =
@@ -102,7 +137,28 @@ public sealed class LauncherTamperMonitor : ILauncherTamperMonitor
         "System Management Console v21",
         "High-Speed Spectator",
         "System Performance Utility v17",
-        "Stealth Controls"
+        "Stealth Controls",
+        "cheat engine",
+        "speedhack",
+        "injector",
+        "dll injector",
+        "process hacker",
+        "x64dbg",
+        "x32dbg",
+        "artmoney"
+    ];
+    private static readonly string[] SuspiciousBinaryPathTokens =
+    [
+        "\\cheat engine\\",
+        "\\x64dbg\\",
+        "\\x32dbg\\",
+        "\\ollydbg\\",
+        "\\process hacker\\",
+        "\\xenos\\",
+        "\\extreme injector\\",
+        "\\gh injector\\",
+        "\\artmoney\\",
+        "\\reclass\\"
     ];
 
     private static readonly TimeSpan CheatArtifactClockSkew = TimeSpan.FromSeconds(10);
@@ -137,7 +193,7 @@ public sealed class LauncherTamperMonitor : ILauncherTamperMonitor
             return new TamperDetectionResult("Debugger attached to launcher.", "Debugger.IsAttached");
         }
 
-        var monitoredProcesses = GetProcessSnapshots(processIds);
+        var monitoredProcesses = BuildInspectionTargets(GetProcessSnapshots(processIds));
         var commandLineMap = TryReadProcessCommandLines();
 
         var suspiciousProcess = InspectRunningProcesses(commandLineMap);
@@ -172,7 +228,6 @@ public sealed class LauncherTamperMonitor : ILauncherTamperMonitor
 
         var targetProcessIds = monitoredProcesses
             .Select(x => x.ProcessId)
-            .Append(Environment.ProcessId)
             .Where(x => x > 0)
             .Distinct()
             .ToArray();
@@ -187,6 +242,18 @@ public sealed class LauncherTamperMonitor : ILauncherTamperMonitor
         }
 
         return null;
+    }
+
+    private static IReadOnlyList<ProcessSnapshot> BuildInspectionTargets(IReadOnlyList<ProcessSnapshot> processSnapshots)
+    {
+        var targets = processSnapshots.ToList();
+        if (TryGetCurrentProcessSnapshot(out var currentSnapshot) &&
+            targets.All(x => x.ProcessId != currentSnapshot.ProcessId))
+        {
+            targets.Add(currentSnapshot);
+        }
+
+        return targets;
     }
 
     private static IReadOnlyList<ProcessSnapshot> GetProcessSnapshots(IEnumerable<int> processIds)
@@ -213,6 +280,24 @@ public sealed class LauncherTamperMonitor : ILauncherTamperMonitor
         }
 
         return snapshots;
+    }
+
+    private static bool TryGetCurrentProcessSnapshot(out ProcessSnapshot snapshot)
+    {
+        try
+        {
+            using var process = Process.GetCurrentProcess();
+            snapshot = new ProcessSnapshot(
+                process.Id,
+                process.ProcessName,
+                process.StartTime.ToUniversalTime());
+            return true;
+        }
+        catch
+        {
+            snapshot = default;
+            return false;
+        }
     }
 
     private static IReadOnlyDictionary<int, string> TryReadProcessCommandLines()
@@ -277,6 +362,14 @@ public sealed class LauncherTamperMonitor : ILauncherTamperMonitor
                         $"process:{processName}:{processNameToken}");
                 }
 
+                if (TryGetProcessImagePath(process, out var processPath) &&
+                    ContainsSuspiciousBinaryPathToken(processPath, out var processPathToken))
+                {
+                    return new TamperDetectionResult(
+                        $"Suspicious tool path detected for process {processName}.",
+                        $"processpath:{processName}:{processPathToken}");
+                }
+
                 if (commandLineMap.TryGetValue(process.Id, out var commandLine) &&
                     ContainsSuspiciousCommandLineToken(commandLine, out var token))
                 {
@@ -330,6 +423,12 @@ public sealed class LauncherTamperMonitor : ILauncherTamperMonitor
             }
 
             var isKnownInjector = hasKnownInjectorToken;
+            if (!isKnownInjector)
+            {
+                var processName = TryGetProcessName(processId);
+                isKnownInjector = ContainsSuspiciousProcessNameToken(processName, out var _matchedProcessToken);
+            }
+
             if (!isMonitoredProcess && !isKnownInjector)
             {
                 return true;
@@ -403,6 +502,35 @@ public sealed class LauncherTamperMonitor : ILauncherTamperMonitor
         return false;
     }
 
+    private static bool TryGetProcessImagePath(Process process, out string processPath)
+    {
+        try
+        {
+            processPath = process.MainModule?.FileName ?? string.Empty;
+            return !string.IsNullOrWhiteSpace(processPath);
+        }
+        catch
+        {
+            processPath = string.Empty;
+            return false;
+        }
+    }
+
+    private static bool ContainsSuspiciousBinaryPathToken(string processPath, out string matchedToken)
+    {
+        foreach (var token in SuspiciousBinaryPathTokens)
+        {
+            if (processPath.Contains(token, StringComparison.OrdinalIgnoreCase))
+            {
+                matchedToken = token;
+                return true;
+            }
+        }
+
+        matchedToken = string.Empty;
+        return false;
+    }
+
     private static string NormalizeProcessToken(string value)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -452,12 +580,20 @@ public sealed class LauncherTamperMonitor : ILauncherTamperMonitor
                     continue;
                 }
 
-                if (SuspiciousModuleNameTokens.Any(
-                        token => moduleName.Contains(token, StringComparison.OrdinalIgnoreCase)))
+                if (ContainsSuspiciousModuleNameToken(moduleName, out var moduleToken))
                 {
                     return new TamperDetectionResult(
                         $"Suspicious module injected into process {processId}.",
-                        $"{process.ProcessName}:{moduleName}");
+                        $"{process.ProcessName}:{moduleName}:{moduleToken}");
+                }
+
+                var modulePath = module.FileName ?? string.Empty;
+                if (!string.IsNullOrWhiteSpace(modulePath) &&
+                    ContainsSuspiciousBinaryPathToken(modulePath, out var modulePathToken))
+                {
+                    return new TamperDetectionResult(
+                        $"Suspicious module path injected into process {processId}.",
+                        $"{process.ProcessName}:{modulePathToken}:{moduleName}");
                 }
             }
         }
@@ -476,6 +612,21 @@ public sealed class LauncherTamperMonitor : ILauncherTamperMonitor
         }
 
         return null;
+    }
+
+    private static bool ContainsSuspiciousModuleNameToken(string moduleName, out string matchedToken)
+    {
+        foreach (var token in SuspiciousModuleNameTokens)
+        {
+            if (moduleName.Contains(token, StringComparison.OrdinalIgnoreCase))
+            {
+                matchedToken = token;
+                return true;
+            }
+        }
+
+        matchedToken = string.Empty;
+        return false;
     }
 
     private static TamperDetectionResult? InspectTimerApiHooks(IReadOnlyList<ProcessSnapshot> monitoredProcesses)
@@ -722,8 +873,12 @@ public sealed class LauncherTamperMonitor : ILauncherTamperMonitor
             (uint)ProcessAccessRights.DuplicateHandle |
             (uint)ProcessAccessRights.SetInformation |
             (uint)ProcessAccessRights.SuspendResume;
+        const uint suspiciousReadMask =
+            (uint)ProcessAccessRights.VirtualMemoryRead |
+            (uint)ProcessAccessRights.QueryInformation;
 
-        return (grantedAccess & dangerousMask) != 0;
+        return (grantedAccess & dangerousMask) != 0 ||
+               (grantedAccess & suspiciousReadMask) == suspiciousReadMask;
     }
 
     private static string TryGetProcessName(int processId)

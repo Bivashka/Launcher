@@ -33,6 +33,7 @@ public sealed class PendingSubmissionService(ISettingsService settingsService) :
         try
         {
             var store = await LoadStoreUnsafeAsync(cancellationToken);
+            store.Items.RemoveAll(IsSecurityViolationItem);
             store.Items.Add(item);
             TrimToMaxItems(store.Items);
             await SaveStoreUnsafeAsync(store, cancellationToken);
@@ -157,7 +158,8 @@ public sealed class PendingSubmissionService(ISettingsService settingsService) :
             var remaining = new List<PendingSubmissionItem>(store.Items.Count);
 
             var ordered = store.Items
-                .OrderBy(x => x.CreatedAtUtc)
+                .OrderBy(x => IsSecurityViolationItem(x) ? 0 : 1)
+                .ThenBy(x => x.CreatedAtUtc)
                 .ToList();
 
             foreach (var item in ordered)
@@ -168,7 +170,8 @@ public sealed class PendingSubmissionService(ISettingsService settingsService) :
                     continue;
                 }
 
-                if (item.AttemptCount >= MaxAttempts)
+                if (item.AttemptCount >= MaxAttempts &&
+                    !IsSecurityViolationItem(item))
                 {
                     dropped++;
                     continue;
@@ -302,6 +305,11 @@ public sealed class PendingSubmissionService(ISettingsService settingsService) :
         };
     }
 
+    private static bool IsSecurityViolationItem(PendingSubmissionItem item)
+    {
+        return item.Type.Equals(PendingSubmissionTypes.SecurityViolation, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static void TrimToMaxItems(List<PendingSubmissionItem> items)
     {
         if (items.Count <= MaxQueueItems)
@@ -309,9 +317,18 @@ public sealed class PendingSubmissionService(ISettingsService settingsService) :
             return;
         }
 
-        var removeCount = items.Count - MaxQueueItems;
         items.Sort((left, right) => left.CreatedAtUtc.CompareTo(right.CreatedAtUtc));
-        items.RemoveRange(0, removeCount);
+        while (items.Count > MaxQueueItems)
+        {
+            var removableIndex = items.FindIndex(item => !IsSecurityViolationItem(item));
+            if (removableIndex >= 0)
+            {
+                items.RemoveAt(removableIndex);
+                continue;
+            }
+
+            items.RemoveAt(0);
+        }
     }
 
     private static PendingSubmissionStore NormalizeLoadedStore(PendingSubmissionStore source)

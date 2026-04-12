@@ -413,8 +413,8 @@ public sealed class PublicAuthController(
                 Reason: activeBan.Reason));
         }
 
-        var banReason = $"Launcher anti-tamper: {normalizedReason}";
-        var expiresAtUtc = now.AddDays(31);
+        var banReason = BuildSecurityViolationBanReason(normalizedReason);
+        DateTime? expiresAtUtc = null;
 
         account.SessionVersion++;
         account.UpdatedAtUtc = now;
@@ -430,7 +430,7 @@ public sealed class PublicAuthController(
 
         var ban = new HardwareBan
         {
-            AccountId = account.Id,
+            AccountId = null,
             HwidHash = normalizedHwidHash,
             DeviceUserName = normalizedDeviceUserName,
             Reason = banReason,
@@ -1253,6 +1253,72 @@ public sealed class PublicAuthController(
         return normalized.Length > 256 ? normalized[..256] : normalized;
     }
 
+    private static string BuildSecurityViolationBanReason(string normalizedReason)
+    {
+        if (ContainsAny(normalizedReason,
+                "speedhack",
+                "timer api hook",
+                "timerhook",
+                "queryperformancecounter",
+                "gettickcount",
+                "timegettime",
+                "ntqueryperformancecounter"))
+        {
+            return "Хард-бан по HWID: обнаружено ускорение клиента или подмена игровых таймеров.";
+        }
+
+        if (ContainsAny(normalizedReason,
+                "debugger",
+                "x64dbg",
+                "x32dbg",
+                "ollydbg",
+                "ida",
+                "dnspy",
+                "ilspy",
+                "frida"))
+        {
+            return "Хард-бан по HWID: обнаружен отладчик или инструмент анализа памяти.";
+        }
+
+        if (ContainsAny(normalizedReason,
+                "inject",
+                "injected",
+                "manualmap",
+                "manual map",
+                "dll injector",
+                "dangerous handle",
+                "hook detected",
+                "suspicious module",
+                "external process opened"))
+        {
+            return "Хард-бан по HWID: обнаружено внедрение в процесс игры или лаунчера.";
+        }
+
+        if (ContainsAny(normalizedReason,
+                "cheat engine",
+                "cheatengine",
+                "artmoney",
+                "process hacker",
+                "xenos",
+                "extreme injector",
+                "gh injector",
+                "ghinjector",
+                "dbk",
+                "vehdebug",
+                "allochook",
+                "luaclient",
+                "winhook",
+                "ced3d",
+                "d3dhook",
+                "known cheat",
+                "suspicious process"))
+        {
+            return "Хард-бан по HWID: обнаружен запрещённый инструмент вмешательства в память.";
+        }
+
+        return "Хард-бан по HWID: обнаружено вмешательство в процесс игры или лаунчера.";
+    }
+
     private static string NormalizeSecurityViolationEvidence(string? rawEvidence)
     {
         if (string.IsNullOrWhiteSpace(rawEvidence))
@@ -1262,6 +1328,19 @@ public sealed class PublicAuthController(
 
         var normalized = rawEvidence.Trim();
         return normalized.Length > 2048 ? normalized[..2048] : normalized;
+    }
+
+    private static bool ContainsAny(string value, params string[] tokens)
+    {
+        foreach (var token in tokens)
+        {
+            if (value.Contains(token, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static string NormalizeDeviceUserName(string? rawDeviceUserName)
